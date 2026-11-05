@@ -1,16 +1,10 @@
 # Since AI Hackathon 2026 — company challenges
 
-Public challenge summaries supplied by the team. Each company challenge awards cash prizes to its top three teams; the amounts and IP notes are listed below.
+Public challenge summaries supplied by the team. Standard challenge prizes are **1st €2,000 · 2nd €750 · 3rd €250**. FORCIT’s different prizes are listed in its section. IP notes are included for each challenge.
 
 ## Connecting the physical and digital worlds at industrial sites
 
 **Company:** Valmet
-
-**Challenge prizes:**
-
-- 1st €2,000
-- 2nd €750
-- 3rd €250
 
 **IP terms:** Your team owns what you build. Valmet can use it in its business. [Full terms](https://sinceai.app/terms#challenge-partner-licence).
 
@@ -20,12 +14,6 @@ Public challenge summaries supplied by the team. Each company challenge awards c
 
 **Company:** Bayer
 
-**Challenge prizes:**
-
-- 1st €2,000
-- 2nd €750
-- 3rd €250
-
 **IP terms:** Your team owns what you build. Bayer can use it in its business. [Full terms](https://sinceai.app/terms#challenge-partner-licence).
 
 **Description:** Turn industrial health, safety and environment observations into insights people can act on. Explore how AI could make complex safety information clearer and more useful for decision-making.
@@ -33,12 +21,6 @@ Public challenge summaries supplied by the team. Each company challenge awards c
 ## Short-term energy forecasting under uncertainty
 
 **Company:** Turku Energia
-
-**Challenge prizes:**
-
-- 1st €2,000
-- 2nd €750
-- 3rd €250
 
 **IP terms:** Your team owns what you build. Turku Energia can use it in its business. [Full terms](https://sinceai.app/terms#challenge-partner-licence).
 
@@ -48,12 +30,6 @@ Public challenge summaries supplied by the team. Each company challenge awards c
 
 **Company:** Apetit
 
-**Challenge prizes:**
-
-- 1st €2,000
-- 2nd €750
-- 3rd €250
-
 **IP terms:** Your team owns what you build. Apetit can use it in its business. [Full terms](https://sinceai.app/terms#challenge-partner-licence).
 
 **Description:** Food production depends on the climate, natural resources and resilient supply chains. Explore how AI could connect sustainability information with better, forward-looking business decisions.
@@ -61,12 +37,6 @@ Public challenge summaries supplied by the team. Each company challenge awards c
 ## Personalised golf club fitting
 
 **Company:** Takomo Golf
-
-**Challenge prizes:**
-
-- 1st €2,000
-- 2nd €750
-- 3rd €250
 
 **IP terms:** What you build for this challenge goes to Takomo Golf. Your existing code and know-how stay yours. You may not use this work after the event without Takomo Golf's prior written consent. [Full terms](https://sinceai.app/terms#challenge-partner-ownership).
 
@@ -92,12 +62,6 @@ Public challenge summaries supplied by the team. Each company challenge awards c
 
 **Company:** Elisa
 
-**Challenge prizes:**
-
-- 1st €2,000
-- 2nd €750
-- 3rd €250
-
 **IP terms:** Your team owns what you build. Elisa can use it in its business. [Full terms](https://sinceai.app/terms#challenge-partner-licence).
 
 **Description:** Essential know-how in network operations often lives in everyday discussions rather than formal systems. Explore how AI could capture and connect that knowledge to support more autonomous operations.
@@ -105,12 +69,6 @@ Public challenge summaries supplied by the team. Each company challenge awards c
 ## Understanding ship design rules and compliance
 
 **Company:** Meyer Turku
-
-**Challenge prizes:**
-
-- 1st €2,000
-- 2nd €750
-- 3rd €250
 
 **IP terms:** Your team owns what you build. Meyer Turku can use it in its business. [Full terms](https://sinceai.app/terms#challenge-partner-licence).
 
@@ -120,12 +78,6 @@ Public challenge summaries supplied by the team. Each company challenge awards c
 
 **Company:** Traficom
 
-**Challenge prizes:**
-
-- 1st €2,000
-- 2nd €750
-- 3rd €250
-
 **IP terms:** Your team owns what you build. Traficom can use it in its business. [Full terms](https://sinceai.app/terms#challenge-partner-licence).
 
 **Description:** Satellite and terrestrial radio systems share limited radio-frequency spectrum. Explore how AI could help specialists identify potential interference risks and support more efficient spectrum planning.
@@ -133,12 +85,6 @@ Public challenge summaries supplied by the team. Each company challenge awards c
 ## Clear, credible textile sustainability insights
 
 **Company:** Lindström
-
-**Challenge prizes:**
-
-- 1st €2,000
-- 2nd €750
-- 3rd €250
 
 **IP terms:** Your team owns what you build. Lindström can use it in its business. [Full terms](https://sinceai.app/terms#challenge-partner-licence).
 
@@ -148,12 +94,6 @@ Public challenge summaries supplied by the team. Each company challenge awards c
 
 **Company:** Business Turku
 
-**Challenge prizes:**
-
-- 1st €2,000
-- 2nd €750
-- 3rd €250
-
 **IP terms:** Your team owns what you build. Business Turku can use it in its business. [Full terms](https://sinceai.app/terms#challenge-partner-licence).
 
 **Description:** Existing industrial machinery holds untapped potential for smarter operations. Explore how AI could add intelligence to established equipment and help people recognise maintenance and performance opportunities.
@@ -161,12 +101,6 @@ Public challenge summaries supplied by the team. Each company challenge awards c
 ## Responsible guidance for everyday digital safety
 
 **Company:** DNA
-
-**Challenge prizes:**
-
-- 1st €2,000
-- 2nd €750
-- 3rd €250
 
 **IP terms:** What you build for this challenge goes to DNA. Your existing code and know-how stay yours. [Full terms](https://sinceai.app/terms#challenge-partner-ownership).
 
@@ -176,12 +110,6 @@ Public challenge summaries supplied by the team. Each company challenge awards c
 
 **Company:** Fonecta
 
-**Challenge prizes:**
-
-- 1st €2,000
-- 2nd €750
-- 3rd €250
-
 **IP terms:** Your team owns what you build. Fonecta can use it in its business. [Full terms](https://sinceai.app/terms#challenge-partner-licence).
 
 **Description:** Local businesses need accurate information wherever customers search online. Explore how AI could help keep that information timely and useful, improving how businesses are discovered.
@@ -190,12 +118,6 @@ Public challenge summaries supplied by the team. Each company challenge awards c
 
 **Company:** Europress
 
-**Challenge prizes:**
-
-- 1st €2,000
-- 2nd €750
-- 3rd €250
-
 **IP terms:** Your team owns what you build. Europress can use it in its business. [Full terms](https://sinceai.app/terms#challenge-partner-licence).
 
 **Description:** Smart waste-management equipment can generate valuable operational signals. Explore how AI could turn those signals into insights that improve service decisions and create customer value.
@@ -203,12 +125,6 @@ Public challenge summaries supplied by the team. Each company challenge awards c
 ## Trustworthy data sharing with privacy-enhancing technologies
 
 **Company:** TrustED
-
-**Challenge prizes:**
-
-- 1st €2,000
-- 2nd €750
-- 3rd €250
 
 **To be confirmed in writing.**
 
