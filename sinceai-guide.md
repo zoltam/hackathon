@@ -2,17 +2,7 @@
 
 **6–8 November 2026 · Turku, Finland. All times are local: EET (UTC+2).**
 
-Source: the organiser's *Builder Guide*, updated 4 November 2026, supplied to the team as pasted text. These are condensed working notes; check [sinceai.app](https://sinceai.app) and organiser updates for changes. Team planning suggestions below are not additional event rules.
-
-## Do these first
-
-- [ ] Everyone can sign in to their own sinceai.app account and has joined the same team (maximum five members).
-- [ ] Agree who is team lead and shortlist **at least three company challenges** from the summaries available Thursday 5 November at 15:00.
-- [ ] Confirm attendance in the dashboard if requested, and check meal arrangements. The stated meal RSVP and CSC / LUMI registration deadlines were 30 October; ask organisers about unresolved arrangements.
-- [ ] Everyone can push to this repository. Download tools, dependencies, container images and any models before arrival.
-- [ ] Join the Since AI Discord for updates and support.
-- [ ] Bring laptop, charger, adapters, water bottle and a pen. Finland uses type C/F plugs, 230 V. A phone hotspot is useful backup.
-- [ ] Arrange accommodation if needed: it is not included unless personally confirmed by Since AI. Build spaces have no sleeping facilities.
+Based on the organiser's [Builder Guide](https://sinceai.ai/hackathon-2026/guide/builders) (updated 4 November), with additional official sources checked on **5 November 2026**. These are condensed team notes; check [sinceai.app](https://sinceai.app) and organiser updates for changes. Suggested questions and demo advice are preparation guidance, not additional event rules.
 
 ## Hard deadlines and team rules
 
@@ -79,6 +69,41 @@ Workshop seating is limited; organisers recommend one attendee per team. Attenda
 | 13:30–14:00 | Company challenge top-three awards. Winning teams stay for a photo after the ceremony on floor 1 under Taidon portaat. |
 | 14:00–15:10 | Live finals: up to **4 minutes presenting + 6 minutes jury questions** per finalist. |
 | Around 15:30 | Overall award and event ends. |
+
+## How judging and the live finals work
+
+There are three separate decisions:
+
+| Decision | Who decides | Timing |
+| --- | --- | --- |
+| Top three in each company challenge | That company's evaluators, using its agreed criteria | Review Sunday 10:00–13:00; awards from 13:30. |
+| Five finalists | Participant voting in sinceai.app | Sunday 10:00–12:00. |
+| Overall winner | The finals jury, after the live presentations | Sunday afternoon; separate €5,000 award. |
+
+**The five finalists come from five different company challenges: at most one per challenge. They are not simply the overall top five projects.** Each eligible builder gets 20 pairwise comparisons and never sees their own team's project. The public Judge Guide leaves overall scoring criteria and weights to the judges' briefing; it does not publish a final rubric. [Source: Judge Guide](https://sinceai.ai/hackathon-2026/guide/judges).
+
+### If we reach the finals
+
+- **All five finalist teams present live on stage at EduCity, Sunday 14:00–15:10.** A submitted video does not replace this presentation.
+- Finalists are notified after voting closes at 12:00 and receive presentation instructions.
+- Report beside the stage at **13:00**; front-row seats are reserved for finalists.
+- Each slot allows **up to four minutes presenting, then up to six minutes of jury questions**. The schedule includes five-minute breaks between presentations.
+- The jury selects the overall winner; the event ends around 15:30.
+
+[Sources: Builder Guide](https://sinceai.ai/hackathon-2026/guide/builders), [Field Guide finals schedule](https://sinceai.ai/hackathon-2026/guide#schedule).
+
+### Announced overall jury
+
+| Judge | Organisation / role |
+| --- | --- |
+| Sarita Runeberg | CEO, Maria 01 |
+| Niko Elers | Investment Director, Voima Ventures |
+| Tuomas Mäkilä | Associate Professor of Software Engineering, University of Turku |
+| Rasmus Harmaala | Deep Tech Investor & Founder, Inovexus |
+| Chandra Challagonda | CEO, FIWARE Foundation; Group DPO, Adfinis AG |
+| Matyas Karel Stoch | Founding Engineer, Cloudroom |
+
+[Source: official event page](https://sinceai.ai/hackathon).
 
 ## Questions for our challenge company
 
@@ -154,6 +179,22 @@ Benefits listed in the supplied guide; check the official AI Tools & Resources c
 
 CSC / LUMI registration was due 30 October. If using Red Hat OpenShift, the guide recommends setting up the free 30-day Developer Sandbox before the event.
 
+## Optional technology awards — entry details
+
+| Award | Prize / entry requirements |
+| --- | --- |
+| **Red Hat OpenShift AI** | **€1,000**, subject to partnership terms. Meaningfully use OpenShift AI in the official company-challenge project; a standalone award-only app is ineligible. Tick it under Partner technologies, explain usage in at least 40 characters, and provide HTTPS technical evidence. |
+| **FIWARE Open Innovation** | Non-cash package: one-year membership, Global Summit 2027 invitation, mentorship and network introductions. Requires meaningful FIWARE integration, a live working demo, a usage explanation of at least 40 characters and HTTPS evidence. Summit travel / accommodation are excluded. |
+
+FIWARE also permits a separate prototype via the app's open challenges page, using its displayed deadline. That entry cannot enter company rankings or qualify for the five-team final.
+
+Published award weights:
+
+- **Red Hat:** OpenShift AI use 35%, business value 30%, reliability 25%, documentation / clarity 10%.
+- **FIWARE:** integration 35%, technical quality 30%, innovation 20%, practical value 15%.
+
+These weights apply only to the named awards. [Source and full conditions: AI Tools & Resources](https://sinceai.ai/hackathon-2026/guide/resources).
+
 ## Confidentiality and ownership
 
 - Read our selected challenge's terms before using its materials or publishing work.
@@ -204,15 +245,14 @@ Use our app route from 17:30 to confirm departure time and room. Team-formation 
 - Overall jury-selected winner: a separate **€5,000** cash award.
 - MLH, Red Hat and FIWARE awards are optional extras; they do not replace our required company challenge.
 
-## Team planning — fill in together
+## Useful official links
 
-- Team lead: TBD
-- Challenge shortlist (ranked): TBD / TBD / TBD
-- Selected challenge and briefing room: TBD
-- Prototype / integration owner: TBD
-- Company Q&A owner: TBD
-- Demo / submission owner: TBD
-- Internal demo-ready and submission targets (before Sunday 10:00): TBD
+- [Builder Guide and submission rules](https://sinceai.ai/hackathon-2026/guide/builders).
+- [Judge Guide: evaluation and finalist selection](https://sinceai.ai/hackathon-2026/guide/judges).
+- [AI Tools & Resources: claim instructions and optional awards](https://sinceai.ai/hackathon-2026/guide/resources).
+- [Field Guide: venue maps, food and routes](https://sinceai.ai/hackathon-2026/guide).
+- [Weekend calendar subscription / download](https://sinceai.ai/hackathon-2026/guide/calendar/builders): subscriptions receive schedule updates; downloaded copies are fixed snapshots.
+- [Since AI Discord](https://discord.gg/vMWdrVUPws).
 
 ## Help
 
