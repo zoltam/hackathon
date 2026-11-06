@@ -21,6 +21,7 @@ SEEDS = [
 
 # Registered viewpoints reviewed with the shipped detector.
 REVIEWED_APPROACHES = {
+    'boiler-room:wall-circulation-pump': (7.75, .90),
     'boiler-room:far-circulation-pump': (7.85, .80),
     'boiler-room:black-circulation-pump': (7.35, .80),
 }

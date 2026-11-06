@@ -238,6 +238,10 @@ rendered frames, before the iPhone's two-frame confirmation.
 For P-003, four false positives were boxes on the correct pump with IoU
 0.318–0.496. Five fragments of at most 1,080 pixels had no usable box.
 Confidence was already at least 0.994 for the four misplaced boxes.
+R6 added 80 reviewed wall-pump training views from disjoint camera cells.
+Step 450 improved wall-pump walking validation from 23 TP / 4 FP to
+26 TP / 3 FP, but original-view P-005 went from 16 TP / 0 FP to 14 TP / 2 FP.
+None of the four checkpoints cleared the regression checks. R3 remains deployed.
 
 ## Shared agreements before integration
 
@@ -285,6 +289,11 @@ Confidence was already at least 0.994 for the four misplaced boxes.
   overlay. GPU throughput fell to 25.40 FPS in the last interval. The
   reported thermal state was 3 throughout. The user reported working
   operation on iPhone 13. No instrumented iPhone 13 timing was recorded.
+- On the merged build, all six scripted iPhone 15 journeys reached their
+  service cell, confirmed the expected visual target, and loaded the matching
+  workbook report. Routes at the default 0.10 m radius were P-005 3.1 m,
+  P-004 3.2 m, P-003 4.5 m, P-001 4.5 m, P-002 4.0 m, and CV-003 4.1 m.
+  The scan start lacks clearance at 0.20 m and 0.30 m.
 - The iPhone crate test localized two positions from rendered QR corners. It
   blocked the original route, then blocked the active detour and reopened 27
   cells when moved. The test uses a tagged object and a stationary camera

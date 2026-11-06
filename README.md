@@ -54,7 +54,7 @@ swiftc -O tools/build_pump_references.swift -o /tmp/valmet-pump-references
 /tmp/valmet-pump-references --detection-dataset-hq
 python3 tools/prepare_detection_views.py build/valmet-detection-hq
 swiftc -O tools/train_equipment_detector.swift -o /tmp/valmet-train-equipment-monitored
-/tmp/valmet-train-equipment-monitored 600 > /tmp/valmet-detector-hq-training.log 2>&1
+/tmp/valmet-train-equipment-monitored 600 --model="$PWD/build/valmet-detection-hq/candidate.mlmodel" > /tmp/valmet-detector-hq-training.log 2>&1
 ```
 
 In another terminal, monitor without altering the worker:
@@ -93,6 +93,11 @@ the scripted service journey on the connected phone:
 xcrun devicectl device process launch --device <device> --terminate-existing --console <bundle-id> -- \
   --verify-service-journey "$(dart tools/verify_service_route.dart)"
 ```
+
+Pass a scene object ID to `dart tools/verify_service_route.dart` to test
+another service target. The app's **Service target** selector offers the five
+pumps and inline valve. Their routes are available at the default 0.10 m
+virtual-camera radius.
 
 The log records distance, target confirmation, arrival, workbook evidence and
 visible mapped frames. The journey passes only when all are present. The
