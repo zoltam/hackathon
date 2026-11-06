@@ -55,6 +55,9 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
   private let routeLayer = CAShapeLayer()
   private let targetLayer = CAShapeLayer()
   private let message = UILabel()
+  private let visionStatus = UILabel()
+  private let verifyVision: Bool
+  private var verificationFrames = 0
   private let align = UIButton(type: .system)
   private let toggle = UIButton(type: .system)
   private var alignment: WorldAlignment?
@@ -72,9 +75,10 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
 
   override var canBecomeFirstResponder: Bool { model.keyControls }
 
-  init(model: WalkSite, renderer: SplatRenderer) {
+  init(model: WalkSite, renderer: SplatRenderer, verifyVision: Bool = false) {
     self.model = model
     self.renderer = renderer
+    self.verifyVision = verifyVision
     super.init(nibName: nil, bundle: nil)
   }
 
@@ -111,6 +115,21 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     message.font = .preferredFont(forTextStyle: .callout)
     message.textColor = .white
     message.numberOfLines = 0
+    visionStatus.font = .preferredFont(forTextStyle: .caption1)
+    visionStatus.textColor = .white
+    visionStatus.numberOfLines = 2
+    visionStatus.isHidden = true
+    renderer.vision.onPrediction = { [weak self] prediction in
+      guard let self, self.view.window != nil, !self.virtual.isHidden else { return }
+      if self.verifyVision {
+        print("VALMET_VISION ts=\(prediction.frame.timestamp) x=\(prediction.frame.pose.columns.3.x) label=\(prediction.label) confidence=\(prediction.confidence) ms=\(prediction.inferenceMilliseconds)")
+        fflush(stdout)
+        self.verificationFrames += 1
+      }
+      guard CACurrentMediaTime() - prediction.frame.timestamp < 2 else { return }
+      self.visionStatus.text = "Scene classification · \(prediction.label)"
+      self.visionStatus.isHidden = false
+    }
     align.configuration = .filled()
     align.setTitle("Set start and direction", for: .normal)
     align.addTarget(self, action: #selector(calibrate), for: .touchUpInside)
@@ -126,7 +145,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     row.distribution = .fillEqually
     row.spacing = 8
     movementControls = model.keyControls ? makeControls() : nil
-    let panel = UIStackView(arrangedSubviews: [message, movementControls, align, row].compactMap { $0 })
+    let panel = UIStackView(arrangedSubviews: [message, visionStatus, movementControls, align, row].compactMap { $0 })
     panel.axis = .vertical
     panel.spacing = 8
     panel.isLayoutMarginsRelativeArrangement = true
@@ -145,6 +164,10 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
 
   override func viewDidAppear(_ animated: Bool) {
     super.viewDidAppear(animated)
+    if verifyVision {
+      verifyRenderedFrame(index: 0)
+      return
+    }
     if model.keyControls { becomeFirstResponder() }
     guard !requestedCamera else { return }
     requestedCamera = true
@@ -159,6 +182,32 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
           self.updateDisplay("Allow camera access in Settings to track your walk.")
         }
       }
+    }
+  }
+
+  // Repeatable device smoke check. Uses the normal renderer and model,
+  // with synthetic camera poses instead of requiring a person to walk.
+  private func verifyRenderedFrame(index: Int) {
+    guard view.window != nil, verificationFrames < 3, index < 12 else { return }
+    virtual.isHidden = false
+    let size = virtual.bounds.size
+    if size.width > 0, size.height > 0 {
+      let eye = model.center(model.start, height: assumedPhoneHeight) + SIMD3(Float(index) * 0.02, 0, 0)
+      let heading = initialForward
+      let yaw = atan2(-heading.x, -heading.z) + 0.15 + Float(index) * 0.035
+      let rotation = simd_quatf(angle: yaw, axis: SIMD3(0, 1, 0)) *
+        simd_quatf(angle: -0.18, axis: SIMD3(1, 0, 0))
+      var pose = simd_float4x4(rotation)
+      pose.columns.3 = SIMD4(eye.x, eye.y, eye.z, 1)
+      let n: Float = 0.04, f: Float = 40, zoom: Float = 1.4
+      let projection = simd_float4x4(columns: (
+        SIMD4(zoom / Float(size.width / size.height), 0, 0, 0), SIMD4(0, zoom, 0, 0),
+        SIMD4(0, 0, f / (n - f), -1), SIMD4(0, 0, n * f / (n - f), 0)
+      ))
+      renderer.render(pose: pose, projection: projection)
+    }
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.65) { [weak self] in
+      self?.verifyRenderedFrame(index: index + 1)
     }
   }
 
@@ -407,7 +456,10 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     let visible = ready && showModel && alignment != nil
     virtual.isHidden = !visible
     movementControls?.isHidden = !visible
-    if !visible { buttons.removeAll() }
+    if !visible {
+      buttons.removeAll()
+      visionStatus.isHidden = true
+    }
     align.isEnabled = ready || alignment != nil
     toggle.isEnabled = alignment != nil && ready
     align.setTitle(alignment == nil ? "Set start and direction" : "Reset alignment", for: .normal)

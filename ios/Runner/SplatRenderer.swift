@@ -10,6 +10,7 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
   }
 
   let view: MTKView
+  let vision = RenderedVision()
   private let queue: MTLCommandQueue
   private let pipeline: MTLRenderPipelineState
   private let floorPipeline: MTLRenderPipelineState
@@ -24,7 +25,7 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
   private var bins: [Int]
   private var bucket: [Int16]
   private var positions: [SIMD4<Float>]
-  private var pendingFrame: (pose: simd_float4x4, projection: simd_float4x4)?
+  private var pendingFrame: RenderedVision.Frame?
   private var lastDraw: CFTimeInterval = 0
 
   init?(data: Data, roomSize: SIMD2<Float>) {
@@ -72,6 +73,7 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
     view.delegate = self
     view.colorPixelFormat = format
     view.clearColor = MTLClearColor(red: 0.10, green: 0.11, blue: 0.12, alpha: 1)
+    view.framebufferOnly = false
     view.isPaused = true
     view.autoResizeDrawable = false
   }
@@ -80,15 +82,16 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
     let now = CACurrentMediaTime()
     guard now - lastDraw >= 1.0 / 35 else { return }
     lastDraw = now
-    pendingFrame = (pose, projection)
+    pendingFrame = RenderedVision.Frame(pose: pose, projection: projection, timestamp: now)
     view.draw()
   }
 
   func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {}
 
   func draw(in view: MTKView) {
-    guard let (pose, projection) = pendingFrame else { return }
+    guard let frame = pendingFrame else { return }
     pendingFrame = nil
+    let pose = frame.pose, projection = frame.projection
     let size = view.bounds.size
     guard size.width > 0, size.height > 0,
           inFlight.wait(timeout: .now()) == .success else { return }
@@ -119,6 +122,7 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
       encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4, instanceCount: sorted)
     }
     encoder.endEncoding()
+    vision.capture(drawable.texture, command: command, frame: frame)
     command.present(drawable)
     command.addCompletedHandler { [inFlight] _ in inFlight.signal() }
     command.commit()
