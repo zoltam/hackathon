@@ -65,23 +65,37 @@ The verification prints image-space boxes for several rendered views. The benchm
 
 ## Navigation and inspection evidence (member 2)
 
-The Flutter screen plans four-neighbour routes over measured floor support.
-The importer retains faint floor observations down to 1% opacity, keeps the
-existing body-obstacle threshold, and applies no extra obstacle margin. Radius
-clearance runs in the planner. Unknown gaps remain excluded; disconnected
-observed floor remains in the map. The current registered Equipment Room build
-contains 272 detected floor cells, with 179 connected to the pump approach.
+The Flutter screen plans four-neighbour routes over measured floor support on
+10 cm cells. Floor observations retain opacity down to 1%. Each floor cell needs
+three observations, or two direct observations plus at least 14 across its 3×3
+neighbourhood. Unknown cells stay excluded. Strong obstacle observations between
+0.17 and 1.55 m block movement, matching the virtual camera's 1.50 m height plus
+5 cm margin; this is not standing-person clearance. Real low obstacles stay blocked.
+Radius clearance runs in the planner and the native viewer uses the same mask.
+Manual movement checks substeps no longer than half a cell to prevent skipping
+obstacles. The registered renderer/detector frame and 11 equipment bounds remain
+unchanged; the reviewed pump approach moves only 3.5 cm to a finer cell centre.
+
+The current Equipment Room build contains 3,151 observed floor cells. With the
+default 0.10 m radius, 2,052 cells pass clearance and 2,001 connect to the pump:
+20.01 m², compared with 11.19 m² previously. Seven reviewed room regions,
+including the upper-middle aisle, are reachable. The remaining 51 clearance-valid
+cells form small separate patches; they are not shown as connected walking paths.
+The upper aisle was checked in actual Gaussian renders from both directions.
+Run `flutter test test/scan_navigation_test.dart` after generating local assets to
+check these connections, low obstacles, equipment bounds and preview arrival.
 
 ![Equipment Room walking connections](docs/images/equipment-room-walking-paths.png)
 
-Solid teal lines connect cells valid for a 0.20 m radius; dashed amber lines
-show additional 0.10 m virtual-camera connections. This is a scan-derived
-simulation map, not verified human walking clearance. The picture uses the same
-registered coordinates, equipment catalogue and full-scan asset as the app.
-The overhead illustration cuts geometry above 1.35 m to reveal the floor.
+Teal lines show the connected 0.10 m virtual-camera walking network; orange shows
+the 3.10 m pump route. The picture uses the same registered coordinates,
+equipment catalogue and full-scan asset as the app. The overhead illustration
+cuts geometry above 1.35 m to reveal the floor.
 
-The **Virtual avatar radius** selector checks clearance against obstacles, unknown
-floor and map boundaries. No route disables walkthrough/playback. The Equipment Room grid opens with a 0.10 m virtual camera radius and supports a 3.00 m route to the pump. The route becomes unavailable at 0.20 m. This radius describes the simulation; clearance for a person requires a calibrated floor and scale.
+The **Virtual camera radius** selector checks obstacles, unknown floor and map
+boundaries. If a target has no route, free exploration remains available while
+route playback is disabled. A blocked starting point is reported explicitly.
+Physical AR movement cannot be constrained; leaving the mask displays a warning.
 
 **Play route preview** animates the map marker at 0.7 m/s, with pause and reset.
 On the iPhone, align first, then use **Play route preview** in the 3D viewer for

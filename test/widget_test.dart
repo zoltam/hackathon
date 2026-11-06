@@ -31,6 +31,12 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Walk inside the 3D model'), findsOneWidget);
+    expect(
+      find.text(
+        'Camera height 1.50 m · not a standing-person clearance check.',
+      ),
+      findsOneWidget,
+    );
     final messages = <bool>[];
     final messenger = tester.binding.defaultBinaryMessenger;
     messenger.setMockMethodCallHandler(channel, (call) async {
@@ -72,7 +78,7 @@ void main() {
     expect(find.text('15.8 m remaining'), findsOneWidget);
   });
 
-  testWidgets('clearance blocks native launch and can be explicitly reduced', (
+  testWidgets('blocked start stays explicit and clearance can be reduced', (
     tester,
   ) async {
     final site = Site.fromJson('''{
@@ -101,9 +107,19 @@ void main() {
             find.widgetWithText(FilledButton, 'Walk inside the 3D model'),
           )
           .onPressed,
-      isNull,
+      isNotNull,
     );
-    await tester.tap(find.text('0.20 m · avatar'));
+    expect(
+      find.text(
+        'Start position lacks the selected clearance. Reduce the radius to move from this start.',
+      ),
+      findsOneWidget,
+    );
+    await tester.tap(find.text('Walk inside the 3D model'));
+    await tester.pumpAndSettle();
+    expect(payload!['walkableFloor'], isEmpty);
+    expect(payload!['route'], isEmpty);
+    await tester.tap(find.text('0.20 m · camera'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('0.10 m · virtual camera').last);
     await tester.pumpAndSettle();
@@ -121,6 +137,96 @@ void main() {
     expect(payload!['clearanceMetres'], .1);
     expect(payload!['arrivalRadiusMetres'], .125);
     expect(payload!['route'], hasLength(5));
+    expect(payload!['walkableFloor'], [
+      [0, 0],
+      [1, 0],
+      [2, 0],
+      [3, 0],
+      [4, 0],
+    ]);
     expect((payload!['objects'] as List).first['object_id'], 'test-target');
   });
+  testWidgets(
+    'opens exploration with no route and sends the same walkable mask',
+    (tester) async {
+      final site = Site.fromJson(
+        jsonEncode({
+          'name': 'Disconnected room',
+          'width': 5,
+          'depth': 3,
+          'cellSize': 1,
+          'start': [0, 1],
+          'floor': [
+            for (var x = 0; x < 5; x++)
+              for (var z = 0; z < 3; z++) [x, z],
+          ],
+          'objects': [
+            {
+              'name': 'Wall',
+              'x': 2,
+              'z': 0,
+              'width': 1,
+              'depth': 3,
+              'height': 2,
+            },
+            {
+              'name': 'Target',
+              'x': 4,
+              'z': 1,
+              'width': 1,
+              'depth': 1,
+              'height': 1,
+              'cells': [],
+              'service': [4, 1],
+            },
+          ],
+        }),
+      );
+      Map<String, dynamic>? payload;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SiteSimulation(
+              site: site,
+              loadAssetData: () async => null,
+              openNative: (method, [data]) async {
+                payload = jsonDecode(data!) as Map<String, dynamic>;
+              },
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Walk inside the 3D model'));
+      await tester.pumpAndSettle();
+      expect(payload!['route'], isEmpty);
+      expect(payload!['floor'], hasLength(15));
+      final allowed = (payload!['walkableFloor'] as List)
+          .map((cell) => (cell[0] as int, cell[1] as int))
+          .toSet();
+      for (var x = 0; x < site.width; x++) {
+        for (var z = 0; z < site.depth; z++) {
+          expect(
+            allowed.contains((x, z)),
+            site.isWalkable((x, z), clearanceMetres: .2),
+          );
+        }
+      }
+      expect(allowed, contains(site.start));
+      expect(allowed, isNot(contains((2, 1))));
+      await tester.scrollUntilVisible(find.text('Play route preview'), 200);
+      expect(
+        tester
+            .widget<FilledButton>(
+              find.widgetWithText(FilledButton, 'Play route preview'),
+            )
+            .onPressed,
+        isNull,
+      );
+      expect(
+        find.text('No route with 0.20 m clearance to this device.'),
+        findsOneWidget,
+      );
+    },
+  );
 }

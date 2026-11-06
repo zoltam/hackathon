@@ -23,13 +23,58 @@ SOURCE_TRANSLATION = np.array([.170918, .066481, -.148239])
 WORLD_AXES = np.array([1, -1, -1])
 
 
-def observed_floor(xyz, opacity_logits, grid):
+CELL_SIZE = .10
+CAMERA_HEIGHT = 1.50
+OBSTACLE_TOP = CAMERA_HEIGHT + .05
+
+
+def observed_floor(xyz, opacity_logits, grid, covariance=None):
     """Keep measured floor support; let the runtime planner apply radius clearance."""
-    body = (xyz[:, 1] >= .17) & (xyz[:, 1] <= 1.8) & (opacity_logits >= -2.2)
+    body = (xyz[:, 1] >= .17) & (xyz[:, 1] <= OBSTACLE_TOP) & (opacity_logits >= -2.2)
     floor = (np.abs(xyz[:, 1]) <= .12) & (opacity_logits >= np.log(.01 / .99))
-    occupied = {p for p, n in Counter(map(tuple, grid[body].tolist())).items() if n >= 20}
-    candidates = {p for p, n in Counter(map(tuple, grid[floor].tolist())).items() if n >= 14}
+    occupied = {p for p, n in Counter(map(tuple, grid[body].tolist())).items() if n >= 4}
+    support = Counter(map(tuple, grid[floor].tolist()))
+    # Sparse scan patches still need direct observations and nearby floor evidence.
+    candidates = {p for p, n in support.items() if n >= 3 or (n >= 2 and
+                  sum(support[(p[0] + dx, p[1] + dz)]
+                      for dx in (-1, 0, 1) for dz in (-1, 0, 1)) >= 14)}
+    if covariance is not None and floor.any():
+        centres = xyz[floor][:, [0, 2]]
+        cov = covariance[floor]
+        xx, xz, zz = cov[:, 0, 0], cov[:, 0, 2], cov[:, 2, 2]
+        determinant = xx * zz - xz * xz
+        valid = determinant > 1e-12
+        centres, xx, xz, zz, determinant = (
+            values[valid] for values in (centres, xx, xz, zz, determinant))
+        origins = np.floor(centres / CELL_SIZE).astype(int)
+        shape = grid.max(axis=0) + 1
+        footprints = np.zeros(tuple(shape), dtype=int)
+        for dx in (-1, 0, 1):
+            for dz in (-1, 0, 1):
+                cells = origins + [dx, dz]
+                delta = (cells + .5) * CELL_SIZE - centres
+                distance = (zz * delta[:, 0] ** 2 - 2 * xz * delta[:, 0] * delta[:, 1] +
+                            xx * delta[:, 1] ** 2) / determinant
+                # Measured Gaussian footprints cover sparse gaps; never extrapolate beyond 12 cm.
+                inside = (distance <= 4) & ((delta * delta).sum(axis=1) <= .12 ** 2)
+                inside &= (cells >= 0).all(axis=1) & (cells < shape).all(axis=1)
+                cells = cells[inside]
+                np.add.at(footprints, (cells[:, 0], cells[:, 1]), 1)
+        for p in map(tuple, np.argwhere(footprints >= 2).tolist()):
+            if sum(support[(p[0] + dx, p[1] + dz)]
+                   for dx in (-1, 0, 1) for dz in (-1, 0, 1)) >= 14:
+                candidates.add(p)
     return candidates - occupied, occupied
+
+
+def clearance_floor(floor, cell_size, radius):
+    """Same circle-to-square clearance as Site._walkable, including unknown floor."""
+    reach = int(np.ceil(radius / cell_size + .5))
+    offsets = [(x, z) for x in range(-reach, reach + 1)
+               for z in range(-reach, reach + 1)
+               if (max(0, abs(x) - .5) * cell_size) ** 2 +
+                  (max(0, abs(z) - .5) * cell_size) ** 2 < radius ** 2]
+    return {p for p in floor if all((p[0] + x, p[1] + z) in floor for x, z in offsets)}
 
 
 def prepare(source, destination):
@@ -75,15 +120,30 @@ def prepare(source, destination):
 
     registered = (values[:, :3] - SOURCE_TRANSLATION) @ SOURCE_ROTATION / SOURCE_SCALE
     xyz = registered * WORLD_AXES + [5, 1.07, -.7]
-    cell = .25
-    grid = np.floor(xyz[:, [0, 2]] / cell).astype(int)
-    shift = -grid.min(axis=0)
-    grid += shift
-    width, depth = (grid.max(axis=0) + 1).tolist()
-    origin = np.array([shift[0] * cell, 0, shift[1] * cell])
+    # Keep the reviewed renderer/detector frame anchored to its original grid.
+    coarse = np.floor(xyz[:, [0, 2]] / .25).astype(int)
+    shift = -coarse.min(axis=0)
+    origin = np.array([shift[0] * .25, 0, shift[1] * .25])
     xyz += origin
+    cell = CELL_SIZE
+    grid = np.floor(xyz[:, [0, 2]] / cell).astype(int)
+    width, depth = (grid.max(axis=0) + 1).tolist()
 
-    walkable, _ = observed_floor(xyz, values[:, 10], grid)
+    # Keep anisotropic Gaussian shape, opacity, and DC color for Metal.
+    # Convert the quaternion's coordinate frame by rotating 180° around x.
+    q = values[:, 3:7] * [1, 1, -1, -1]
+    w, qx, qy, qz = q.T
+    rotation = np.column_stack((
+        1 - 2*(qy*qy + qz*qz), 2*(qx*qy - qz*w), 2*(qx*qz + qy*w),
+        2*(qx*qy + qz*w), 1 - 2*(qx*qx + qz*qz), 2*(qy*qz - qx*w),
+        2*(qx*qz - qy*w), 2*(qy*qz + qx*w), 1 - 2*(qx*qx + qy*qy),
+    )).reshape(-1, 3, 3)
+    axes = rotation * np.exp(np.clip(values[:, 11:14], -16, 4))[..., None, :]
+    source_to_world = SOURCE_ROTATION.T * WORLD_AXES[:, None] * WORLD_AXES / SOURCE_SCALE
+    axes = source_to_world @ axes
+    covariance = axes @ np.swapaxes(axes, 1, 2)
+
+    walkable, _ = observed_floor(xyz, values[:, 10], grid, covariance)
 
     def adjacent(p):
         x, z = p
@@ -101,14 +161,18 @@ def prepare(source, destination):
         return distance
 
     # Preserve the reviewed approach and pick the nearest valid starting cell.
-    service = tuple((shift + [21, 7]).tolist())
+    service = tuple(np.floor((origin[[0, 2]] + [5.375, 1.875]) / cell).astype(int).tolist())
     if service not in walkable:
         raise ValueError('The mapped pump approach is not on the observed walkable floor')
     dist = distances(service, walkable)
     if len(dist) < 8:
         raise ValueError('No sufficiently large walkable floor at the pump approach')
-    entrance = shift + [15, 0]
-    start = min(dist, key=lambda p: ((p[0] - entrance[0]) ** 2 + (p[1] - entrance[1]) ** 2, p))
+    entrance = (origin[[0, 2]] + [3.875, .125]) / cell - .5
+    safe = clearance_floor(walkable, cell, .10)
+    safe_dist = distances(service, safe) if service in safe else {}
+    if not safe_dist:
+        raise ValueError("The pump approach lacks virtual-camera clearance")
+    start = min(safe_dist, key=lambda p: ((p[0] - entrance[0]) ** 2 + (p[1] - entrance[1]) ** 2, p))
     opacity = 1 / (1 + np.exp(-values[:, 10]))
     model = {
         'name': 'Equipment Room',
@@ -118,32 +182,26 @@ def prepare(source, destination):
         'start': start, 'floor': sorted(walkable),
         'floorMapping': {
             'method': 'observed_floor_without_body_height_obstacle_points',
-            'floorBandMetres': .12, 'obstacleHeightMetres': [.17, 1.8],
-            'minimumFloorPoints': 14, 'minimumObstaclePoints': 20,
+            'floorBandMetres': .12, 'obstacleHeightMetres': [.17, OBSTACLE_TOP],
+            'cameraHeightMetres': CAMERA_HEIGHT,
+            'minimumFloorPoints': 2, 'denseFloorPoints': 3,
+            'sparseFloorNeighbourhoodPoints': 14, 'minimumObstaclePoints': 4,
+            'minimumFloorGaussianFootprints': 2, 'floorGaussianSigma': 2,
+            'maximumFloorFootprintReachMetres': .12,
             'minimumFloorOpacity': .01,
             'allValidSplatsRetained': True,
             'minimumObstacleOpacity': float(1 / (1 + np.exp(2.2))),
             'importerMarginMetres': 0,
             'connectedCellsFromStart': len(dist),
             'disconnectedFloorCells': len(walkable - dist.keys()),
+            'cameraRadiusMetres': .10,
+            'clearanceCells': len(safe),
+            'connectedClearanceCells': len(safe_dist),
         },
         'originShift': origin.tolist(), 'shRotation': SOURCE_ROTATION.tolist(),
         'objects': extract_equipment(xyz, opacity, cell, service, origin),
     }
 
-    # Keep anisotropic Gaussian shape, opacity, and DC color for Metal.
-    # Convert the quaternion's coordinate frame by rotating 180° around x.
-    q = values[:, 3:7] * [1, 1, -1, -1]
-    w, qx, qy, qz = q.T
-    rotation = np.column_stack((
-        1 - 2*(qy*qy + qz*qz), 2*(qx*qy - qz*w), 2*(qx*qz + qy*w),
-        2*(qx*qy + qz*w), 1 - 2*(qx*qx + qz*qz), 2*(qy*qz - qx*w),
-        2*(qx*qz - qy*w), 2*(qy*qz + qx*w), 1 - 2*(qx*qx + qy*qy),
-    )).reshape(-1, 3, 3)
-    axes = rotation * np.exp(np.clip(values[:, 11:14], -16, 4))[..., None, :]
-    source_to_world = SOURCE_ROTATION.T * WORLD_AXES[:, None] * WORLD_AXES / SOURCE_SCALE
-    axes = source_to_world @ axes
-    covariance = axes @ np.swapaxes(axes, 1, 2)
     rgb = .5 + .28209479 * values[:, 7:10]
     zero = np.zeros(len(values))
     fields = np.column_stack((

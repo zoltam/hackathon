@@ -202,9 +202,19 @@ class _SiteSimulationState extends State<SiteSimulation>
         'shRotation': site.shRotation,
         'start': pair(site.start),
         'route': _route.map(pair).toList(),
-        'clearanceMetres': _journey?.clearanceMetres,
+        'clearanceMetres': _clearanceMetres,
         'arrivalRadiusMetres': site.cellSize / 2,
         'floor': site.floor?.map(pair).toList(),
+        'walkableFloor': [
+          for (var x = 0; x < site.width; x++)
+            for (var z = 0; z < site.depth; z++)
+              if (site.isWalkable(
+                (x, z),
+                moved: _moved,
+                clearanceMetres: _clearanceMetres,
+              ))
+                [x, z],
+        ],
         'target': target < 0 ? null : target,
         'objects': [
           for (final object in visible)
@@ -258,14 +268,14 @@ class _SiteSimulationState extends State<SiteSimulation>
         ),
         DropdownButtonFormField<double>(
           initialValue: _clearanceMetres,
-          decoration: const InputDecoration(labelText: 'Virtual avatar radius'),
+          decoration: const InputDecoration(labelText: 'Virtual camera radius'),
           items: const [
             DropdownMenuItem(
               value: 0.1,
               child: Text('0.10 m · virtual camera'),
             ),
-            DropdownMenuItem(value: 0.2, child: Text('0.20 m · avatar')),
-            DropdownMenuItem(value: 0.3, child: Text('0.30 m · avatar')),
+            DropdownMenuItem(value: 0.2, child: Text('0.20 m · camera')),
+            DropdownMenuItem(value: 0.3, child: Text('0.30 m · camera')),
           ],
           onChanged: (radius) {
             if (radius == null) return;
@@ -275,8 +285,19 @@ class _SiteSimulationState extends State<SiteSimulation>
             });
           },
         ),
+        const Text(
+          'Camera height 1.50 m · not a standing-person clearance check.',
+        ),
+        if (!site.isWalkable(
+          site.start,
+          moved: _moved,
+          clearanceMetres: _clearanceMetres,
+        ))
+          const Text(
+            'Start position lacks the selected clearance. Reduce the radius to move from this start.',
+          ),
         FilledButton.icon(
-          onPressed: _route.isEmpty ? null : _openWorld,
+          onPressed: _openWorld,
           icon: const Icon(Icons.directions_walk),
           label: const Text('Walk inside the 3D model'),
         ),

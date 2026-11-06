@@ -29,6 +29,7 @@ struct WalkSite: Decodable {
   let start: [Int]
   let route: [[Int]]
   let floor: [[Int]]?
+  let walkableFloor: [[Int]]?
   let target: Int?
   let objects: [Block]
   let arrivalRadiusMetres: Float?
@@ -144,7 +145,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     }
     reality.session.delegate = self
     reality.session.delegateQueue = .main
-    floorCells = model.floor.map { Set($0.map { SIMD2($0[0], $0[1]) }) }
+    floorCells = (model.walkableFloor ?? model.floor).map { Set($0.map { SIMD2($0[0], $0[1]) }) }
     for (layer, color, width) in [
       (routeLayer, UIColor.systemMint, CGFloat(4)),
       (detectionLayer, UIColor.systemYellow, CGFloat(3)),
@@ -452,15 +453,21 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
   private func move(motions: Set<Motion>, seconds: Float, pose: simd_float4x4) {
     let direction: Float = (motions.contains(.forward) ? 1 : 0) -
       (motions.contains(.backward) ? 1 : 0)
-    guard direction != 0 else { return }
+    guard direction != 0,
+          isWalkable(cellAt(x: manualPosition.x, z: manualPosition.z)) else { return }
     let back = pose.columns.2
     let heading = SIMD2(-back.x, -back.z)
     guard simd_length(heading) > 0.1 else { return }
     let offset = simd_normalize(heading) * (direction * seconds * 1.2)
-    let x = manualPosition.x + offset.x
-    let z = manualPosition.z + offset.y
-    if isWalkable(cellAt(x: x, z: manualPosition.z)) { manualPosition.x = x }
-    if isWalkable(cellAt(x: manualPosition.x, z: z)) { manualPosition.z = z }
+    // Check short steps so a tap cannot skip a blocked cell in a fine grid.
+    let steps = max(1, Int(ceil(simd_length(offset) / (model.cellSize / 2))))
+    let step = offset / Float(steps)
+    for _ in 0..<steps {
+      let x = manualPosition.x + step.x
+      let z = manualPosition.z + step.y
+      if isWalkable(cellAt(x: x, z: manualPosition.z)) { manualPosition.x = x }
+      if isWalkable(cellAt(x: manualPosition.x, z: z)) { manualPosition.z = z }
+    }
   }
 
   private func cellAt(x: Float, z: Float) -> SIMD2<Int> {
@@ -628,13 +635,17 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     let cell = cellAt(x: position.x, z: position.z)
     arrived = false
     if !isWalkable(cell) {
-      updateDisplay("Outside the model’s walkable area. Return to the route or show the camera.")
+      if model.keyControls && cell == SIMD2(model.start[0], model.start[1]) {
+        updateDisplay("Start position lacks the selected clearance. Close and reduce the camera radius.")
+      } else {
+        updateDisplay("Outside the model’s walkable area. Return to the route or show the camera.")
+      }
     } else if let arrival = arrivalText(at: position) {
       arrived = true
       updateDisplay(arrival)
     } else {
       updateDisplay(model.name + (previewMode ? " · Automatic route preview" :
-        (model.route.isEmpty ? " · Explore the model" : " · Follow the green route")))
+        (model.route.isEmpty ? " · No route to target · Explore the model" : " · Follow the green route")))
     }
   }
 
