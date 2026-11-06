@@ -27,12 +27,12 @@ class ImportTests(unittest.TestCase):
         self.site = {'objects': [dict(name='Test', x=1, z=2, width=1,
                                      depth=1, service=[0, 2])]}
 
-    def run_export(self, mapping=None):
+    def run_export(self, mapping=None, *, include_nearby=False):
         with tempfile.TemporaryDirectory() as temp:
             workbook = Path(temp) / 'synthetic.xlsx'
             workbook.write_bytes(b'synthetic test source')
             with patch('import_asset_data.load_workbook', return_value=self.book):
-                return export(workbook, self.site, mapping)
+                return export(workbook, self.site, mapping, include_nearby=include_nearby)
 
     def test_reproducible_mapping_and_source_provenance(self):
         result = self.run_export()
@@ -49,6 +49,17 @@ class ImportTests(unittest.TestCase):
             self.run_export({'grid:1:2:1:1': 'UNKNOWN'})
         with self.assertRaises(ValueError):
             self.run_export({'unknown-object': 'A'})
+
+    def test_nearby_mapping_preserves_the_service_target_rank(self):
+        self.site['objects'].append(dict(objectId='aaa-nearby'))
+        self.assertEqual(self.run_export()['mappings'], {'grid:1:2:1:1': 'B'})
+        self.assertEqual(self.run_export(include_nearby=True)['mappings'], {
+            'grid:1:2:1:1': 'B', 'aaa-nearby': 'A',
+        })
+        with self.assertRaises(ValueError):
+            self.run_export({'aaa-nearby': 'A'})
+        self.assertEqual(self.run_export({'aaa-nearby': 'A'}, include_nearby=True)['mappings'],
+                         {'aaa-nearby': 'A'})
 
     def test_duplicate_scene_or_asset_ids_rejected(self):
         self.site['objects'] *= 2

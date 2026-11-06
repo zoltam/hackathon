@@ -18,4 +18,19 @@ class RunnerTests: XCTestCase {
       SIMD3<Float>(1.5, 0, 1.5),
     ])
   }
+
+  func testDetectionMatchesTheMappedAssetAtCapturePose() {
+    let bounds: [[Float]] = [[-0.4, 0.2, 0.2], [0.0, 0.6, 0.5]]
+    let fragment = RenderedVision.Detection(
+      objectID: "pump", confidence: 0.8,
+      bounds: CGRect(x: 0.37, y: 0.66, width: 0.07, height: 0.07))
+    XCTAssertTrue(RenderedVision.matches(fragment, to: bounds, viewProjection: matrix_identity_float4x4))
+
+    var movedView = matrix_identity_float4x4
+    movedView.columns.3.x = 1
+    XCTAssertFalse(RenderedVision.matches(fragment, to: bounds, viewProjection: movedView))
+    XCTAssertFalse(RenderedVision.matches(
+      fragment, to: [[-0.4, 0.2, -0.5], [0.0, 0.6, -0.2]],
+      viewProjection: matrix_identity_float4x4))
+  }
 }

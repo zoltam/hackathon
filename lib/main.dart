@@ -123,9 +123,10 @@ class _SiteSimulationState extends State<SiteSimulation> {
 
   Future<void> _openWorld() async {
     final selectedTarget = _target;
+    AssetData? data;
     String? report;
     try {
-      final data = widget.loadAssetData != null
+      data = widget.loadAssetData != null
           ? await widget.loadAssetData!()
           : AssetData.fromJson(
               await rootBundle.loadString('assets/valmet/asset-data.json'),
@@ -182,6 +183,7 @@ class _SiteSimulationState extends State<SiteSimulation> {
               'height': object.height,
               'cells': object.cells?.map(pair).toList(),
               'bounds': object.bounds,
+              'syntheticCondition': data?.conditionForObject(object.objectId),
             },
         ],
       }),

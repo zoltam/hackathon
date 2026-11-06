@@ -73,15 +73,24 @@ class AssetData {
   List<RecordData> _rows(String name) =>
       (_tables[name] as List).cast<RecordData>();
 
+  RecordData? _currentState(Object assetId) => _rows(
+    'Current_State',
+  ).where((r) => r['asset_id'] == assetId).singleOrNull;
+
+  String? conditionForObject(String objectId) {
+    final assetId = (_json['mappings'] as RecordData)[objectId];
+    if (assetId == null) return null;
+    final condition = _currentState(assetId)?['condition_state'];
+    return condition is String && condition.isNotEmpty ? condition : null;
+  }
+
   AssetDiagnosis? forObject(String objectId) {
     final assetId = (_json['mappings'] as RecordData)[objectId];
     if (assetId == null) return null;
     final asset = _rows(
       'Asset_Master',
     ).where((r) => r['asset_id'] == assetId).singleOrNull;
-    final state = _rows(
-      'Current_State',
-    ).where((r) => r['asset_id'] == assetId).singleOrNull;
+    final state = _currentState(assetId);
     if (asset == null || state == null) return null;
 
     List<RecordData> latest(String name, String time) {

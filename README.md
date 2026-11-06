@@ -63,6 +63,18 @@ xcrun devicectl device process launch --device <device> --terminate-existing --c
 
 The verification prints image-space boxes for several rendered views. The benchmark prints the number of GPU-completed frames, frame rate, inference latency, and frame-to-overlay latency for a 15-second scripted view sequence. The benchmark is invalidated if the app loses foreground focus.
 
+To check target confirmation and arrival on the route from the Dart planner, run
+the scripted service journey on the connected phone:
+
+```sh
+xcrun devicectl device process launch --device <device> --terminate-existing --console <bundle-id> -- \
+  --verify-service-journey "$(dart tools/verify_service_route.dart)"
+```
+
+The log records the planned distance, target confirmation, and arrival. The
+script moves the virtual camera and leaves a physical AR walk to be verified
+separately.
+
 ## Navigation and inspection evidence (member 2)
 
 The Flutter screen plans four-neighbour routes over measured floor support on
@@ -100,19 +112,21 @@ boundaries. If a target has no route, free exploration remains available.
 A blocked starting point is reported explicitly.
 Physical AR movement cannot be constrained; leaving the mask displays a warning.
 
-On the iPhone, set the start and direction, then follow the mint floor arrows to the gold service marker in the
-3D viewer. Walk with the phone or enable **Forward and backward controls** to
+On the iPhone, set the start and direction, then follow the mint floor arrows along the curved line to the
+gold service marker in the 3D viewer. Walk with the phone or enable **Forward and backward controls** to
 move with arrows and turn by rotating the phone. **Show camera** switches to
 the camera feed, and **Reset alignment** lets you align again. Arrival uses
 horizontal distance to the service point, separately from target recognition.
-At the service point, open **Inspection evidence** for the selected target.
+The viewer lists up to three nearby catalog objects and their condition. A yellow
+box marks a visual detection after two consecutive frames agree with its mapped
+3D bounds. At the service point, open **Inspection evidence** for the target.
 
 Import the supplied workbook after generating `assets/valmet/site.json`:
 
 ```sh
 python3 -m pip install -r tools/requirements-data.txt
 python3 tools/import_asset_data.py "/path/to/supplied-workbook.xlsx" \
-  --site assets/valmet/site.json
+  --site assets/valmet/site.json --include-nearby
 ```
 
 The importer writes ignored `assets/valmet/asset-data.json`, retaining original
@@ -121,7 +135,8 @@ values, worksheet row references and a workbook SHA-256. It imports the included
 can be kept in ignored `sources/valmet/`. Keep source and generated data local.
 
 By default it sorts service-object IDs and associates them with workbook assets
-by increasing health score, breaking ties by asset ID. This is a **synthetic
+by increasing health score, breaking ties by asset ID. The nearby option then
+assigns the remaining equipment without changing service-target assignments. This is a **synthetic
 association**, not semantic recognition or verified physical identity. Override
 it with `--mapping /path/to/mapping.json`, whose JSON object maps scene
 `object_id` to workbook `asset_id`. Explicit `objectId` or `object_id` values are preferred;

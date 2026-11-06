@@ -22,7 +22,7 @@ def object_id(obj):
     return obj.get('objectId') or obj.get('object_id') or 'grid:{x}:{z}:{width}:{depth}'.format(**obj)
 
 
-def export(workbook, site, mappings=None):
+def export(workbook, site, mappings=None, *, include_nearby=False):
     book = load_workbook(workbook, read_only=True, data_only=True)
     tables = {}
     try:
@@ -55,20 +55,22 @@ def export(workbook, site, mappings=None):
             if row['asset_id'] not in assets:
                 raise ValueError(f"Unknown asset at {row['_source']}")
 
-    objects = [o for o in site['objects'] if o.get('service') is not None]
-    ids = [object_id(o) for o in objects]
+    ids = sorted(object_id(o) for o in site['objects'] if o.get('service') is not None)
+    if include_nearby:
+        # Assign the service targets first, keeping their original ranked conditions.
+        ids += sorted(object_id(o) for o in site['objects'] if o.get('service') is None)
     if len(set(ids)) != len(ids):
-        raise ValueError('Service objects need unique object_id values')
+        raise ValueError('Mapped scene objects need unique object_id values')
     mapping_method = 'synthetic_ranked' if mappings is None else 'synthetic_explicit'
     if mappings is None:
         # Reproducible association allowed by the brief. No semantic identity claim.
         ranked = sorted(states, key=lambda a: (
             states[a].get('health_score', 101), a))
         if len(ids) > len(ranked):
-            raise ValueError('More service objects than workbook assets')
-        mappings = dict(zip(sorted(ids), ranked))
+            raise ValueError('More mapped scene objects than workbook assets with current state')
+        mappings = dict(zip(ids, ranked))
     if set(mappings) - set(ids):
-        raise ValueError('Mapping contains unknown/non-service scene objects')
+        raise ValueError('Mapping contains scene objects outside the selected mapping scope')
     if set(mappings.values()) - assets.keys():
         raise ValueError('Mapping contains unknown workbook assets')
     if len(set(mappings.values())) != len(mappings):
@@ -91,11 +93,14 @@ def main():
     parser.add_argument('--site', type=Path, required=True)
     parser.add_argument('--mapping', type=Path,
                         help='JSON object: scene object_id -> workbook asset_id')
+    parser.add_argument('--include-nearby', action='store_true',
+                        help='Also map equipment without a service route')
     parser.add_argument('--output', type=Path,
                         default=Path('assets/valmet/asset-data.json'))
     args = parser.parse_args()
     mappings = json.loads(args.mapping.read_text()) if args.mapping else None
-    result = export(args.workbook, json.loads(args.site.read_text()), mappings)
+    result = export(args.workbook, json.loads(args.site.read_text()), mappings,
+                    include_nearby=args.include_nearby)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(result, ensure_ascii=False, allow_nan=False) + '\n')
     print(f"Mapped {len(result['mappings'])} scene objects; "

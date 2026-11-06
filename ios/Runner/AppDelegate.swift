@@ -48,27 +48,57 @@ import UIKit
       open(payload, .normal, result)
     }
     let arguments = ProcessInfo.processInfo.arguments
-    let visionMode: WorldWalk.VisionMode = arguments.contains("--benchmark-rendered-vision") ? .benchmark :
+    let journeyArgument = arguments.firstIndex(of: "--verify-service-journey")
+    let visionMode: WorldWalk.VisionMode = journeyArgument != nil ? .journey :
+      arguments.contains("--benchmark-rendered-vision") ? .benchmark :
       arguments.contains("--verify-rendered-vision") ? .verify : .normal
     if visionMode != .normal {
-      let logPrefix = visionMode == .benchmark ? "VALMET_BENCH" : "VALMET_VISION"
+      let logPrefix = visionMode == .journey ? "VALMET_JOURNEY" :
+        visionMode == .benchmark ? "VALMET_BENCH" : "VALMET_VISION"
       DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
         let key = registrar.lookupKey(forAsset: "assets/valmet/site.json")
         guard let url = Bundle.main.url(forResource: key, withExtension: nil),
               let data = try? Data(contentsOf: url),
               var site = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
               let start = site["start"] as? [Int], start.count == 2 else {
-          print(visionMode == .benchmark ? "VALMET_BENCH error=missing_scene" : "VALMET_VISION missing scene")
+          print(visionMode == .verify ? "VALMET_VISION missing scene" : "\(logPrefix) error=missing_scene")
           fflush(stdout)
           return
         }
         site["keyControls"] = false
-        site["target"] = 0
-        site["route"] = [start, [start[0], start[1] + 1]]
+        if let journeyArgument {
+          guard arguments.indices.contains(journeyArgument + 1),
+                let journey = (try? JSONSerialization.jsonObject(
+                  with: Data(arguments[journeyArgument + 1].utf8))) as? [String: Any],
+                let route = journey["route"] as? [[Int]], route.first == start,
+                let id = journey["targetID"] as? String,
+                let objects = site["objects"] as? [[String: Any]],
+                let target = objects.firstIndex(where: { $0["objectId"] as? String == id }),
+                let service = objects[target]["service"] as? [Int], route.last == service,
+                let floor = site["floor"] as? [[Int]] else {
+            print("VALMET_JOURNEY error=invalid_route")
+            fflush(stdout)
+            return
+          }
+          let floorCells = Set(floor)
+          guard route.allSatisfy({ $0.count == 2 && floorCells.contains($0) }),
+                zip(route, route.dropFirst()).allSatisfy({ a, b in
+                  abs(a[0] - b[0]) + abs(a[1] - b[1]) == 1
+                }) else {
+            print("VALMET_JOURNEY error=invalid_route")
+            fflush(stdout)
+            return
+          }
+          site["target"] = target
+          site["route"] = route
+        } else {
+          site["target"] = 0
+          site["route"] = [start, [start[0], start[1] + 1]]
+        }
         guard let data = try? JSONSerialization.data(withJSONObject: site) else { return }
         open(String(decoding: data, as: UTF8.self), visionMode) { error in
           if let error = error as? FlutterError {
-            print(visionMode == .benchmark ? "\(logPrefix) error=\(error.code)" : "\(logPrefix) opening error: \(error.code)")
+            print(visionMode == .verify ? "VALMET_VISION opening error: \(error.code)" : "\(logPrefix) error=\(error.code)")
             fflush(stdout)
           }
         }

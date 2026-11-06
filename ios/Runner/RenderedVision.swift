@@ -1,4 +1,5 @@
 import CoreML
+import CoreGraphics
 import CoreVideo
 import QuartzCore
 import Metal
@@ -8,6 +9,7 @@ import simd
 final class RenderedVision {
   struct Frame {
     let pose: simd_float4x4
+    let projection: simd_float4x4
     let timestamp: CFTimeInterval
   }
 
@@ -21,6 +23,52 @@ final class RenderedVision {
     let frame: Frame
     let detections: [Detection]
     let inferenceMilliseconds: Int
+  }
+
+  static func matches(_ detection: Detection, to bounds: [[Float]],
+                      viewProjection: simd_float4x4) -> Bool {
+    guard bounds.count == 2, bounds.allSatisfy({ $0.count == 3 && $0.allSatisfy(\.isFinite) }),
+          zip(bounds[0], bounds[1]).allSatisfy({ $0.0 < $0.1 }) else { return false }
+
+    let corners = (0..<8).map { corner in
+      viewProjection * SIMD4(bounds[corner & 1][0], bounds[(corner >> 1) & 1][1],
+                             bounds[(corner >> 2) & 1][2], 1)
+    }
+    var lower = SIMD2<Float>(repeating: .infinity)
+    var upper = SIMD2<Float>(repeating: -.infinity)
+    func include(_ point: SIMD4<Float>) {
+      guard point.w > 0, point.z <= point.w else { return }
+      // Vision and Metal NDC both measure y from the bottom.
+      let projected = (SIMD2(point.x, point.y) / point.w + 1) / 2
+      guard projected.x.isFinite, projected.y.isFinite else { return }
+      lower = simd_min(lower, projected)
+      upper = simd_max(upper, projected)
+    }
+
+    for (index, corner) in corners.enumerated() {
+      if corner.z >= 0 { include(corner) }
+      // Include edges that cross the near plane so close-up views stay matchable.
+      for axis in [1, 2, 4] where index & axis == 0 {
+        let neighbor = corners[index | axis]
+        if (corner.z >= 0) != (neighbor.z >= 0) {
+          let fraction = corner.z / (corner.z - neighbor.z)
+          include(corner + (neighbor - corner) * fraction)
+        }
+      }
+    }
+    guard lower.x < upper.x, lower.y < upper.y else { return false }
+
+    let viewport = CGRect(x: 0, y: 0, width: 1, height: 1)
+    let size = upper - lower
+    let mapped = CGRect(x: CGFloat(lower.x), y: CGFloat(lower.y),
+                        width: CGFloat(size.x), height: CGFloat(size.y))
+      .intersection(viewport)
+    let observed = detection.bounds.intersection(viewport)
+    guard !mapped.isEmpty, !observed.isEmpty else { return false }
+    // A visible fragment may be much smaller than the projected box. Require
+    // overlap with the detection and allow a small registration margin.
+    let overlap = mapped.insetBy(dx: -0.025, dy: -0.025).intersection(observed)
+    return !overlap.isEmpty && overlap.width * overlap.height >= observed.width * observed.height * 0.25
   }
 
   var onPrediction: ((Prediction) -> Void)?

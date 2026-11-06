@@ -183,6 +183,14 @@ Correct detections increased for eight of 11 devices in the original views and s
 
 The local export is `build/valmet-equipment-room-r3/candidate/equipment-detector.mlmodel`, SHA-256 `7114588a3fcd9477ef93f72039db10cd89c14305140f3abb907abc2e25fdb239`. It matches the bytes in the iPhone build. On iPhone 15, all six scripted pump views returned the target, one with a duplicate box. The seventh view returned no detections. The 15-second benchmark measured 29.67 FPS, 5 ms median inference and 7 ms p95 (29 predictions, reported thermal state 3).
 
+## Actuator follow-up training
+
+R4 ran 600 steps on 792 images, including 72 additional actuator portraits. The best
+middle-actuator checkpoint improved walking validation from 3/18 to 5/18. Left
+actuator remained at 0/7. Pump false positives rose from one to four, above the
+validation limit, so the published R3 detector remains active. R4 was evaluated
+on validation; the held-out test sets were reserved.
+
 ## Scene and equipment handoff
 
 The current builder validates and renders all 1,676,481 Gaussians in Equipment Room.ply. Similarity registration to the reviewed scene yielded a 2.32 cm median nearest-neighbor distance. The navigation grid now uses 126 × 129 cells at 0.10 m resolution in the unchanged registered frame. Measured floor centres and bounded Gaussian footprints provide 3,213 floor cells. At the default 0.10 m virtual-camera radius, 2,106 of 2,130 clearance-valid cells connect to the pump approach (21.06 m²). The 1.55 m obstacle ceiling matches the 1.50 m virtual camera plus margin, not standing-person clearance. The imported route from the entrance to the pump is 31 steps (3.10 m). Eleven rendered-region anchors, including the full reviewed upper aisle, remain connected; real low obstacles stay blocked. Distances assume one reviewed scene unit is one metre.

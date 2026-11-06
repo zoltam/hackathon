@@ -146,10 +146,10 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
     }
     let buffer = sortBuffers[nextBuffer]
     nextBuffer = (nextBuffer + 1) % sortBuffers.count
-    let sorted = sort(pose: pose, into: buffer)
     var uniforms = Uniforms(viewProjection: projection * pose.inverse,
                             screen: SIMD2(Float(dimensions.width), Float(dimensions.height)),
                             roomSize: roomSize, camera: pose.columns.3, sourceRotation: sourceRotation)
+    let sorted = sort(viewProjection: uniforms.viewProjection, screen: uniforms.screen, into: buffer)
     // Put an approximate floor behind the captured detail. This pass has no
     // effect on the walkability grid.
     encoder.setRenderPipelineState(floorPipeline)
@@ -164,7 +164,7 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
     }
     encoder.endEncoding()
     vision.capture(drawable.texture, command: command,
-                   frame: RenderedVision.Frame(pose: pose, timestamp: frame.timestamp))
+                   frame: RenderedVision.Frame(pose: pose, projection: projection, timestamp: frame.timestamp))
     if let routeBuffer {
       // Draw guidance after the vision readback, using the same camera and drawable.
       let guidePass = MTLRenderPassDescriptor()
@@ -202,61 +202,85 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
 
   static func guideMarkers(for route: [SIMD3<Float>], cellSize: Float) -> [SIMD4<Float>] {
     guard let end = route.last, cellSize > 0 else { return [] }
+    let destination = SIMD4(end.x, end.z, 0, -1)
     let points = route.map { SIMD2($0.x, $0.z) }
-    var path: [SIMD2<Float>] = []
-    var arrows: [SIMD4<Float>] = []
-    for index in points.indices.dropLast() {
-      let point = points[index]
-      let outgoing = points[index + 1] - point
-      var arrowPosition = point
-      var direction = outgoing
-      if index > 0 {
-        let incoming = point - points[index - 1]
-        // Round a grid corner inside its own cell, tangent to both straight legs.
-        if simd_length_squared(incoming) > 0, simd_length_squared(outgoing) > 0,
-           abs(simd_dot(incoming, outgoing)) < cellSize * cellSize * 0.01 {
-          let entry = point - incoming * 0.43
-          let exit = point + outgoing * 0.43
-          for step in 0...8 {
-            let t = Float(step) / 8
-            let s = 1 - t
-            path.append(entry * (s * s) + point * (2 * s * t) + exit * (t * t))
-          }
-          arrowPosition = (entry + point * 2 + exit) / 4
-          direction = exit - entry
-        } else {
-          path.append(point)
-        }
-      } else {
-        path.append(point)
+    guard let start = points.first, points.count > 1 else { return [destination] }
+
+    // Merge straight grid steps before rounding, so finer grids still get a visible curve.
+    var corners = [start]
+    for index in points.indices.dropFirst().dropLast() {
+      let incoming = points[index] - points[index - 1]
+      let outgoing = points[index + 1] - points[index]
+      if simd_dot(incoming, outgoing) < 0.99 * simd_length(incoming) * simd_length(outgoing) {
+        corners.append(points[index])
       }
-      arrows.append(SIMD4(arrowPosition.x, arrowPosition.y, atan2(direction.y, direction.x), 0))
+    }
+    corners.append(SIMD2(end.x, end.z))
+
+    let markerSize = max(cellSize, 0.18)
+    let minimumGap = markerSize * 1.12
+    var path = [start]
+    var arrows: [SIMD4<Float>] = []
+    var occupied = [SIMD2(end.x, end.z)]
+
+    func addArrow(at point: SIMD2<Float>, toward direction: SIMD2<Float>) {
+      guard occupied.allSatisfy({ simd_distance($0, point) >= minimumGap }) else { return }
+      arrows.append(SIMD4(point.x, point.y, atan2(direction.y, direction.x), 0))
+      occupied.append(point)
+    }
+
+    for index in corners.indices.dropFirst().dropLast() {
+      let point = corners[index]
+      let incoming = point - corners[index - 1]
+      let outgoing = corners[index + 1] - point
+      // Limit the curve to the turn cell and its two route neighbors.
+      let trim = min(0.20, cellSize * 1.4, simd_length(incoming) * 0.45, simd_length(outgoing) * 0.45)
+      guard trim > 0 else { continue }
+      let entry = point - simd_normalize(incoming) * trim
+      let exit = point + simd_normalize(outgoing) * trim
+      for step in 0...8 {
+        let t = Float(step) / 8
+        let s = 1 - t
+        path.append(entry * (s * s) + point * (2 * s * t) + exit * (t * t))
+      }
+      addArrow(at: (entry + point * 2 + exit) / 4, toward: exit - entry)
     }
     path.append(SIMD2(end.x, end.z))
-    // The final component selects the marker: positive ribbon length, zero arrow, negative ring.
-    var markers: [SIMD4<Float>] = zip(path, path.dropFirst()).compactMap { start, end in
+
+    let spacing = max(0.24, minimumGap)
+    var distance: Float = 0
+    var nextArrow: Float = 0
+    var ribbon: [SIMD4<Float>] = []
+    for (start, end) in zip(path, path.dropFirst()) {
       let delta = end - start
       let length = simd_length(delta)
-      guard length > 0 else { return nil }
+      guard length > 0 else { continue }
       let center = (start + end) / 2
-      return SIMD4(center.x, center.y, atan2(delta.y, delta.x), length / cellSize)
+      ribbon.append(SIMD4(center.x, center.y, atan2(delta.y, delta.x), length / cellSize))
+      while nextArrow < distance + length {
+        addArrow(at: start + delta * ((nextArrow - distance) / length), toward: delta)
+        nextArrow += spacing
+      }
+      distance += length
     }
-    markers += arrows
-    markers.append(SIMD4(end.x, end.z, 0, -1))
-    return markers
+    // Positive length draws the ribbon. Arrows and the ring draw on top.
+    return ribbon + arrows + [destination]
   }
 
-  private func sort(pose: simd_float4x4, into buffer: MTLBuffer) -> Int {
-    let back = pose.columns.2, origin = pose.columns.3
-    let eye = SIMD3(origin.x, origin.y, origin.z)
-    let forward = -SIMD3(back.x, back.y, back.z)
-    let shift = simd_dot(eye, forward)
+  private func sort(viewProjection: simd_float4x4, screen: SIMD2<Float>, into buffer: MTLBuffer) -> Int {
+    let rows = viewProjection.transpose.columns
+    // Match the shader's largest projected footprint when culling before sorting.
+    let maxSigma = max(screen.x, screen.y) * 0.06
+    let frustum = 1 + 6 * maxSigma / screen
     let destination = buffer.contents().bindMemory(to: UInt32.self, capacity: count)
     for i in bins.indices { bins[i] = 0 }
     for i in positions.indices {
-      let p = positions[i]
-      let depth = simd_dot(SIMD3(p.x, p.y, p.z), forward) - shift
-      if depth <= 0.04 {
+      var point = positions[i]
+      point.w = 1
+      let depth = simd_dot(rows.3, point)
+      if depth <= 0.04 ||
+         abs(simd_dot(rows.0, point)) > depth * frustum.x ||
+         abs(simd_dot(rows.1, point)) > depth * frustum.y {
         bucket[i] = -1
       } else {
         let bin = min(Self.binCount - 1, Int(depth * 128))
@@ -327,7 +351,8 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
     float2 local = float2(corner & 1, (corner >> 1) & 1) * 2.0 - 1.0;
     float2 extent = marker.w > 0 ? float2(.11, marker.w * .5 + .11) : float2(.43);
     float2 offset = local * extent;
-    float2 p = marker.xy + (right * offset.x + forward * offset.y) * cellSize;
+    float scale = marker.w > 0 ? cellSize : max(cellSize, .18);
+    float2 p = marker.xy + (right * offset.x + forward * offset.y) * scale;
     return { u.viewProjection * float4(p.x, .035, p.y, 1),
              marker.w > 0 ? offset : local, marker.w };
   }

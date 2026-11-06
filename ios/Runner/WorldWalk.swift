@@ -13,6 +13,17 @@ struct WalkSite: Decodable {
     let height: CGFloat
     let cells: [[Int]]?
     let bounds: [[Float]]?
+    let syntheticCondition: String?
+
+    func floorBounds(cellSize: Float) -> (min: SIMD2<Float>, max: SIMD2<Float>) {
+      if let bounds, bounds.count == 2, bounds.allSatisfy({ $0.count == 3 }),
+         bounds[0][0] <= bounds[1][0], bounds[0][2] <= bounds[1][2] {
+        return (SIMD2(bounds[0][0], bounds[0][2]), SIMD2(bounds[1][0], bounds[1][2]))
+      }
+      let min = SIMD2(Float(x), Float(z)) * cellSize
+      let max = SIMD2(Float(x) + Float(width), Float(z) + Float(depth)) * cellSize
+      return (min, max)
+    }
   }
 
   let name: String
@@ -60,7 +71,7 @@ struct WorldAlignment {
 }
 
 final class WorldWalk: UIViewController, ARSessionDelegate {
-  enum VisionMode { case normal, verify, benchmark }
+  enum VisionMode { case normal, verify, benchmark, journey }
 
   private let model: WalkSite
   private let renderer: SplatRenderer
@@ -69,9 +80,12 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
   private let detectionLayer = CAShapeLayer()
   private let message = UILabel()
   private let visionStatus = UILabel()
+  private let nearbyStatus = UILabel()
   private let visionMode: VisionMode
   private let detectorURL: URL?
   private var verificationFrames = 0
+  private var journeyStart: CFTimeInterval?
+  private var journeyConfirmedTarget = false
   private static let benchmarkDuration: CFTimeInterval = 15
   private var benchmarkStart: CFTimeInterval?
   private var benchmarkLink: CADisplayLink?
@@ -143,6 +157,10 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
       guard let self, self.view.window != nil, !self.virtual.isHidden else { return }
       self.updateDetectionPose(pose)
     }
+    nearbyStatus.font = .preferredFont(forTextStyle: .caption1)
+    nearbyStatus.textColor = .white
+    nearbyStatus.numberOfLines = 4
+    nearbyStatus.isHidden = true
     renderer.vision.onPrediction = { [weak self] prediction in
       guard let self else { return }
       if self.visionMode == .benchmark, self.inBenchmarkWindow(CACurrentMediaTime()) {
@@ -153,11 +171,22 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
         self.clearDetections()
         return
       }
-      let detections = prediction.detections
+      let viewProjection = prediction.frame.projection * prediction.frame.pose.inverse
+      let detections = prediction.detections.filter { detection in
+        guard let object = self.model.objects.first(where: { $0.objectId == detection.objectID }) else { return false }
+        guard let bounds = object.bounds else { return true }
+        return RenderedVision.matches(detection, to: bounds, viewProjection: viewProjection)
+      }
       self.lastDetection = detections.isEmpty ? nil : prediction.frame
       let confirmedIDs = self.drawDetections(detections)
       if self.visionMode == .benchmark, self.inBenchmarkWindow(CACurrentMediaTime()) {
         self.benchmarkOverlayAges.append(Int((CACurrentMediaTime() - prediction.frame.timestamp) * 1000))
+      }
+      if self.journeyStart != nil, !self.journeyConfirmedTarget,
+         let id = self.serviceTarget?.objectId, confirmedIDs.contains(id) {
+        self.journeyConfirmedTarget = true
+        print("VALMET_JOURNEY phase=target_confirmed id=\(id)")
+        fflush(stdout)
       }
       if self.visionMode == .verify {
         let labels = detections.map { detection in
@@ -193,7 +222,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     row.distribution = .fillEqually
     row.spacing = 8
     movementControls = model.keyControls ? makeControls() : nil
-    let panel = UIStackView(arrangedSubviews: [message, visionStatus, movementControls, align, inspect, row].compactMap { $0 })
+    let panel = UIStackView(arrangedSubviews: [message, visionStatus, nearbyStatus, movementControls, align, inspect, row].compactMap { $0 })
     panel.axis = .vertical
     panel.spacing = 8
     panel.isLayoutMarginsRelativeArrangement = true
@@ -222,12 +251,16 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
       guard self.visionMode != .normal else { return }
       if !loaded {
         self.visionStatus.isHidden = false
-        print(self.visionMode == .benchmark ? "VALMET_BENCH error=detector_unavailable" : "VALMET_VISION detector unavailable")
+        let log = self.visionMode == .journey ? "VALMET_JOURNEY error=detector_unavailable" :
+          self.visionMode == .benchmark ? "VALMET_BENCH error=detector_unavailable" : "VALMET_VISION detector unavailable"
+        print(log)
         fflush(stdout)
       } else if self.visionMode == .verify {
         self.verifyRenderedFrame(index: 0)
-      } else {
+      } else if self.visionMode == .benchmark {
         self.startBenchmark()
+      } else {
+        self.startJourney()
       }
     }
     if visionMode != .normal { return }
@@ -258,25 +291,101 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
   }
 
   private func renderVerificationPose(index: Int) {
+    let origin = model.originShift ?? .zero
+    let eye = origin + (index == 5 ? SIMD3<Float>(4.625, 1.50, 1.625) :
+      SIMD3<Float>(5.385 - Float(index % 3) * 0.08, 1.50, 1.88 + Float(index % 2) * 0.06))
+    let look = origin + (index == 2 ? SIMD3<Float>(6.90, 1.15, 2.43) :
+      index == 3 ? SIMD3(3.0, 1.15, 1.875) : SIMD3(5.943, 1.164, 2.447))
+    renderScriptedView(eye: eye, look: look)
+  }
+
+  private func renderScriptedView(eye: SIMD3<Float>, look: SIMD3<Float>) {
     let size = virtual.bounds.size
-    if size.width > 0, size.height > 0 {
-      let origin = model.originShift ?? .zero
-      let eye = origin + (index == 5 ? SIMD3<Float>(4.625, 1.50, 1.625) :
-        SIMD3<Float>(5.385 - Float(index % 3) * 0.08, 1.50, 1.88 + Float(index % 2) * 0.06))
-      let look = origin + (index == 2 ? SIMD3<Float>(6.90, 1.15, 2.43) :
-        index == 3 ? SIMD3(3.0, 1.15, 1.875) : SIMD3(5.943, 1.164, 2.447))
-      let back = simd_normalize(eye - look)
-      let right = simd_normalize(simd_cross(SIMD3(0, 1, 0), back))
-      let up = simd_cross(back, right)
-      func vector(_ p: SIMD3<Float>, _ w: Float) -> SIMD4<Float> { SIMD4(p.x, p.y, p.z, w) }
-      let pose = simd_float4x4(columns: (vector(right, 0), vector(up, 0), vector(back, 0), vector(eye, 1)))
-      let n: Float = 0.04, f: Float = 40, zoom: Float = 1.4
-      let projection = simd_float4x4(columns: (
-        SIMD4(zoom / Float(size.width / size.height), 0, 0, 0), SIMD4(0, zoom, 0, 0),
-        SIMD4(0, 0, f / (n - f), -1), SIMD4(0, 0, n * f / (n - f), 0)
-      ))
-      renderer.render(pose: pose, projection: projection)
+    guard size.width > 0, size.height > 0 else { return }
+    let back = simd_normalize(eye - look)
+    let right = simd_normalize(simd_cross(SIMD3(0, 1, 0), back))
+    let up = simd_cross(back, right)
+    func vector(_ p: SIMD3<Float>, _ w: Float) -> SIMD4<Float> { SIMD4(p.x, p.y, p.z, w) }
+    let pose = simd_float4x4(columns: (vector(right, 0), vector(up, 0), vector(back, 0), vector(eye, 1)))
+    let n: Float = 0.04, f: Float = 40, zoom: Float = 1.4
+    let projection = simd_float4x4(columns: (
+      SIMD4(zoom / Float(size.width / size.height), 0, 0, 0), SIMD4(0, zoom, 0, 0),
+      SIMD4(0, 0, f / (n - f), -1), SIMD4(0, 0, n * f / (n - f), 0)
+    ))
+    renderer.render(pose: pose, projection: projection)
+  }
+
+  private var serviceTarget: WalkSite.Block? {
+    guard let target = model.target, model.objects.indices.contains(target) else { return nil }
+    return model.objects[target]
+  }
+
+  private func startJourney() {
+    guard let id = serviceTarget?.objectId, model.cellSize > 0, !model.route.isEmpty else {
+      print("VALMET_JOURNEY error=invalid_route")
+      fflush(stdout)
+      return
     }
+    showModel = true
+    journeyStart = CACurrentMediaTime()
+    let distance = Float(model.route.count - 1) * model.cellSize
+    print("VALMET_JOURNEY phase=start id=\(id) cells=\(model.route.count) distance_m=\(distance)")
+    fflush(stdout)
+    journeyFrame()
+  }
+
+  private func journeyFrame() {
+    guard let start = journeyStart, let target = serviceTarget else { return }
+    guard view.window?.windowScene?.activationState == .foregroundActive else {
+      stopJourney(error: "scene_inactive")
+      return
+    }
+    let end = Float(model.route.count - 1)
+    let speed: Float = 0.15
+    let elapsed = Float(CACurrentMediaTime() - start)
+    let elapsedWalking = end * model.cellSize / speed
+    let step = min(end, elapsed * speed / model.cellSize)
+    func point(at step: Float) -> SIMD3<Float> {
+      let index = Int(step)
+      let a = model.center(model.route[index], height: assumedPhoneHeight)
+      let b = model.center(model.route[min(index + 1, model.route.count - 1)], height: assumedPhoneHeight)
+      return a + (b - a) * (step - Float(index))
+    }
+    let eye = point(at: step)
+    let bounds = target.floorBounds(cellSize: model.cellSize)
+    let targetCenter = (bounds.min + bounds.max) / 2
+    let lookAtTarget = SIMD3(targetCenter.x, Float(target.height) * 0.9, targetCenter.y)
+    let lookAhead = point(at: min(end, step + 4)) - SIMD3(0, 0.20, 0)
+    let remaining = (end - step) * model.cellSize
+    let aim = min(1, max(0, (0.9 - remaining) / 0.5))
+    let look = lookAhead + (lookAtTarget - lookAhead) * aim
+
+    let hadArrived = arrived
+    updateWalkStatus(at: SIMD4(eye.x, eye.y, eye.z, 1))
+    renderScriptedView(eye: eye, look: look)
+    if arrived && !hadArrived {
+      print("VALMET_JOURNEY phase=arrival elapsed_s=\(elapsed)")
+      fflush(stdout)
+    }
+    if elapsed >= elapsedWalking + 4 {
+      stopJourney(error: arrived && journeyConfirmedTarget ? nil : "missing_arrival_or_target")
+    } else {
+      DispatchQueue.main.asyncAfter(deadline: .now() + 1.0 / 30.0) { [weak self] in
+        self?.journeyFrame()
+      }
+    }
+  }
+
+  private func stopJourney(error: String?) {
+    guard let start = journeyStart else { return }
+    journeyStart = nil
+    let elapsed = CACurrentMediaTime() - start
+    if let error {
+      print("VALMET_JOURNEY result=failed error=\(error) confirmed=\(journeyConfirmedTarget) arrived=\(arrived) elapsed_s=\(elapsed)")
+    } else {
+      print("VALMET_JOURNEY result=passed confirmed=true arrived=true elapsed_s=\(elapsed)")
+    }
+    fflush(stdout)
   }
 
   private func startBenchmark() {
@@ -352,6 +461,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
   override func viewWillDisappear(_ animated: Bool) {
     super.viewWillDisappear(animated)
     abortBenchmark(reason: "view_disappeared")
+    stopJourney(error: "view_disappeared")
     lastFrame = nil
     keys.removeAll()
     buttons.removeAll()
@@ -459,12 +569,31 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
       floorCells?.contains(cell) != false
   }
 
+  private func updateNearbyEquipment(at position: SIMD4<Float>) {
+    let point = SIMD2(position.x, position.z)
+    let radius: Float = 2.5
+    let nearby = model.objects.compactMap { object -> (WalkSite.Block, Float)? in
+      let bounds = object.floorBounds(cellSize: model.cellSize)
+      let nearest = simd_clamp(point, bounds.min, bounds.max)
+      let distance = simd_distance_squared(point, nearest)
+      return distance <= radius * radius ? (object, distance) : nil
+    }.sorted {
+      $0.1 == $1.1 ? $0.0.name < $1.0.name : $0.1 < $1.1
+    }.prefix(3)
+    let lines = nearby.map { object, _ in
+      let condition = object.syntheticCondition.map { "Synthetic condition: \($0)" } ?? "Condition unavailable"
+      return "\(object.name) · \(condition)"
+    }
+    let text = lines.isEmpty ? nil : (["Nearby equipment"] + lines).joined(separator: "\n")
+    if nearbyStatus.text != text { nearbyStatus.text = text }
+  }
+
   private func arrivalText(at position: SIMD4<Float>) -> String? {
     guard let end = model.route.last,
           simd_distance(SIMD2(position.x, position.z), SIMD2(model.center(end).x, model.center(end).z))
             <= (model.arrivalRadiusMetres ?? model.cellSize / 2),
-          let index = model.target, model.objects.indices.contains(index) else { return nil }
-    return "At service position · \(model.objects[index].name)"
+          let target = serviceTarget else { return nil }
+    return "At service position · \(target.name)"
   }
 
   private func isCurrent(_ frame: RenderedVision.Frame, comparedWith pose: simd_float4x4) -> Bool {
@@ -585,7 +714,11 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
       let projection = frame.camera.projectionMatrix(for: orientation, viewportSize: size, zNear: 0.04, zFar: 40)
       renderer.render(pose: pose, projection: projection)
     }
-    let position = pose.columns.3
+    updateWalkStatus(at: pose.columns.3)
+  }
+
+  private func updateWalkStatus(at position: SIMD4<Float>) {
+    if showModel { updateNearbyEquipment(at: position) }
     let cell = cellAt(x: position.x, z: position.z)
     arrived = false
     if !isWalkable(cell) {
@@ -636,11 +769,12 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
   }
 
   private func updateDisplay(_ text: String) {
-    let visible = ready && showModel && alignment != nil
+    let visible = showModel && (visionMode == .journey || (ready && alignment != nil))
     virtual.isHidden = !visible
     movementControls?.isHidden = !visible
     inspect.isHidden = !visible || !arrived
     visionStatus.isHidden = !visible
+    nearbyStatus.isHidden = !visible || nearbyStatus.text == nil
     if !visible {
       buttons.removeAll()
       clearDetections()
