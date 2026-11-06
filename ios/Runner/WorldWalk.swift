@@ -3,7 +3,7 @@ import AVFoundation
 import UIKit
 import simd
 
-let assumedPhoneHeight: Float = 1.75
+let assumedPhoneHeight: Float = 1.50
 
 struct WalkSite: Decodable {
   struct Block: Decodable {
