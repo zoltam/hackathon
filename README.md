@@ -28,14 +28,14 @@ flutter pub get
 Connect the iPhone, open `ios/Runner.xcworkspace` in Xcode, and select
 your team and a unique bundle identifier under Runner → Signing & Capabilities.
 Select the connected iPhone as the run destination and run the Runner scheme.
-The simulator can preview the Flutter route map. The AR walkthrough requires
+The simulator can preview the Flutter settings. The AR walkthrough requires
 the physical iPhone. The repository already includes the Core ML detector.
 
 ## Walk inside the 3D model
 
-The main screen includes a route overview map: blue marks the start, green the
-planned route and orange the service target. It updates when the target or
-camera clearance changes.
+The main screen shows the planned route distance for the selected target and
+camera clearance. Open the maintenance report after reaching the target in
+the 3D viewer.
 
 Enable **Forward and backward controls** under **Settings** to move with the two on-screen buttons or ↑/↓. Turn by rotating the phone. This mode still uses ARKit to track orientation.
 

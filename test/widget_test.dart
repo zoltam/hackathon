@@ -104,7 +104,7 @@ void main() {
     expect(messages, [false, true]);
   });
 
-  testWidgets('shows route map and distance without playback controls', (
+  testWidgets('shows route distance without a preview map or playback', (
     tester,
   ) async {
     final site = Site.fromJson(
@@ -118,14 +118,7 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(find.text('15.8 m · route with 0.20 m clearance'), findsOneWidget);
-    final map = find.byKey(const ValueKey('site-minimap'));
-    await tester.scrollUntilVisible(map, 200);
-    await tester.pumpAndSettle();
-    final painter = tester.widget<CustomPaint>(map).painter! as SitePainter;
-    expect(painter.site, same(site));
-    expect(painter.target, site.objects.firstWhere((o) => o.service != null));
-    expect(painter.route.first, site.start);
-    expect(painter.route.last, painter.target!.service);
+    expect(find.byKey(const ValueKey('site-minimap')), findsNothing);
     expect(tester.takeException(), isNull);
     expect(find.text('Play route preview'), findsNothing);
     expect(find.text('Pause preview'), findsNothing);
@@ -152,7 +145,10 @@ void main() {
           {"asset_id":"asset-1","tag":"P-005","asset_class":"PROCESS_PUMP"},
           {"asset_id":"asset-2","tag":"P-006","asset_class":"PROCESS_PUMP"}
         ],
-        "Current_State":[],"Telemetry_Sample_3d":[],"Alarms_Events":[],
+        "Current_State":[
+          {"asset_id":"asset-1","condition_state":"attention_required",
+           "recommended_next_check":"Inspect coupling","_source":"Current_State!2"}
+        ],"Telemetry_Sample_3d":[],"Alarms_Events":[],
         "Maintenance_History":[],"Historical_Service_Cases":[],
         "Knowledge_Docs":[],"Data_Quality":[]
       }
@@ -180,9 +176,16 @@ void main() {
     await tester.pumpWidget(ValmetApp(site: site));
     await tester.pumpAndSettle();
     expect(find.text('P-005 · Feed pump'), findsOneWidget);
-    await tester.tap(find.text('Walk inside the 3D model'));
+    await tester.drag(find.byType(ListView), const Offset(0, -800));
+    await tester.pumpAndSettle();
+    expect(find.byType(Card, skipOffstage: false), findsNothing);
+    final open = find.text('Walk inside the 3D model');
+    await tester.ensureVisible(open);
+    await tester.tap(open);
     await tester.pumpAndSettle();
     expect(payload!['hasWorkbook'], isTrue);
+    expect(payload!['inspectionSummary'], contains('Inspect coupling'));
+    expect(payload!['inspectionReport'], contains('Current_State!2'));
     final objects = (payload!['objects'] as List).cast<Map<String, dynamic>>();
     expect(objects, hasLength(2));
     for (final object in site.objects) {
@@ -199,7 +202,9 @@ void main() {
       expect(sent['workbookTag'], object.objectId == 'pump' ? 'P-005' : null);
     }
 
-    await tester.tap(find.text('P-005 · Feed pump'));
+    final pump = find.text('P-005 · Feed pump');
+    await tester.scrollUntilVisible(pump, -200);
+    await tester.tap(pump);
     await tester.pumpAndSettle();
     expect(find.text('Inlet valve'), findsOneWidget);
     expect(find.textContaining('P-006'), findsNothing);
@@ -264,13 +269,6 @@ void main() {
     expect(payload!['clearanceMetres'], .1);
     expect(payload!['arrivalRadiusMetres'], .3);
     expect(payload!['route'], hasLength(5));
-    final map = find.byKey(const ValueKey('site-minimap'));
-    await tester.ensureVisible(map);
-    await tester.pumpAndSettle();
-    expect(
-      (tester.widget<CustomPaint>(map).painter! as SitePainter).route,
-      hasLength(5),
-    );
     expect(payload!['walkableFloor'], [
       [0, 0],
       [1, 0],
