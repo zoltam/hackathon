@@ -19,6 +19,25 @@ class RunnerTests: XCTestCase {
     ])
   }
 
+  func testMinimapDropsThePreviousRouteWhenReplanned() throws {
+    let map = RouteMapView(model: try routeSite())
+    map.frame = CGRect(x: 0, y: 0, width: 160, height: 160)
+    map.layoutIfNeeded()
+    func snapshot() -> Data? {
+      map.layer.displayIfNeeded()
+      return UIGraphicsImageRenderer(size: map.bounds.size).image {
+        map.layer.render(in: $0.cgContext)
+      }.pngData()
+    }
+    let original = try XCTUnwrap(snapshot())
+    map.setRoute([])
+    XCTAssertTrue(map.route.isEmpty)
+    XCTAssertNotEqual(try XCTUnwrap(snapshot()), original)
+    map.setRoute([[0, 0], [0, 1], [1, 1]])
+    XCTAssertEqual(map.route, [[0, 0], [0, 1], [1, 1]])
+    XCTAssertNotEqual(try XCTUnwrap(snapshot()), original)
+  }
+
   func testArrivalAcceptsTheApproachButNotOtherNearbyCells() throws {
     let json = #"{"name":"Test","keyControls":false,"width":4,"depth":6,"cellSize":0.1,"start":[1,0],"route":[[1,0],[1,1],[1,2],[1,3],[1,4]],"objects":[]}"#
     let site = try JSONDecoder().decode(WalkSite.self, from: Data(json.utf8))
@@ -72,5 +91,124 @@ class RunnerTests: XCTestCase {
     XCTAssertEqual(observed.x, center.x, accuracy: 0.001)
     XCTAssertEqual(observed.y, center.y, accuracy: 0.001)
     XCTAssertNil(ObstacleTag.center(corners: corners(halfSide: 0.05), frame: frame))
+  }
+
+  private func roomSite() throws -> WalkSite {
+    let json = """
+      {"name":"Equipment Room","sourceSha256":"\(RouteMapView.imageSourceSha256)",
+       "keyControls":false,"width":126,"depth":129,"cellSize":0.1,
+       "start":[58,65],"route":[[58,65],[73,65],[73,81]],"objects":[]}
+      """
+    return try JSONDecoder().decode(WalkSite.self, from: Data(json.utf8))
+  }
+
+  func testPNGMapKeepsReviewedStartAndServiceAlignedAtBothSizes() throws {
+    let image = UIGraphicsImageRenderer(size: CGSize(width: 240, height: 200)).image { _ in
+      UIColor.brown.setFill()
+      UIBezierPath(rect: CGRect(x: 0, y: 0, width: 240, height: 200)).fill()
+    }
+    let map = RouteMapView(model: try roomSite(), image: image)
+    XCTAssertNotNil(map.mapImage)
+    for size in [CGSize(width: 160, height: 160), CGSize(width: 360, height: 600)] {
+      map.frame = CGRect(origin: .zero, size: size)
+      let region = RouteMapView.imageWorldBounds
+      let a = map.mapPoint(x: Float(region.minX), z: Float(region.minY))
+      let b = map.mapPoint(x: Float(region.maxX), z: Float(region.maxY))
+      let start = map.mapPoint(x: 5.85, z: 6.55)
+      let service = map.mapPoint(x: 7.35, z: 8.15)
+      XCTAssertEqual((b.x - a.x) / (b.y - a.y), 1.2, accuracy: 0.0001)
+      // Reviewed landmarks in the 2400 × 2000 PNG, independent of view size.
+      XCTAssertEqual((start.x - a.x) / (b.x - a.x) * 2400, 1036.578, accuracy: 0.1)
+      XCTAssertEqual((start.y - a.y) / (b.y - a.y) * 2000, 1243.252, accuracy: 0.1)
+      XCTAssertEqual((service.x - a.x) / (b.x - a.x) * 2400, 1412.722, accuracy: 0.1)
+      XCTAssertEqual((service.y - a.y) / (b.y - a.y) * 2000, 1644.473, accuracy: 0.1)
+    }
+    XCTAssertNil(RouteMapView(model: try routeSite(), image: image).mapImage)
+  }
+
+  func testFrameRateDefaultsAndRejectsUnsupportedValues() throws {
+    XCTAssertEqual(try routeSite().renderFramesPerSecond, 30)
+    for (value, expected) in [(15, 15), (60, 60), (0, 30), (1000, 30)] {
+      let json = "{\"name\":\"Test\",\"keyControls\":false,\"framesPerSecond\":\(value),\"width\":3,\"depth\":3,\"cellSize\":1,\"start\":[0,0],\"route\":[],\"objects\":[]}"
+      let site = try JSONDecoder().decode(WalkSite.self, from: Data(json.utf8))
+      XCTAssertEqual(site.renderFramesPerSecond, expected)
+    }
+  }
+
+  func testMapPreservesModelAxesAndScaleWhenExpanded() throws {
+    let map = RouteMapView(model: try routeSite())
+    for size in [CGSize(width: 160, height: 160), CGSize(width: 360, height: 700)] {
+      map.frame = CGRect(origin: .zero, size: size)
+      let origin = map.mapPoint(x: 0, z: 0)
+      let east = map.mapPoint(x: 1, z: 0)
+      let south = map.mapPoint(x: 0, z: 1)
+      XCTAssertGreaterThan(east.x, origin.x)
+      XCTAssertGreaterThan(south.y, origin.y)
+      XCTAssertEqual(east.x - origin.x, south.y - origin.y, accuracy: 0.001)
+      XCTAssertTrue(map.bounds.contains(map.mapPoint(x: 3, z: 3)))
+    }
+  }
+
+  func testMapDoesNotClaimLocationBeforeAlignmentOrAfterTrackingLoss() throws {
+    let map = RouteMapView(model: try routeSite())
+    XCTAssertNil(map.pose)
+    XCTAssertEqual(map.accessibilityValue, "Location unavailable")
+    var pose = matrix_identity_float4x4
+    pose.columns.3 = SIMD4(1.5, 1.5, 2.5, 1)
+    map.setPose(pose)
+    XCTAssertEqual(map.pose?.columns.3, pose.columns.3)
+    XCTAssertNotEqual(map.accessibilityValue, "Location unavailable")
+    map.setPose(nil)
+    XCTAssertNil(map.pose)
+    XCTAssertEqual(map.accessibilityValue, "Location unavailable")
+  }
+
+  func testMapRendersAtCornerAndExpandedSizes() throws {
+    let imageURL = Bundle.main.bundleURL.appendingPathComponent(
+      "Frameworks/App.framework/flutter_assets/assets/valmet/equipment-room-map.png")
+    let image = UIImage(contentsOfFile: imageURL.path)
+    let map = RouteMapView(model: try image == nil ? routeSite() : roomSite(), image: image)
+    var pose = matrix_identity_float4x4
+    pose.columns.3 = image == nil ? SIMD4(0.5, 1.5, 0.5, 1) : SIMD4(5.85, 1.5, 6.55, 1)
+    map.setPose(pose)
+    for size in [CGSize(width: 160, height: 160), CGSize(width: 360, height: 600)] {
+      map.frame = CGRect(origin: .zero, size: size)
+      map.layoutIfNeeded()
+      map.layer.displayIfNeeded()
+      let image = UIGraphicsImageRenderer(size: size).image { map.layer.render(in: $0.cgContext) }
+      let attachment = XCTAttachment(image: image)
+      attachment.name = "Route map \(Int(size.width))"
+      attachment.lifetime = .keepAlways
+      add(attachment)
+    }
+  }
+
+  func testMapTapOpensLargerMapAndKeepsLocationLive() throws {
+    let site = try routeSite()
+    let renderer = try XCTUnwrap(SplatRenderer(data: Data(count: 160), roomSize: SIMD2(3, 3),
+                                              sourceRotation: matrix_identity_float3x3,
+                                              route: site.route.map { site.center($0) }, cellSize: site.cellSize))
+    let controller = WorldWalk(model: site, renderer: renderer, detectorURL: nil, visionMode: .verify)
+    let window = UIWindow(frame: UIScreen.main.bounds)
+    window.rootViewController = controller
+    window.makeKeyAndVisible()
+    defer { window.isHidden = true }
+    let corner = try XCTUnwrap(controller.view.subviews.compactMap { $0 as? RouteMapView }.first)
+    renderer.view.isHidden = false
+    var pose = matrix_identity_float4x4
+    pose.columns.3 = SIMD4(0.5, 1.5, 0.5, 1)
+    renderer.onFrameReady?(pose, matrix_identity_float4x4, renderer.view.bounds.size)
+    corner.sendActions(for: .touchUpInside)
+    let navigation = try XCTUnwrap(controller.presentedViewController as? UINavigationController)
+    let page = try XCTUnwrap(navigation.topViewController)
+    let expanded = try XCTUnwrap(page.view.subviews.compactMap { $0 as? RouteMapView }.first)
+    navigation.view.layoutIfNeeded()
+    page.view.layoutIfNeeded()
+    XCTAssertGreaterThan(expanded.bounds.width, corner.bounds.width)
+    XCTAssertEqual(expanded.pose?.columns.3, pose.columns.3)
+    pose.columns.3 = SIMD4(1.5, 1.5, 1.5, 1)
+    renderer.onFrameReady?(pose, matrix_identity_float4x4, renderer.view.bounds.size)
+    XCTAssertEqual(expanded.pose?.columns.3, pose.columns.3)
+    XCTAssertNotNil(page.navigationItem.rightBarButtonItem)
   }
 }

@@ -31,12 +31,16 @@ import UIKit
                                          roomSize: SIMD2(Float(model.width), Float(model.depth)) * model.cellSize,
                                          sourceRotation: model.sourceRotation,
                                          route: model.route.map { model.center($0) },
-                                         cellSize: model.cellSize, obstacleEnabled: visionMode == .obstacle || model.obstacleDemo == true) else {
+                                         cellSize: model.cellSize, obstacleEnabled: visionMode == .obstacle || model.obstacleDemo == true,
+                                         framesPerSecond: model.renderFramesPerSecond) else {
         return result(FlutterError(code: "metal", message: "Could not start the 3D renderer.", details: nil))
       }
       let detectorKey = registrar.lookupKey(forAsset: "assets/valmet/equipment-detector.mlmodel")
       let detectorURL = Bundle.main.url(forResource: detectorKey, withExtension: nil)
-      let camera = WorldWalk(model: model, renderer: renderer, detectorURL: detectorURL, visionMode: visionMode)
+      let mapKey = registrar.lookupKey(forAsset: "assets/valmet/equipment-room-map.png")
+      let mapImage = Bundle.main.path(forResource: mapKey, ofType: nil).flatMap { UIImage(contentsOfFile: $0) }
+      let camera = WorldWalk(model: model, renderer: renderer, detectorURL: detectorURL,
+                             visionMode: visionMode, mapImage: mapImage)
       camera.replanRoute = { request, completion in
         channel.invokeMethod("replanServiceRoute", arguments: request, result: completion)
       }

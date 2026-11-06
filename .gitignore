@@ -49,5 +49,6 @@ app.*.map.json
 !/assets/valmet/.gitkeep
 !/assets/valmet/site.json
 !/assets/valmet/equipment-detector.mlmodel
+!/assets/valmet/equipment-room-map.png
 
 /sources/valmet/

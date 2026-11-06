@@ -55,6 +55,7 @@ class Site {
 
   Site._(Map<String, dynamic> json)
     : name = json['name'] as String,
+      sourceSha256 = json['sourceSha256'] as String?,
       width = json['width'] as int,
       depth = json['depth'] as int,
       cellSize = (json['cellSize'] as num).toDouble(),
@@ -73,6 +74,7 @@ class Site {
   }
 
   final String name;
+  final String? sourceSha256;
   final int width, depth;
   final double cellSize;
   final List<dynamic>? originShift, shRotation;

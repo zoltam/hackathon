@@ -9,6 +9,59 @@ import 'package:valmet_field_app/main.dart';
 import 'package:valmet_field_app/site.dart';
 
 void main() {
+  testWidgets('passes the selected frame rate to the 3D viewer', (
+    tester,
+  ) async {
+    final messenger = tester.binding.defaultBinaryMessenger;
+    messenger.setMockMessageHandler('flutter/assets', (_) async => null);
+    addTearDown(() => messenger.setMockMessageHandler('flutter/assets', null));
+    rootBundle.evict('assets/valmet/asset-data.json');
+    addTearDown(() => rootBundle.evict('assets/valmet/asset-data.json'));
+    final roomJson =
+        jsonDecode(File('test/fixtures/site.json').readAsStringSync())
+            as Map<String, dynamic>;
+    roomJson['sourceSha256'] = 'test-scan-sha256';
+    final room = Site.fromJson(jsonEncode(roomJson));
+    final rates = <int>[];
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SiteSimulation(
+            site: room,
+            loadAssetData: () async => null,
+            openNative: (_, [data]) async {
+              expect(
+                (jsonDecode(data!) as Map<String, dynamic>)['sourceSha256'],
+                'test-scan-sha256',
+              );
+              rates.add(
+                (jsonDecode(data) as Map<String, dynamic>)['framesPerSecond']
+                    as int,
+              );
+            },
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final open = find.text('Walk inside the 3D model');
+    await tester.scrollUntilVisible(open, 200);
+    await tester.tap(open);
+    await tester.pumpAndSettle();
+    for (final rate in [15, 60]) {
+      final dropdown = find.byType(DropdownButtonFormField<int>);
+      await tester.scrollUntilVisible(dropdown, -200);
+      await tester.tap(dropdown);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('$rate FPS').last);
+      await tester.pumpAndSettle();
+      await tester.scrollUntilVisible(open, 200);
+      await tester.tap(open);
+      await tester.pumpAndSettle();
+    }
+    expect(rates, [30, 15, 60]);
+  });
+
   testWidgets('opens with a route and the first-person walkthrough', (
     tester,
   ) async {
@@ -18,6 +71,7 @@ void main() {
     const channel = MethodChannel('valmet/field');
 
     final messages = <bool>[];
+    rootBundle.evict('assets/valmet/asset-data.json');
     final messenger = tester.binding.defaultBinaryMessenger;
     messenger.setMockMessageHandler('flutter/assets', (_) async => null);
     addTearDown(() => messenger.setMockMessageHandler('flutter/assets', null));
@@ -58,9 +112,14 @@ void main() {
     );
     await tester.pumpWidget(ValmetApp(site: site));
     await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+      find.text('15.8 m · route with 0.20 m clearance'),
+      200,
+    );
+    await tester.pumpAndSettle();
     expect(find.text('15.8 m · route with 0.20 m clearance'), findsOneWidget);
     final map = find.byKey(const ValueKey('site-minimap'));
-    await tester.ensureVisible(map);
+    await tester.scrollUntilVisible(map, 200);
     await tester.pumpAndSettle();
     final painter = tester.widget<CustomPaint>(map).painter! as SitePainter;
     expect(painter.site, same(site));

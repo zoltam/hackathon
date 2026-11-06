@@ -39,6 +39,16 @@ camera clearance changes.
 
 Enable **Forward and backward controls** under **Settings** to move with the two on-screen buttons or ↑/↓. Turn by rotating the phone. This mode still uses ARKit to track orientation.
 
+Choose **3D frame rate** under **Settings** before opening the viewer: 15, 30
+(default), or 60 FPS. This is a target; the device may render more slowly.
+
+The 3D viewer's top-right map shows the room PNG, your blue position/heading,
+the active mint route, and the gold destination. Tap it to enlarge; **Done**
+returns to the viewer. Both map sizes follow obstacle-driven replanning.
+Position appears after alignment and disappears if tracking is unavailable.
+The bundled PNG is calibrated to the reviewed Equipment Room scan; a vector
+map is used if the scan differs or the image cannot be loaded.
+
 On an ARKit-capable iPhone, select a service target and tap **Walk inside the 3D model**. Stand at the physical spot that should correspond to the virtual start, hold the phone upright and face the direction of the first route segment. The app assumes an initial phone height of 1.50 metres and uses the phone’s angle for the view. Tap **Set start and direction**. ARKit drives the virtual camera with the phone's rotation and translation, with one physical metre equal to one model metre. **Show camera** switches back to the live view while tracking continues. Use **Reset alignment** to choose a new physical start.
 
 The importer requires the complete Equipment Room scan. It registers the scan against the reviewed equipment frame and renders all 1,676,481 splats with their anisotropic covariance, opacity, and degree-3 view-dependent color. The navigation grid comes from observed floor and obstacle geometry. A neutral backing surface fills missing floor pixels and leaves walkability unchanged. Distances assume the reviewed scene uses metres. Keep the organizer's scan and derived assets local unless public redistribution is authorized.

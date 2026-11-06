@@ -63,9 +63,11 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
   private var positions: [SIMD4<Float>]
   private var pendingFrame: (pose: simd_float4x4, projection: simd_float4x4, timestamp: CFTimeInterval)?
   private var lastDraw: CFTimeInterval = 0
+  private let framesPerSecond: Int
 
   init?(data: Data, roomSize: SIMD2<Float>, sourceRotation: simd_float3x3,
-        route: [SIMD3<Float>], cellSize: Float, obstacleEnabled: Bool = false) {
+        route: [SIMD3<Float>], cellSize: Float, obstacleEnabled: Bool = false, framesPerSecond: Int = 30) {
+    self.framesPerSecond = [15, 30, 60].contains(framesPerSecond) ? framesPerSecond : 30
     guard let device = MTLCreateSystemDefaultDevice(), let queue = device.makeCommandQueue(),
           let library = try? device.makeLibrary(source: Self.shader, options: nil) else { return nil }
     let format = MTLPixelFormat.bgra8Unorm
@@ -172,7 +174,8 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
 
   func render(pose: simd_float4x4, projection: simd_float4x4) {
     let now = CACurrentMediaTime()
-    guard now - lastDraw >= 1.0 / 35 else { return }
+    // Allow 1 ms of frame-clock jitter to avoid skipping every other AR frame.
+    guard now - lastDraw >= 1.0 / Double(framesPerSecond) - 0.001 else { return }
     lastDraw = now
     pendingFrame = (pose, projection, now)
     view.draw()

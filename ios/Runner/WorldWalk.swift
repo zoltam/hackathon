@@ -34,6 +34,13 @@ struct WalkSite: Decodable {
 
   let name: String
   let hasWorkbook: Bool?
+  let sourceSha256: String?
+  let framesPerSecond: Int?
+
+  var renderFramesPerSecond: Int {
+    let fps = framesPerSecond ?? 30
+    return [15, 30, 60].contains(fps) ? fps : 30
+  }
   let keyControls: Bool
   let obstacleDemo: Bool?
   let moved: Bool?
@@ -94,6 +101,166 @@ struct WorldAlignment {
   }
 }
 
+final class RouteMapView: UIControl {
+  let model: WalkSite
+  let mapImage: UIImage?
+  private(set) var route: [[Int]]
+  // Same orthographic crop/aspect correction as the reviewed 2400 × 2000 room PNG.
+  static let imageWorldBounds = CGRect(x: 1.7163, y: 1.5921166667, width: 9.5708, height: 7.9756666667)
+  static let imageSourceSha256 = "83d8c7d99316c08c9719cfc2c5a6b9d1903b89847780e2458adc662c79f32955"
+  private(set) var pose: simd_float4x4?
+  private var baseImage: UIImage?
+
+  init(model: WalkSite, image: UIImage? = nil) {
+    self.model = model
+    route = model.route
+    mapImage = model.sourceSha256 == Self.imageSourceSha256 ? image : nil
+    super.init(frame: .zero)
+    backgroundColor = UIColor.black.withAlphaComponent(0.85)
+    layer.cornerRadius = 12
+    clipsToBounds = true
+    isAccessibilityElement = true
+    accessibilityLabel = "Route map"
+    accessibilityIdentifier = "route-map"
+    accessibilityTraits = .button
+    accessibilityHint = "Opens a larger map"
+    setPose(nil)
+  }
+
+  required init?(coder: NSCoder) { nil }
+
+  func setRoute(_ route: [[Int]]) {
+    self.route = route
+    baseImage = nil
+    setNeedsDisplay()
+  }
+
+  func setPose(_ pose: simd_float4x4?) {
+    self.pose = pose
+    accessibilityValue = pose.map {
+      String(format: "Position %.1f, %.1f metres", $0.columns.3.x, $0.columns.3.z)
+    } ?? "Location unavailable"
+    setNeedsDisplay()
+  }
+
+  func mapPoint(x: Float, z: Float) -> CGPoint {
+    let region = worldBounds
+    let scale = max(0, min((bounds.width - 24) / region.width, (bounds.height - 60) / region.height))
+    return CGPoint(x: (bounds.width - region.width * scale) / 2 + (CGFloat(x) - region.minX) * scale,
+                   y: 30 + (bounds.height - 60 - region.height * scale) / 2 + (CGFloat(z) - region.minY) * scale)
+  }
+
+  private var worldBounds: CGRect {
+    mapImage == nil ? CGRect(x: 0, y: 0, width: CGFloat(model.width) * CGFloat(model.cellSize),
+                            height: CGFloat(model.depth) * CGFloat(model.cellSize)) : Self.imageWorldBounds
+  }
+
+  private var imageRect: CGRect {
+    let region = worldBounds
+    let a = mapPoint(x: Float(region.minX), z: Float(region.minY))
+    let b = mapPoint(x: Float(region.maxX), z: Float(region.maxY))
+    return CGRect(x: a.x, y: a.y, width: b.x - a.x, height: b.y - a.y)
+  }
+
+  override func layoutSubviews() {
+    super.layoutSubviews()
+    baseImage = nil
+    setNeedsDisplay()
+  }
+
+  override func draw(_ rect: CGRect) {
+    guard bounds.width > 24, bounds.height > 60 else { return }
+    if baseImage == nil {
+      baseImage = UIGraphicsImageRenderer(size: bounds.size).image { context in
+        context.cgContext.clip(to: imageRect)
+        func cells(_ cells: [[Int]], color: UIColor) {
+          let path = UIBezierPath()
+          for cell in cells {
+            let a = mapPoint(x: Float(cell[0]) * model.cellSize, z: Float(cell[1]) * model.cellSize)
+            let b = mapPoint(x: Float(cell[0] + 1) * model.cellSize, z: Float(cell[1] + 1) * model.cellSize)
+            path.append(UIBezierPath(rect: CGRect(x: a.x, y: a.y, width: b.x - a.x, height: b.y - a.y)))
+          }
+          color.setFill()
+          path.fill()
+        }
+        if let mapImage {
+          mapImage.draw(in: imageRect)
+        } else {
+          cells(model.floor ?? model.walkableFloor ?? [], color: UIColor(white: 0.28, alpha: 1))
+          cells(model.walkableFloor ?? [], color: UIColor(white: 0.48, alpha: 1))
+          for object in model.objects {
+            let footprint = object.cells ?? (object.x..<(object.x + object.width)).flatMap { x in
+              (object.z..<(object.z + object.depth)).map { [x, $0] }
+            }
+            cells(footprint, color: .darkGray)
+          }
+        }
+        let routePath = UIBezierPath()
+        for (index, cell) in route.enumerated() {
+          let center = model.center(cell)
+          let point = mapPoint(x: center.x, z: center.z)
+          if index == 0 { routePath.move(to: point) } else { routePath.addLine(to: point) }
+        }
+        UIColor.systemMint.setStroke()
+        routePath.lineWidth = 3
+        routePath.lineCapStyle = .round
+        routePath.lineJoinStyle = .round
+        routePath.stroke()
+        let start = model.center(model.start)
+        let startPoint = mapPoint(x: start.x, z: start.z)
+        UIColor.systemBlue.setStroke()
+        let ring = UIBezierPath(ovalIn: CGRect(x: startPoint.x - 4, y: startPoint.y - 4, width: 8, height: 8))
+        ring.lineWidth = 2
+        ring.stroke()
+        let destination: SIMD3<Float>?
+        if let last = route.last {
+          destination = model.center(last)
+        } else if let target = model.target, model.objects.indices.contains(target) {
+          let object = model.objects[target]
+          if let service = object.service, service.count == 2 {
+            destination = model.center(service)
+          } else {
+            destination = SIMD3((Float(object.x) + Float(object.width) / 2) * model.cellSize,
+                                0, (Float(object.z) + Float(object.depth) / 2) * model.cellSize)
+          }
+        } else {
+          destination = nil
+        }
+        if let end = destination {
+          let point = mapPoint(x: end.x, z: end.z)
+          UIColor.systemYellow.setFill()
+          UIBezierPath(ovalIn: CGRect(x: point.x - 5, y: point.y - 5, width: 10, height: 10)).fill()
+        }
+      }
+    }
+    baseImage?.draw(in: bounds)
+    let attributes: [NSAttributedString.Key: Any] = [
+      .font: UIFont.preferredFont(forTextStyle: .caption1), .foregroundColor: UIColor.white,
+    ]
+    ("Map ↗" as NSString).draw(at: CGPoint(x: 12, y: 8), withAttributes: attributes)
+    let outside = pose.map { !worldBounds.contains(CGPoint(x: CGFloat($0.columns.3.x), y: CGFloat($0.columns.3.z))) } ?? false
+    let status = pose == nil ? "Location unavailable" : outside ? "Outside map" : route.isEmpty ? "No route" : "You · Route · Target"
+    (status as NSString).draw(at: CGPoint(x: 12, y: bounds.height - 23), withAttributes: attributes)
+    guard let pose, !outside, let context = UIGraphicsGetCurrentContext() else { return }
+    let point = mapPoint(x: pose.columns.3.x, z: pose.columns.3.z)
+    context.saveGState()
+    context.translateBy(x: point.x, y: point.y)
+    context.rotate(by: CGFloat(atan2(-pose.columns.2.x, pose.columns.2.z)))
+    let arrow = UIBezierPath()
+    arrow.move(to: CGPoint(x: 0, y: -10))
+    arrow.addLine(to: CGPoint(x: 7, y: 7))
+    arrow.addLine(to: CGPoint(x: 0, y: 4))
+    arrow.addLine(to: CGPoint(x: -7, y: 7))
+    arrow.close()
+    UIColor.systemBlue.setFill()
+    UIColor.white.setStroke()
+    arrow.lineWidth = 2
+    arrow.fill()
+    arrow.stroke()
+    context.restoreGState()
+  }
+}
+
 final class WorldWalk: UIViewController, ARSessionDelegate {
   enum VisionMode { case normal, verify, benchmark, journey, obstacle }
 
@@ -110,12 +277,21 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
   private let nearbyStatus = UILabel()
   private let visionMode: VisionMode
   private let detectorURL: URL?
+  private let mapImage: UIImage?
+  private lazy var routeMap = RouteMapView(model: model, image: mapImage)
+  private weak var expandedMap: RouteMapView?
+  private var panelTrailing: NSLayoutConstraint?
   private var verificationFrames = 0
   private var journeyStart: CFTimeInterval?
   private var journeyConfirmedTarget = false
   private var journeyNearbyMax = (frames: 0, mapped: 0)
   var replanRoute: (([String: Any], @escaping (Any?) -> Void) -> Void)?
-  private lazy var activeRoute = model.route
+  private lazy var activeRoute = model.route {
+    didSet {
+      routeMap.setRoute(activeRoute)
+      expandedMap?.setRoute(activeRoute)
+    }
+  }
   private var obstacleStart: CFTimeInterval?
   private var obstaclePlacedAt: CFTimeInterval?
   private var previousObstacleCenter: SIMD2<Float>?
@@ -164,10 +340,12 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
 
   override var canBecomeFirstResponder: Bool { model.keyControls }
 
-  init(model: WalkSite, renderer: SplatRenderer, detectorURL: URL?, visionMode: VisionMode = .normal) {
+  init(model: WalkSite, renderer: SplatRenderer, detectorURL: URL?, visionMode: VisionMode = .normal,
+       mapImage: UIImage? = nil) {
     self.model = model
     self.renderer = renderer
     self.detectorURL = detectorURL
+    self.mapImage = mapImage
     self.visionMode = visionMode
     super.init(nibName: nil, bundle: nil)
   }
@@ -212,6 +390,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
       guard let self, self.view.window != nil, !self.virtual.isHidden,
             self.virtual.bounds.size == size else { return }
       self.updateDetectionPose(pose)
+      if self.visionMode != .normal { self.updateMap(pose) }
       self.updateNearbyEquipment(at: pose.columns.3, viewProjection: projection * pose.inverse)
     }
     nearbyStatus.font = .preferredFont(forTextStyle: .caption1)
@@ -299,12 +478,28 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     panel.translatesAutoresizingMaskIntoConstraints = false
     view.addSubview(panel)
     controlPanel = panel
+    let trailing = panel.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -12)
+    panelTrailing = trailing
     NSLayoutConstraint.activate([
       panel.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 12),
-      panel.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -12),
+      trailing,
       panel.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -10),
     ])
+    routeMap.translatesAutoresizingMaskIntoConstraints = false
+    routeMap.addTarget(self, action: #selector(showMap), for: .touchUpInside)
+    view.addSubview(routeMap)
+    NSLayoutConstraint.activate([
+      routeMap.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 12),
+      routeMap.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -12),
+      routeMap.widthAnchor.constraint(equalToConstant: 160),
+      routeMap.heightAnchor.constraint(equalTo: routeMap.widthAnchor),
+    ])
     updateDisplay("Hold the phone steady while tracking starts.")
+  }
+
+  override func viewWillLayoutSubviews() {
+    super.viewWillLayoutSubviews()
+    panelTrailing?.constant = view.bounds.width > view.bounds.height ? -184 : -12
   }
 
   override func viewDidAppear(_ animated: Bool) {
@@ -1093,6 +1288,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
       let projection = frame.camera.projectionMatrix(for: orientation, viewportSize: size, zNear: 0.04, zFar: 40)
       renderer.render(pose: pose, projection: projection)
     }
+    updateMap(pose)
     updateWalkStatus(at: pose.columns.3)
   }
 
@@ -1149,6 +1345,38 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     present(UINavigationController(rootViewController: report), animated: true)
   }
 
+  private func updateMap(_ pose: simd_float4x4?) {
+    routeMap.setPose(pose)
+    expandedMap?.setPose(pose)
+  }
+
+  @objc private func showMap() {
+    guard presentedViewController == nil else { return }
+    let page = UIViewController()
+    page.title = model.name
+    page.view.backgroundColor = .black
+    let map = RouteMapView(model: model, image: mapImage)
+    map.accessibilityTraits = .image
+    map.accessibilityHint = nil
+    map.setRoute(activeRoute)
+    map.setPose(routeMap.pose)
+    expandedMap = map
+    map.translatesAutoresizingMaskIntoConstraints = false
+    page.view.addSubview(map)
+    NSLayoutConstraint.activate([
+      map.leadingAnchor.constraint(equalTo: page.view.safeAreaLayoutGuide.leadingAnchor, constant: 12),
+      map.trailingAnchor.constraint(equalTo: page.view.safeAreaLayoutGuide.trailingAnchor, constant: -12),
+      map.topAnchor.constraint(equalTo: page.view.safeAreaLayoutGuide.topAnchor, constant: 12),
+      map.bottomAnchor.constraint(equalTo: page.view.safeAreaLayoutGuide.bottomAnchor, constant: -12),
+    ])
+    page.navigationItem.rightBarButtonItem = UIBarButtonItem(systemItem: .done,
+      primaryAction: UIAction { [weak self] _ in self?.dismiss(animated: true) })
+    let navigation = UINavigationController(rootViewController: page)
+    navigation.sheetPresentationController?.detents = [.large()]
+    navigation.sheetPresentationController?.prefersGrabberVisible = true
+    present(navigation, animated: true)
+  }
+
   func sessionWasInterrupted(_ session: ARSession) {
     ready = false
     updateDisplay("Tracking interrupted. Return to the original area.")
@@ -1163,6 +1391,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
   }
 
   private func updateDisplay(_ text: String) {
+    if visionMode == .normal && (!ready || alignment == nil) { updateMap(nil) }
     let visible = showModel && (visionMode == .journey || visionMode == .obstacle || (ready && alignment != nil))
     virtual.isHidden = !visible
     movementControls?.isHidden = !visible
