@@ -153,6 +153,21 @@ The selected local export is `build/valmet-equipment-room/candidate/equipment-de
 
 On iPhone 15 (iOS 26.5), the scripted 15-second complete-scan benchmark processed 449 GPU frames (29.93 FPS) and 29 predictions (5 ms median, 8 ms p95). The first detector on the same scan delivered 29.47 FPS and 6/7 ms median/p95. The selected model returned one red-pump box in each of six scripted samples that showed the pump and no detection in the remaining sample. This checks the renderer-to-model path; a person walking the full route is a separate acceptance check.
 
+## Follow-up training on walkable viewpoints
+
+`/tmp/valmet-pump-references --route-dataset` renders 720 × 1560 native portrait images at walkable cell centers. Each cell belongs to one split. The images vary pitch, yaw and phone height around the pump, with all visible catalog assets labeled from scene masks. We added 192 images to the previous 396 training images and 78 images to the previous 88 validation images by combining the image files and annotation indices within each split. The 69 new test images stayed separate. All views represent the same simulated room.
+
+We trained a new ObjectPrint detector head for 400 steps. Step 200 was selected by target F1 on the new validation views, subject to the original validation guard of at most 3.5 percentage points of aggregate F1 loss and one fewer correct pump detection. Its new validation result was 76/78 pump detections and seven false pump detections.
+
+| Test split | Previous aggregate F1 | New aggregate F1 | Previous pump | New pump |
+| --- | ---: | ---: | ---: | ---: |
+| New walkable viewpoints, 69 images | 36.92% | 77.02% | 14/69 | 66/69 |
+| Original viewpoints, 88 images | 90.67% | 88.08% | 11/18 | 10/18 |
+
+False pump detections rose from 8 to 10 on the new split and from 2 to 4 on the original split. The new model is optimized for walkable portrait viewpoints. On iPhone 15, it returned a single pump box in each of the six scripted pump views and no detections in the remaining view. The 15-second benchmark measured 29.87 FPS with 29 predictions, 6 ms median inference and 7 ms p95.
+
+Local export `build/valmet-equipment-room-r2/candidate/equipment-detector.mlmodel` SHA-256 `3893f04a516ad88cbf24a309cfa6f7e9c5e4c896f8930faed43f26ce73b05194`. The installed app bundles the same bytes. The training log is `/tmp/valmet-equipment-room-r2-training.log`. Pass `--report-label=boiler-room:red-circulation-pump` to the evaluation tool to report pump false positives.
+
 ## Scene and equipment handoff
 
 The current builder validates and renders all 1,676,481 Gaussians in Equipment Room.ply. Similarity registration to the reviewed scene yielded a 2.32 cm median nearest-neighbor distance. The 51 × 52 grid uses 0.25 model units per cell and has 114 walkable cells connected to the pump approach. The imported route from the entrance to the pump is 11 steps. Distances assume one reviewed scene unit is one metre.

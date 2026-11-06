@@ -45,8 +45,9 @@ let splats = data.withUnsafeBytes { device.makeBuffer(bytes: $0.baseAddress!, le
 let count = data.count / stride
 let rows = splats.contents()
 let highQuality = CommandLine.arguments.contains("--detection-dataset-hq")
-let width = highQuality ? 1440 : 820
-let height = highQuality ? 960 : 550
+let routeDataset = CommandLine.arguments.contains("--route-dataset")
+let width = routeDataset ? 720 : (highQuality ? 1440 : 820)
+let height = routeDataset ? 1560 : (highQuality ? 960 : 550)
 let textureDescriptor = MTLTextureDescriptor.texture2DDescriptor(
   pixelFormat: .rgba8Unorm, width: width, height: height, mipmapped: false
 )
@@ -63,6 +64,7 @@ struct Site: Decodable {
   struct Object: Decodable { let objectId: String; let bounds: [[Float]] }
   let width, depth: Int
   let cellSize: Float
+  let floor: [SIMD2<Int>]?
   let originShift: SIMD3<Float>?
   let shRotation: [SIMD3<Float>]?
   let objects: [Object]
@@ -74,7 +76,7 @@ let evaluateCatalog = CommandLine.arguments.contains("--evaluate-catalog")
 let origin = site.originShift ?? .zero
 let sourceRotation = site.shRotation.map { simd_float3x3(rows: $0) } ?? matrix_identity_float3x3
 let aim = origin + SIMD3<Float>(5.943, 1.164, 2.447)
-let near: Float = 0.04, far: Float = 40, zoom: Float = 1.35
+let near: Float = 0.04, far: Float = 40, zoom: Float = routeDataset ? 1.4 : 1.35
 let projection = simd_float4x4(columns: (
   SIMD4(zoom * Float(height) / Float(width), 0, 0, 0), SIMD4(0, zoom, 0, 0),
   SIMD4(0, 0, far / (near - far), -1), SIMD4(0, 0, near * far / (near - far), 0)
@@ -201,7 +203,7 @@ let trainingEyes: [(String, SIMD3<Float>)] = [
   ("a", SIMD3(5.375, 1.50, 1.875)), ("b", SIMD3(5.125, 1.50, 1.875)),
   ("e", SIMD3(5.420, 1.53, 1.960)),
 ]
-let references = try trainingEyes.map { name, eye in
+let references = try (routeDataset ? [] : trainingEyes).map { name, eye in
   let image = render(eye: eye, aim: aim, bounds: target.bounds)
   try image.representation(using: .png, properties: [:])!
     .write(to: assets.appendingPathComponent("pump-reference-\(name).png"), options: .atomic)
@@ -299,7 +301,7 @@ if evaluateCatalog {
   print("\(correct)/\(rows.count) correct, \(wrong) wrong accepts, \(rows.count-correct-wrong) unknown")
 }
 
-if highQuality || CommandLine.arguments.contains("--detection-dataset") {
+if !routeDataset && (highQuality || CommandLine.arguments.contains("--detection-dataset")) {
   let output = highQuality ? "build/valmet-detection-hq" : "build/valmet-detection"
   let directory = CommandLine.arguments.first { $0.hasPrefix("--output=") }
     .map { URL(fileURLWithPath: String($0.dropFirst("--output=".count))) } ?? root.appendingPathComponent(output)
@@ -333,6 +335,45 @@ if highQuality || CommandLine.arguments.contains("--detection-dataset") {
     let json = try JSONSerialization.data(withJSONObject: index, options: [.prettyPrinted, .sortedKeys])
     try json.write(to: folder.appendingPathComponent("annotations.json"), options: .atomic)
     print("\(split): \(index.count) frames, \(counts.count) labels, \(counts.values.reduce(0,+)) boxes")
+    fflush(stdout)
+  }
+}
+
+if routeDataset {
+  let directory = CommandLine.arguments.first { $0.hasPrefix("--output=") }
+    .map { URL(fileURLWithPath: String($0.dropFirst("--output=".count))) }
+    ?? root.appendingPathComponent("build/valmet-route-detection")
+  guard let floor = site.floor else { fatalError("Route data needs the observed floor grid") }
+  let buffers = annotationBuffers()
+  let targetCenter = center(of: target)
+  for (split, groups) in [("train", [0, 1, 2]), ("validation", [3]), ("test", [4])] {
+    let folder = directory.appendingPathComponent(split)
+    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    var index: [[String: Any]] = []
+    var pumpCount = 0
+    for cell in floor where groups.contains((cell.x + 2 * cell.y) % 5) {
+      let position = (SIMD2(Float(cell.x), Float(cell.y)) + 0.5) * site.cellSize
+      let delta = SIMD2(targetCenter.x, targetCenter.z) - position
+      let distance = simd_length(delta)
+      guard (0.85...4.0).contains(distance) else { continue }
+      let heading = atan2(delta.y, delta.x)
+      for (variant, yaw) in [Float(0), -0.28, 0.28].enumerated() {
+        let eye = SIMD3(position.x, variant == 1 ? 1.65 : 1.50, position.y)
+        let look = SIMD3(eye.x + cos(heading + yaw) * distance,
+                         targetCenter.y + Float(variant - 1) * 0.15,
+                         eye.z + sin(heading + yaw) * distance)
+        var labels: [[String: Any]] = []
+        let frame = render(eye: eye - origin, aim: look, masks: buffers) { labels = $0 }
+        guard !labels.isEmpty else { continue }
+        let name = "route-\(cell.x)-\(cell.y)-\(variant).png"
+        try frame.representation(using: .png, properties: [:])!.write(to: folder.appendingPathComponent(name))
+        index.append(["imagefilename": name, "annotation": labels])
+        if labels.contains(where: { $0["label"] as? String == target.objectId }) { pumpCount += 1 }
+      }
+    }
+    let json = try JSONSerialization.data(withJSONObject: index, options: [.prettyPrinted, .sortedKeys])
+    try json.write(to: folder.appendingPathComponent("annotations.json"), options: .atomic)
+    print("\(split): \(index.count) native portrait frames, \(pumpCount) with pump")
     fflush(stdout)
   }
 }

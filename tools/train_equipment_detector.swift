@@ -94,6 +94,7 @@ let request = VNCoreMLRequest(model: model)
 request.imageCropAndScaleOption = .scaleFill
 var truePositive = 0, falsePositive = 0, falseNegative = 0
 var support: [String: Int] = [:], correct: [String: Int] = [:]
+var incorrect: [String: Int] = [:]
 for image in labels {
   let url = test.appendingPathComponent(image.imagefilename)
   guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
@@ -119,11 +120,15 @@ for image in labels {
       correct[label.identifier, default: 0] += 1
     } else {
       falsePositive += 1
+      incorrect[label.identifier, default: 0] += 1
     }
   }
   falseNegative += image.annotation.count - used.count
 }
 for label in support.keys.sorted() { print("\(label): \(correct[label, default: 0])/\(support[label]!)") }
+if let label = value(for: "--report-label") {
+  print("VALMET_EVAL label=\(label) tp=\(correct[label, default: 0]) fp=\(incorrect[label, default: 0]) support=\(support[label, default: 0])")
+}
 if partialLabels { print("Partial labels: predictions for unannotated classes are ignored.") }
 print("Held-out \(partialLabels ? "partial-camera" : "rendered") \(split) · \(labels.count) frames · TP \(truePositive) FP \(falsePositive) FN \(falseNegative) · IoU ≥ 0.50")
 if truePositive == 0 { exit(1) }
