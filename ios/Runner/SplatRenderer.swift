@@ -208,7 +208,29 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
     out.position = float4(2, 2, 2, 1);
     if (clip.w <= .04) return out;
     float2 ndc = clip.xy / clip.w;
-    if (any(abs(ndc) > 1.7)) return out;
+    // Reject only if even the largest allowed footprint misses the screen.
+    const float maxSigma = max(u.screen.x, u.screen.y) * .06;
+    if (any(abs(ndc) > 1 + 6 * maxSigma / u.screen)) return out;
+
+    const float4x4 m = u.viewProjection;
+    float3 rw = float3(m[0].w, m[1].w, m[2].w);
+    float3 jx = (float3(m[0].x, m[1].x, m[2].x) - ndc.x * rw) * (.5 * u.screen.x / clip.w);
+    float3 jy = (float3(m[0].y, m[1].y, m[2].y) - ndc.y * rw) * (.5 * u.screen.y / clip.w);
+    float3x3 cov = float3x3(float3(s.covA.x, s.covA.y, s.covA.z),
+                           float3(s.covA.y, s.covA.w, s.covB.x),
+                           float3(s.covA.z, s.covB.x, s.covB.y));
+    float a = dot(jx, cov * jx) + .3;
+    float b = dot(jx, cov * jy);
+    float c = dot(jy, cov * jy) + .3;
+    float halfTrace = .5 * (a + c);
+    float delta = length(float2(.5 * (a - c), b));
+    float l1 = halfTrace + delta, l2 = max(.25, halfTrace - delta);
+    float angle = .5 * atan2(2 * b, a - c);
+    float2 direction = float2(cos(angle), sin(angle));
+    float2 major = direction * min(sqrt(l1), maxSigma);
+    float2 minor = float2(-direction.y, direction.x) * min(sqrt(l2), maxSigma);
+    float2 extent = 6 * sqrt(major * major + minor * minor) / u.screen;
+    if (any(abs(ndc) > 1 + extent)) return out;
 
     // EGS coefficients are in the original PLY frame (x, -y, -z).
     // Real spherical harmonics in the standard 3DGS degree-3 order.
@@ -228,23 +250,8 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
       rgb += float3(s.sh[i], s.sh[15+i], s.sh[30+i]) * shBasis[i];
     }
     out.color = float4(saturate(rgb), s.centerAlpha.w);
-    const float4x4 m = u.viewProjection;
-    float3 rw = float3(m[0].w, m[1].w, m[2].w);
-    float3 jx = (float3(m[0].x, m[1].x, m[2].x) - ndc.x * rw) * (.5 * u.screen.x / clip.w);
-    float3 jy = (float3(m[0].y, m[1].y, m[2].y) - ndc.y * rw) * (.5 * u.screen.y / clip.w);
-    float3x3 cov = float3x3(float3(s.covA.x, s.covA.y, s.covA.z),
-                           float3(s.covA.y, s.covA.w, s.covB.x),
-                           float3(s.covA.z, s.covB.x, s.covB.y));
-    float a = dot(jx, cov * jx) + .3;
-    float b = dot(jx, cov * jy);
-    float c = dot(jy, cov * jy) + .3;
-    float halfTrace = .5 * (a + c);
-    float delta = length(float2(.5 * (a - c), b));
-    float l1 = halfTrace + delta, l2 = max(.25, halfTrace - delta);
-    float angle = .5 * atan2(2 * b, a - c);
-    float2 direction = float2(cos(angle), sin(angle));
-    float2 offset = direction * (uv.x * min(sqrt(l1), 48.0)) +
-        float2(-direction.y, direction.x) * (uv.y * min(sqrt(l2), 48.0));
+
+    float2 offset = major * uv.x + minor * uv.y;
     out.position = float4(clip.xy + 2 * offset * clip.w / u.screen, clip.zw);
     return out;
   }
