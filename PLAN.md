@@ -168,6 +168,21 @@ False pump detections rose from 8 to 10 on the new split and from 2 to 4 on the 
 
 Local export `build/valmet-equipment-room-r2/candidate/equipment-detector.mlmodel` SHA-256 `3893f04a516ad88cbf24a309cfa6f7e9c5e4c896f8930faed43f26ce73b05194`. The installed app bundles the same bytes. The training log is `/tmp/valmet-equipment-room-r2-training.log`. Pass `--report-label=boiler-room:red-circulation-pump` to the evaluation tool to report pump false positives.
 
+## Follow-up training for both viewpoint sets
+
+`/tmp/valmet-pump-references --legacy-augmentation` adds 132 lossless 1440 × 960 training renders with shifted camera poses and clipped pump views. Append these images and annotations to the previous training split for 720 images total, including all 192 walking views. Validation and test splits stayed fixed. Training and each test split cover all 11 mapped devices.
+
+The 600-step export had the best original-view validation F1 (90.31%). It detected the walking pump in 74/78 validation views with one false pump detection, compared with 76/78 and seven false detections for the previous model. We selected it using the pump F1 fallback within two correct validation detections. The separate release test required higher original-view F1 and no loss of correct pump detections or increase in false pump detections in either test split.
+
+| Test split | Previous aggregate F1 | New aggregate F1 | Previous pump | New pump | False pump detections, previous and new |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Original viewpoints, 88 images | 88.08% | 91.54% | 10/18 | 13/18 | 4 and 2 |
+| Walking viewpoints, 69 images | 77.02% | 81.43% | 66/69 | 67/69 | 10 and 3 |
+
+Correct detections increased for eight of 11 devices in the original views and stayed equal for two. The wall pump fell from 45/51 to 43/51. Correct detections increased for nine of 11 devices in the walking views and stayed equal for two.
+
+The local export is `build/valmet-equipment-room-r3/candidate/equipment-detector.mlmodel`, SHA-256 `7114588a3fcd9477ef93f72039db10cd89c14305140f3abb907abc2e25fdb239`. It matches the bytes in the iPhone build. On iPhone 15, all six scripted pump views returned the target, one with a duplicate box. The seventh view returned no detections. The 15-second benchmark measured 29.67 FPS, 5 ms median inference and 7 ms p95 (29 predictions, reported thermal state 3).
+
 ## Scene and equipment handoff
 
 The current builder validates and renders all 1,676,481 Gaussians in Equipment Room.ply. Similarity registration to the reviewed scene yielded a 2.32 cm median nearest-neighbor distance. The 51 × 52 grid uses 0.25 model units per cell and has 114 walkable cells connected to the pump approach. The imported route from the entrance to the pump is 11 steps. Distances assume one reviewed scene unit is one metre.

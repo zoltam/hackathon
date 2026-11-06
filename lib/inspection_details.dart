@@ -49,7 +49,7 @@ class _InspectionDetailsState extends State<InspectionDetails> {
               Text('Workbook snapshot: ${diagnosis.updatedAt}'),
               if (!widget.arrived)
                 const Text(
-                  'Complete the route preview to review the inspection evidence.',
+                  'Reach the service position in the 3D model to review inspection evidence.',
                 ),
               if (widget.arrived) ...[
                 const SizedBox(height: 12),
