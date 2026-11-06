@@ -51,7 +51,6 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
   private let virtual = SCNView()
   private let eye = SCNNode()
   private let message = UILabel()
-  private let aim = UILabel()
   private let align = UIButton(type: .system)
   private let toggle = UIButton(type: .system)
   private var alignment: WorldAlignment?
@@ -89,12 +88,6 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     virtual.antialiasingMode = .multisampling2X
     virtual.isPlaying = true
 
-    aim.text = "+"
-    aim.textColor = .white
-    aim.font = .boldSystemFont(ofSize: 36)
-    aim.translatesAutoresizingMaskIntoConstraints = false
-    view.addSubview(aim)
-
     message.font = .preferredFont(forTextStyle: .callout)
     message.textColor = .white
     message.numberOfLines = 0
@@ -122,13 +115,11 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     panel.translatesAutoresizingMaskIntoConstraints = false
     view.addSubview(panel)
     NSLayoutConstraint.activate([
-      aim.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-      aim.centerYAnchor.constraint(equalTo: view.centerYAnchor),
       panel.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 12),
       panel.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -12),
       panel.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -10),
     ])
-    updateDisplay("Scan the floor from your starting position.")
+    updateDisplay("Hold the phone steady while tracking starts.")
   }
 
   override func viewDidAppear(_ animated: Bool) {
@@ -263,7 +254,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     if alignment != nil {
       alignment = nil
       showModel = false
-      updateDisplay("Face the first direction of the model route. Aim at the real floor.")
+      updateDisplay("Stand at your start, hold the phone upright and face the first direction of the route.")
       return
     }
     guard ready, let frame = reality.session.currentFrame,
@@ -272,23 +263,22 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     let back = frame.camera.transform.columns.2
     let horizontal = SIMD3(-back.x, 0, -back.z)
     guard simd_length(horizontal) > 0.25 else {
-      updateDisplay("Tilt the phone toward the floor without pointing straight down.")
+      updateDisplay("Hold the phone upright and point it forward to set the route direction.")
       return
     }
-    let center = CGPoint(x: reality.bounds.midX, y: reality.bounds.midY)
-    let hit = [ARRaycastQuery.Target.existingPlaneGeometry, .estimatedPlane].lazy.compactMap { target in
-      self.reality.raycastQuery(from: center, allowing: target, alignment: .horizontal)
-        .flatMap { self.reality.session.raycast($0).first }
-    }.first
-    guard let height = hit?.worldTransform.columns.3.y, (0.5...2.4).contains(position.y - height) else {
-      updateDisplay("Floor not found. Aim at the floor a short distance ahead.")
-      return
-    }
+    // Floor height sets the initial eye level only. Tracking supplies all
+    // subsequent movement, so an unavailable floor need not block the walk.
+    let floorHeight = frame.anchors.compactMap { anchor -> Float? in
+      guard let plane = anchor as? ARPlaneAnchor,
+            plane.classification == .floor else { return nil }
+      let height = plane.transform.columns.3.y
+      return (0.8...2.1).contains(position.y - height) ? height : nil
+    }.max() ?? (position.y - 1.5)
     let start = model.center(model.start)
     let forward = model.route.dropFirst().first.map { model.center($0) - start } ?? SIMD3(0, 0, -1)
     alignment = WorldAlignment(
       physicalCamera: SIMD3(position.x, position.y, position.z),
-      physicalFloor: height,
+      physicalFloor: floorHeight,
       physicalForward: horizontal,
       modelStart: start,
       modelForward: forward
@@ -310,7 +300,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     if alignment != nil {
       updatePose(frame)
     } else if resumed {
-      updateDisplay("Face the first direction of the model route. Aim at the real floor.")
+      updateDisplay("Stand at your start, hold the phone upright and face the first direction of the route.")
     }
   }
 
@@ -348,7 +338,6 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
   private func updateDisplay(_ text: String) {
     let visible = ready && showModel && alignment != nil
     virtual.isHidden = !visible
-    aim.isHidden = alignment != nil
     align.isEnabled = ready || alignment != nil
     toggle.isEnabled = alignment != nil && ready
     align.setTitle(alignment == nil ? "Set start and direction" : "Reset alignment", for: .normal)
