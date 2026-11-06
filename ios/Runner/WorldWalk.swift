@@ -4,6 +4,8 @@ import SceneKit
 import UIKit
 import simd
 
+let assumedPhoneHeight: Float = 1.75
+
 struct WalkSite: Decodable {
   struct Block: Decodable {
     let name: String
@@ -132,7 +134,6 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
         if allowed {
           let configuration = ARWorldTrackingConfiguration()
           configuration.worldAlignment = .gravity
-          configuration.planeDetection = [.horizontal]
           self.reality.session.run(configuration)
         } else {
           self.updateDisplay("Allow camera access in Settings to track your walk.")
@@ -266,19 +267,11 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
       updateDisplay("Hold the phone upright and point it forward to set the route direction.")
       return
     }
-    // Floor height sets the initial eye level only. Tracking supplies all
-    // subsequent movement, so an unavailable floor need not block the walk.
-    let floorHeight = frame.anchors.compactMap { anchor -> Float? in
-      guard let plane = anchor as? ARPlaneAnchor,
-            plane.classification == .floor else { return nil }
-      let height = plane.transform.columns.3.y
-      return (0.8...2.1).contains(position.y - height) ? height : nil
-    }.max() ?? (position.y - 1.5)
     let start = model.center(model.start)
     let forward = model.route.dropFirst().first.map { model.center($0) - start } ?? SIMD3(0, 0, -1)
     alignment = WorldAlignment(
       physicalCamera: SIMD3(position.x, position.y, position.z),
-      physicalFloor: floorHeight,
+      physicalFloor: position.y - assumedPhoneHeight,
       physicalForward: horizontal,
       modelStart: start,
       modelForward: forward

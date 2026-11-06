@@ -119,8 +119,8 @@ final class RouteCamera: UIViewController, ARSessionDelegate, RPPreviewViewContr
     let hint: String
     switch mode {
     case .idle:
-      recordTitle = "Start at floor marker"
-      hint = canTrack ? "Aim at the floor by your feet and start the walk." : "Scan the room slowly to establish tracking."
+      recordTitle = "Start walk"
+      hint = canTrack ? "Hold the phone in front of you and start the walk." : "Scan the room slowly to establish tracking."
     case .recording:
       recordTitle = "Mark service target"
       hint = canTrack ? "Walk around obstacles. \(steps.count) route points." : "Tracking lost. Stop walking and scan the surroundings."
@@ -138,7 +138,7 @@ final class RouteCamera: UIViewController, ARSessionDelegate, RPPreviewViewContr
         : "Follow the blue markers in order."
     }
     status.text = message ?? hint
-    aim.isHidden = mode == .replay || mode == .saving
+    aim.isHidden = mode != .marking
     setButton(record, title: recordTitle, prominent: true)
     setButton(replay, title: mode == .replay ? "Restart replay" : "Replay saved route")
     setButton(video, title: recorder.isRecording ? "Stop video" : "Start video")
@@ -182,11 +182,7 @@ final class RouteCamera: UIViewController, ARSessionDelegate, RPPreviewViewContr
     let camera = position(frame.camera.transform)
     switch mode {
     case .idle:
-      guard let ground = hit(.horizontal), (0.5...2.5).contains(camera.y - ground.y) else {
-        message = "Floor not found. Move the camera slowly and aim down near your feet."
-        return
-      }
-      floor = ground.y + 0.06
+      floor = camera.y - assumedPhoneHeight + 0.06
       steps = [SIMD3(camera.x, floor, camera.z)]
       mode = .recording
     case .recording:
