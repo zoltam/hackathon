@@ -6,6 +6,7 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
     var viewProjection: simd_float4x4
     var screen: SIMD2<Float>
     var roomSize: SIMD2<Float>
+    var camera: SIMD4<Float>
   }
 
   let view: MTKView
@@ -17,6 +18,7 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
   private var sortBuffers: [MTLBuffer] = []
   private var nextBuffer = 0
   private let inFlight = DispatchSemaphore(value: 3)
+  static let bytesPerSplat = 160
   private let count: Int
   private static let binCount = 2048
   private var bins: [Int]
@@ -48,13 +50,15 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
           let splats = data.withUnsafeBytes({ bytes in
             bytes.baseAddress.flatMap { device.makeBuffer(bytes: $0, length: bytes.count, options: .storageModeShared) }
           }) else { return nil }
-    let count = data.count / 64
+    let count = data.count / Self.bytesPerSplat
     for _ in 0..<3 {
       guard let buffer = device.makeBuffer(length: count * 4, options: .storageModeShared) else { return nil }
       sortBuffers.append(buffer)
     }
-    let source = splats.contents().bindMemory(to: SIMD4<Float>.self, capacity: count * 4)
-    positions = (0..<count).map { source[$0 * 4] }
+    let source = splats.contents()
+    positions = (0..<count).map {
+      source.load(fromByteOffset: $0 * Self.bytesPerSplat, as: SIMD4<Float>.self)
+    }
     bins = .init(repeating: 0, count: Self.binCount)
     bucket = .init(repeating: -1, count: count)
     self.count = count
@@ -101,7 +105,7 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
     let sorted = sort(pose: pose, into: buffer)
     var uniforms = Uniforms(viewProjection: projection * pose.inverse,
                             screen: SIMD2(Float(dimensions.width), Float(dimensions.height)),
-                            roomSize: roomSize)
+                            roomSize: roomSize, camera: pose.columns.3)
     // Put an approximate floor behind the captured detail. This pass has no
     // effect on the walkability grid.
     encoder.setRenderPipelineState(floorPipeline)
@@ -156,8 +160,9 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
   #include <metal_stdlib>
   using namespace metal;
 
-  struct Splat { float4 centerAlpha, color, covA, covB; };
-  struct Uniforms { float4x4 viewProjection; float2 screen, roomSize; };
+  struct Splat { float4 centerAlpha, color, covA, covB; half sh[48]; };
+  static_assert(sizeof(Splat) == 160, "Unexpected splat layout");
+  struct Uniforms { float4x4 viewProjection; float2 screen, roomSize; float4 camera; };
   struct FloorPixel { float4 position [[position]]; float2 world; };
 
   vertex FloorPixel floorVertex(uint corner [[vertex_id]], constant Uniforms &u [[buffer(2)]]) {
@@ -194,16 +199,35 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
                            const device Splat *splats [[buffer(0)]],
                            const device uint *order [[buffer(1)]],
                            constant Uniforms &u [[buffer(2)]]) {
-    Splat s = splats[order[instance]];
+    const device Splat &s = splats[order[instance]];
     float4 clip = u.viewProjection * float4(s.centerAlpha.xyz, 1);
     float2 uv = float2((corner & 1) ? 1 : -1, (corner & 2) ? 1 : -1) * 3.0;
     Pixel out;
     out.local = uv;
-    out.color = float4(s.color.rgb, s.centerAlpha.w);
+    out.color = 0;
     out.position = float4(2, 2, 2, 1);
     if (clip.w <= .04) return out;
     float2 ndc = clip.xy / clip.w;
     if (any(abs(ndc) > 1.7)) return out;
+
+    // EGS coefficients are in the original PLY frame (x, -y, -z).
+    // Real spherical harmonics in the standard 3DGS degree-3 order.
+    float3 dir = normalize((s.centerAlpha.xyz - u.camera.xyz) * float3(1, -1, -1));
+    float x = dir.x, y = dir.y, z = dir.z;
+    float xx = x*x, yy = y*y, zz = z*z;
+    float shBasis[15] = {
+      -.488602512*y, .488602512*z, -.488602512*x,
+      1.092548431*x*y, -1.092548431*y*z, .315391565*(3*zz-1),
+      -1.092548431*x*z, .546274215*(xx-yy),
+      -.590043590*y*(3*xx-yy), 2.890611443*x*y*z, -.457045799*y*(5*zz-1),
+      .373176333*z*(5*zz-3), -.457045799*x*(5*zz-1),
+      1.445305721*z*(xx-yy), -.590043590*x*(xx-3*yy)
+    };
+    float3 rgb = s.color.rgb;
+    for (uint i = 0; i < 15; ++i) {
+      rgb += float3(s.sh[i], s.sh[15+i], s.sh[30+i]) * shBasis[i];
+    }
+    out.color = float4(saturate(rgb), s.centerAlpha.w);
     const float4x4 m = u.viewProjection;
     float3 rw = float3(m[0].w, m[1].w, m[2].w);
     float3 jx = (float3(m[0].x, m[1].x, m[2].x) - ndc.x * rw) * (.5 * u.screen.x / clip.w);
