@@ -5,11 +5,12 @@ from collections import Counter, deque
 from pathlib import Path
 import argparse
 import json
+import hashlib
 
 import numpy as np
 
 
-def prepare(source, destination):
+def prepare(source, destination, *, full_scene=False, floor_y=1.07, name=None):
     with source.open('rb') as stream:
         header = []
         for line in stream:
@@ -31,29 +32,47 @@ def prepare(source, destination):
     values = values[np.abs(np.linalg.norm(values[:, 3:7], axis=1) - 1) < .01]
     if not len(values):
         raise ValueError('No valid EGS vertices')
-    # The supplied EGS scan uses y down, with the main floor near y=1.07.
-    crop = np.array([[-5.0, -1.55, -4.0], [4.0, 1.24, -.7]])
-    values = values[((values[:, :3] >= crop[0]) & (values[:, :3] <= crop[1])).all(axis=1)]
-    values = values[values[:, 10] >= -2.2]
-    x, y, z = values[:, :3].T
-    xyz = np.stack((x + 5, 1.07 - y, -.7 - z), axis=1)
+    # The original scan uses a reviewed crop. Updated scans can fit their own
+    # navigation extent while keeping the full visible scene for rendering.
     cell = .25
-    width, depth = 36, 14
+    if not full_scene:
+        crop = np.array([[-5.0, -1.55, -4.0], [4.0, 1.24, -.7]])
+        values = values[((values[:, :3] >= crop[0]) & (values[:, :3] <= crop[1])).all(axis=1)]
+    # Floor surfaces can have faint Gaussians even where the rendered passage
+    # is continuous. Keep those observations for support, not as new free space.
+    floor_points = values[(np.abs(floor_y - values[:, 1]) <= .12) &
+                          (values[:, 10] >= np.log(.01 / .99)), :3]
+    values = values[values[:, 10] >= -2.2]
+    if not len(values):
+        raise ValueError('No visible vertices in the selected scene extent')
+    if full_scene:
+        low, high = np.quantile(values[:, [0, 2]], [.005, .995], axis=0)
+        origin_x = float(np.floor(low[0] / cell) * cell)
+        origin_z = float(np.ceil(high[1] / cell) * cell)
+        width = int(np.ceil((high[0] - origin_x) / cell))
+        depth = int(np.ceil((origin_z - low[1]) / cell))
+    else:
+        origin_x, origin_z = -5.0, -.7
+        width, depth = 36, 14
+    if width * depth > 60000:
+        raise ValueError('Navigation grid too large; review scene scale')
+    x, y, z = values[:, :3].T
+    xyz = np.stack((x - origin_x, floor_y - y, origin_z - z), axis=1)
     grid = np.floor(xyz[:, [0, 2]] / cell).astype(int)
-    grid = np.clip(grid, [0, 0], [width - 1, depth - 1])
+    inside_grid = ((grid >= [0, 0]) & (grid < [width, depth])).all(axis=1)
 
     def counts(mask):
-        return Counter(map(tuple, grid[mask].tolist()))
+        return Counter(map(tuple, grid[mask & inside_grid].tolist()))
 
     occupied = {p for p, n in counts((xyz[:, 1] >= .17) & (xyz[:, 1] <= 1.8)).items() if n >= 20}
-    # Add a small horizontal margin around dense obstacle points.
-    close = {p for p, n in counts((xyz[:, 1] >= .17) & (xyz[:, 1] <= 1.8)).items() if n >= 55}
-    candidates = {p for p, n in counts(np.abs(xyz[:, 1]) <= .12).items() if n >= 14}
+    floor_grid = np.floor(np.column_stack((floor_points[:, 0] - origin_x,
+                                          origin_z - floor_points[:, 2])) / cell).astype(int)
+    floor_inside = ((floor_grid >= [0, 0]) &
+                    (floor_grid < [width, depth])).all(axis=1)
+    floor_counts = Counter(map(tuple, floor_grid[floor_inside].tolist()))
+    candidates = {p for p, n in floor_counts.items() if n >= 14}
+    # Radius clearance belongs to the planner. Dilation here would apply it twice.
     walkable = candidates - occupied
-    nearby = set()
-    for x, z in close:
-        nearby.update(((x-1,z),(x+1,z),(x,z-1),(x,z+1)))
-    buffered = walkable - nearby
 
     def adjacent(p):
         x, z = p
@@ -70,7 +89,7 @@ def prepare(source, destination):
                     queue.append(q)
         return distance
 
-    unseen = set(buffered)
+    unseen = set(walkable)
     best = set()
     while unseen:
         region = set(distances(min(unseen), unseen))
@@ -88,9 +107,22 @@ def prepare(source, destination):
         key=lambda pair: (dist[pair[0]], pair),
     )
     model = {
-        'name': 'Industrial Boiler Room',
+        'name': name or ('Industrial Boiler Room' if not full_scene else source.stem),
+        'sourceFile': source.name,
+        'sourceSha256': hashlib.sha256(source.read_bytes()).hexdigest(),
+        'sourceOrigin': [origin_x, floor_y, origin_z],
         'width': width, 'depth': depth, 'cellSize': cell,
-        'start': start, 'floor': sorted(best),
+        'start': start, 'floor': sorted(walkable),
+        'floorMapping': {
+            'method': 'observed_floor_without_body_height_obstacle_points',
+            'floorBandMetres': .12, 'obstacleHeightMetres': [.17, 1.8],
+            'minimumFloorPoints': 14, 'minimumObstaclePoints': 20,
+            'minimumFloorOpacity': .01,
+            'minimumRenderedOpacity': float(1 / (1 + np.exp(2.2))),
+            'importerMarginMetres': 0,
+            'connectedCellsFromStart': len(best),
+            'disconnectedFloorCells': len(walkable - best),
+        },
         'objects': [{
             'name': 'Inspection target', 'x': target[0], 'z': target[1],
             'width': 1, 'depth': 1, 'height': 1.2, 'service': service,
@@ -119,12 +151,21 @@ def prepare(source, destination):
     destination.mkdir(parents=True, exist_ok=True)
     (destination / 'site.json').write_text(json.dumps(model) + '\n', encoding='utf-8')
     points.tofile(destination / 'boiler-room.splats')
-    print(f'{len(points):,} Gaussian splats, {len(best)} walkable cells, {dist[service]} route steps')
+    print(f'{len(points):,} Gaussian splats, {len(walkable)} mapped floor cells '
+          f'({len(best)} connected), {dist[service]} route steps')
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('source', type=Path)
     parser.add_argument('--output', type=Path, default=Path('assets/valmet'))
+    parser.add_argument('--full-scene', action='store_true',
+                        help='Fit navigation bounds to this scan; do not use the old crop')
+    parser.add_argument('--floor-y', type=float, default=1.07,
+                        help='Source y-down floor elevation; review for each new scan')
+    parser.add_argument('--name', help='Display name for the scene')
     args = parser.parse_args()
-    prepare(args.source, args.output)
+    if not np.isfinite(args.floor_y):
+        parser.error('--floor-y must be finite')
+    prepare(args.source, args.output, full_scene=args.full_scene,
+            floor_y=args.floor_y, name=args.name)

@@ -68,7 +68,7 @@ class _FieldScreenState extends State<FieldScreen> {
                   if (snapshot.hasError) {
                     return const Center(
                       child: Text(
-                        'Industrial Boiler Room scan is missing. Prepare the Valmet PLY before building.',
+                        'Equipment Room scan is missing. Prepare the local PLY assets before building.',
                       ),
                     );
                   }
