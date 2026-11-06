@@ -46,6 +46,12 @@ Sources: [official 2025 project themes](https://sinceai.ai/projects), [SoundWatc
 - **Failure of our assumption:** the task could instead center on site information, navigation data or a document assistant. We should not choose expecting a repeat of the 2025 object-detection challenge.
 - **Verdict:** strongest combined current-theme / historical fit, but only medium confidence in the exact model task.
 
+#### Demo idea — equipment recognition on an iPhone in airplane mode
+
+**Turn on airplane mode, point the camera at equipment, and get accurate results immediately.** This makes offline operation and local inference visible to the audience.
+
+Our proposed implementation is an iPhone app running an equipment-recognition model on the device, potentially fine-tuned for the selected equipment. Demonstrate with Wi-Fi and cellular connectivity disabled. Accuracy and response time are goals to measure on the actual phone, not established results. This is our product idea, not a capability or dataset promised by Valmet's current challenge description.
+
 ### Elisa — Strongest explicit text-input clue.
 
 **Current description, verbatim from [challenges.md](challenges.md):**
