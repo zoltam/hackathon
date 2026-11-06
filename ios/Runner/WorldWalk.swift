@@ -318,7 +318,12 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
   // Repeatable device smoke check. Uses the normal renderer and model,
   // with synthetic camera poses instead of requiring a person to walk.
   private func verifyRenderedFrame(index: Int) {
-    guard view.window != nil, verificationFrames < 7, index < 12 else { return }
+    guard view.window != nil, verificationFrames < 7 else { return }
+    guard index < 12 else {
+      print("VALMET_VISION error=insufficient_samples samples=\(verificationFrames) expected=7")
+      fflush(stdout)
+      return
+    }
     virtual.isHidden = false
     visionStatus.isHidden = false
     renderVerificationPose(index: index)
@@ -509,6 +514,10 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     journeyFrame()
   }
 
+  private var hasJourneyWorkbookEvidence: Bool {
+    model.inspectionSummary?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+  }
+
   private func journeyFrame() {
     guard let start = journeyStart, let target = serviceTarget else { return }
     guard view.window?.windowScene?.activationState == .foregroundActive else {
@@ -540,11 +549,21 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     renderScriptedView(eye: eye, look: look)
     if arrived && !hadArrived {
       print("VALMET_JOURNEY phase=arrival elapsed_s=\(elapsed)")
-      print("VALMET_JOURNEY evidence=\(model.inspectionSummary == nil ? "unavailable" : "workbook")")
+      print("VALMET_JOURNEY evidence=\(hasJourneyWorkbookEvidence ? "workbook" : "unavailable")")
       fflush(stdout)
     }
     if elapsed >= elapsedWalking + 4 {
-      stopJourney(error: arrived && journeyConfirmedTarget ? nil : "missing_arrival_or_target")
+      let error: String?
+      if !arrived || !journeyConfirmedTarget {
+        error = "missing_arrival_or_target"
+      } else if !hasJourneyWorkbookEvidence {
+        error = "missing_workbook_evidence"
+      } else if journeyNearbyMax.mapped == 0 {
+        error = "missing_mapped_nearby_frames"
+      } else {
+        error = nil
+      }
+      stopJourney(error: error)
     } else {
       DispatchQueue.main.asyncAfter(deadline: .now() + 1.0 / 30.0) { [weak self] in
         self?.journeyFrame()

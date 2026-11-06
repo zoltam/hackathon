@@ -1,6 +1,6 @@
 # Valmet development plan
 
-Updated 6 November 2026. Starting point: source review of commit `c103c63`; iPhone build and runtime behaviour have not been verified in this review.
+Updated 7 November 2026. The starting-point review below describes commit `c103c63`. See [device evidence](#brief-coverage-and-device-evidence) for later builds and runtime checks.
 
 ## Goal and demo
 
@@ -51,7 +51,7 @@ Do not encode a video just to analyze it: pass sampled renderer frames directly 
 
 Physical movement is handheld VR-style simulation, not recognition/localization in the real boiler room. Keep the real walking area clear, preserve the real-camera switch, and provide a recenter/reposition or virtual-movement option where physical space is insufficient. Virtual obstacles cannot protect the user from real furniture.
 
-Offline scene preparation, model training and export may happen on Linux/Mac/GPU hardware. The deployed vision model must run on the actual iPhone without server inference. Confirm target iPhone model and iOS version before choosing the model; both are currently unspecified.
+Scene preparation and model training run on a Mac. The deployed model runs locally on iPhone. Scripted device checks used iPhone 15 with iOS 26.5. Physical offline acceptance and the reported iPhone 13 issue need device tests.
 
 ## Four-person ownership
 
@@ -255,8 +255,8 @@ The generated `assets/valmet/site.json` has 17 reviewed objects. Eleven are the 
   at the route start. The interactive crate demo supports movement and a
   no-route state, with planner tests for a fully blocked corridor.
 - Arrival shows a deterministic summary and the existing workbook evidence
-  report. The diagnostic model and submission materials are separate from
-  the scene extraction and iPhone integration.
+  report. [Demo plan](DEMO.md) and [technical note](docs/TECHNICAL-NOTE.md)
+  record what the submission can demonstrate and what remains unverified.
 
 ## Known gaps and decisions
 

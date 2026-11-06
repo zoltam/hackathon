@@ -6,15 +6,30 @@ Team coordination: [development plan](PLAN.md) · [full challenge notes and scor
 
 ## Run on iOS
 
-Use macOS with Flutter and Xcode installed. From the repository root:
+Use macOS with Xcode, Python 3 and Flutter with Dart 3.12.2 or later
+(tested with Flutter 3.44.3). For the full demo, use an ARKit-capable iPhone
+and obtain approved copies of the replacement `Equipment Room.ply` and the
+Valmet synthetic builder workbook (`.xlsx`). The replacement scan has
+1,676,481 vertices. The earlier `Industrial Boiler Room (1).ply` uses a
+different scene registration.
+
+From the repository root, prepare the local assets before building:
 
 ```sh
+python3 -m venv sources/valmet/.venv
+source sources/valmet/.venv/bin/activate
+python3 -m pip install numpy -r tools/requirements-data.txt
+python3 tools/build_boiler_room.py "/path/to/Equipment Room.ply"
+python3 tools/import_asset_data.py "/path/to/Valmet_SinceAI_2026_Synthetic_Industrial_Metaverse_Builder_Pack (1) (2) (1).xlsx" \
+  --site assets/valmet/site.json --include-nearby
 flutter pub get
-open -a Simulator
-flutter run
 ```
 
-For a physical iPhone, open `ios/Runner.xcworkspace` in Xcode and select your team under Runner → Signing & Capabilities. Use a unique bundle identifier for device signing.
+Connect the iPhone, open `ios/Runner.xcworkspace` in Xcode, and select
+your team and a unique bundle identifier under Runner → Signing & Capabilities.
+Select the connected iPhone as the run destination and run the Runner scheme.
+The simulator can preview the Flutter route map. The AR walkthrough requires
+the physical iPhone. The repository already includes the Core ML detector.
 
 ## Walk inside the 3D model
 
@@ -22,21 +37,15 @@ Enable **Forward and backward controls** under **Settings** to move with the two
 
 On an ARKit-capable iPhone, select a service target and tap **Walk inside the 3D model**. Stand at the physical spot that should correspond to the virtual start, hold the phone upright and face the direction of the first route segment. The app assumes an initial phone height of 1.50 metres and uses the phone’s angle for the view. Tap **Set start and direction**. ARKit drives the virtual camera with the phone's rotation and translation, with one physical metre equal to one model metre. **Show camera** switches back to the live view while tracking continues. Use **Reset alignment** to choose a new physical start.
 
-The iPhone demo loads the updated Equipment Room scan. From the repository root, install NumPy and prepare the local assets before building:
-
-```sh
-python3 tools/build_boiler_room.py "/path/to/Equipment Room.ply"
-swiftc -O tools/build_pump_references.swift -o /tmp/valmet-pump-references
-/tmp/valmet-pump-references
-```
-
 The importer requires the complete Equipment Room scan. It registers the scan against the reviewed equipment frame and renders all 1,676,481 splats with their anisotropic covariance, opacity, and degree-3 view-dependent color. The navigation grid comes from observed floor and obstacle geometry. A neutral backing surface fills missing floor pixels and leaves walkability unchanged. Distances assume the reviewed scene uses metres. Keep the organizer's scan and derived assets local unless public redistribution is authorized.
 
 The iPhone detector samples the full rendered image locally at up to 8 frames per second. It skips frames while inference is busy. It returns image-space boxes for the catalog objects, without reading coordinates or camera images as recognition input. Routing and arrival use the separately mapped walkable approach.
 
-To prepare and train the detector on macOS with Xcode and Pillow installed:
+To retrain the detector, use the prepared scan and Python environment from
+the setup above:
 
 ```sh
+python3 -m pip install Pillow
 swiftc -O tools/build_pump_references.swift -o /tmp/valmet-pump-references
 /tmp/valmet-pump-references --detection-dataset-hq
 python3 tools/prepare_detection_views.py build/valmet-detection-hq
@@ -71,9 +80,20 @@ xcrun devicectl device process launch --device <device> --terminate-existing --c
   --verify-service-journey "$(dart tools/verify_service_route.dart)"
 ```
 
-The log records the planned distance, target confirmation, and arrival. The
-script moves the virtual camera and leaves a physical AR walk to be verified
-separately.
+The log records distance, target confirmation, arrival, workbook evidence and
+visible mapped frames. The journey passes only when all are present. The
+script moves the virtual camera. Verify physical AR walking separately.
+
+To rehearse the route and workbook UI on a booted simulator, launch the
+installed build with the same arguments:
+
+```sh
+xcrun simctl launch --terminate-running-process booted <bundle-id> \
+  --verify-service-journey "$(dart tools/verify_service_route.dart)"
+```
+
+The simulator can render the journey without AR tracking. Use the physical
+iPhone to verify the Core ML detector and the full journey gate.
 
 ## Navigation and inspection evidence (member 2)
 
@@ -140,14 +160,6 @@ xcrun devicectl device process launch --device <device> --terminate-existing --c
   --verify-obstacle-reroute "$(dart tools/verify_service_route.dart)"
 ```
 
-
-Import the supplied workbook after generating `assets/valmet/site.json`:
-
-```sh
-python3 -m pip install -r tools/requirements-data.txt
-python3 tools/import_asset_data.py "/path/to/supplied-workbook.xlsx" \
-  --site assets/valmet/site.json --include-nearby
-```
 
 The importer writes ignored `assets/valmet/asset-data.json`, retaining original
 values, worksheet row references and a workbook SHA-256. It imports the included

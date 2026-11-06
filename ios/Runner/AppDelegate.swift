@@ -18,7 +18,7 @@ import UIKit
       guard let model = try? JSONDecoder().decode(WalkSite.self, from: Data(payload.utf8)) else {
         return result(FlutterError(code: "invalid_model", message: "Could not open this 3D model.", details: nil))
       }
-      guard ARWorldTrackingConfiguration.isSupported else {
+      guard visionMode != .normal || ARWorldTrackingConfiguration.isSupported else {
         return result(FlutterError(code: "unsupported", message: "AR needs a compatible physical iPhone.", details: nil))
       }
       let key = registrar.lookupKey(forAsset: "assets/valmet/boiler-room-sh.splats")
