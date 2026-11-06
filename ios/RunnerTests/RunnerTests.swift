@@ -19,6 +19,23 @@ class RunnerTests: XCTestCase {
     ])
   }
 
+  func testScriptedRouteUsesClearanceMaskFromMultipleStarts() {
+    let approach = [2, 0]
+    let detour = [[0, 0], [0, 1], [1, 1], [2, 1], approach]
+    XCTAssertTrue(WalkSite.isClearanceSafeRoute(detour, to: approach, walkableFloor: detour))
+    XCTAssertTrue(WalkSite.isClearanceSafeRoute(Array(detour.dropFirst()), to: approach, walkableFloor: detour))
+    XCTAssertTrue(WalkSite.isClearanceSafeRoute([approach], to: approach, walkableFloor: detour))
+    XCTAssertFalse(WalkSite.isClearanceSafeRoute([[0, 0], [1, 0], approach], to: approach, walkableFloor: detour))
+  }
+
+  func testScriptedRouteRejectsMalformedPaths() {
+    let floor = [[0, 0], [0, 1], [1, 1]]
+    let approach = [1, 1]
+    for route in [[], [[0], approach], [[0, 0], approach], [[0, 0], [0, 1]]] {
+      XCTAssertFalse(WalkSite.isClearanceSafeRoute(route, to: approach, walkableFloor: floor))
+    }
+  }
+
   func testMinimapDropsThePreviousRouteWhenReplanned() throws {
     let map = RouteMapView(model: try routeSite())
     map.frame = CGRect(x: 0, y: 0, width: 160, height: 160)

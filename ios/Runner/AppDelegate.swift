@@ -92,36 +92,6 @@ import UIKit
           return
         }
         site["keyControls"] = false
-        if let journeyArgument {
-          guard arguments.indices.contains(journeyArgument + 1),
-                let journey = (try? JSONSerialization.jsonObject(
-                  with: Data(arguments[journeyArgument + 1].utf8))) as? [String: Any],
-                let route = journey["route"] as? [[Int]], let routeStart = route.first,
-                let id = journey["targetID"] as? String,
-                let objects = site["objects"] as? [[String: Any]],
-                let target = objects.firstIndex(where: { $0["objectId"] as? String == id }),
-                let service = objects[target]["service"] as? [Int], route.last == service,
-                let floor = site["floor"] as? [[Int]] else {
-            print("\(logPrefix) error=invalid_route")
-            fflush(stdout)
-            return
-          }
-          let floorCells = Set(floor)
-          guard route.allSatisfy({ $0.count == 2 && floorCells.contains($0) }),
-                zip(route, route.dropFirst()).allSatisfy({ a, b in
-                  abs(a[0] - b[0]) + abs(a[1] - b[1]) == 1
-                }) else {
-            print("\(logPrefix) error=invalid_route")
-            fflush(stdout)
-            return
-          }
-          site["start"] = routeStart
-          site["target"] = target
-          site["route"] = route
-        } else {
-          site["target"] = 0
-          site["route"] = [start, [start[0], start[1] + 1]]
-        }
         func present(_ scene: [String: Any]) {
           guard let data = try? JSONSerialization.data(withJSONObject: scene) else { return }
           open(String(decoding: data, as: UTF8.self), visionMode, verificationPoses) { error in
@@ -132,13 +102,10 @@ import UIKit
             }
           }
         }
-        if visionMode == .journey || verificationPoses != nil,
-           var objects = site["objects"] as? [[String: Any]], let target = site["target"] as? Int,
-           objects.indices.contains(target), let targetID = objects[target]["objectId"] as? String {
-          channel.invokeMethod("serviceJourneyEvidence", arguments: [
-            "targetID": targetID
-          ]) { result in
-            if let evidence = result as? [String: Any] {
+        func presentWithEvidence(_ scene: [String: Any], targetID: String) {
+          channel.invokeMethod("serviceJourneyEvidence", arguments: ["targetID": targetID]) { result in
+            var scene = scene
+            if let evidence = result as? [String: Any], var objects = scene["objects"] as? [[String: Any]] {
               let conditions = evidence["conditions"] as? [String: Any] ?? [:]
               let tags = evidence["tags"] as? [String: Any] ?? [:]
               for index in objects.indices {
@@ -147,15 +114,63 @@ import UIKit
                   objects[index]["workbookTag"] = tags[id] as? String
                 }
               }
-              site["objects"] = objects
-              site["hasWorkbook"] = evidence["hasWorkbook"] as? Bool
-              site["inspectionReport"] = evidence["inspectionReport"] as? String
-              site["inspectionSummary"] = evidence["inspectionSummary"] as? String
+              scene["objects"] = objects
+              scene["hasWorkbook"] = evidence["hasWorkbook"] as? Bool
+              scene["inspectionReport"] = evidence["inspectionReport"] as? String
+              scene["inspectionSummary"] = evidence["inspectionSummary"] as? String
             }
-            present(site)
+            present(scene)
+          }
+        }
+        if let journeyArgument {
+          guard arguments.indices.contains(journeyArgument + 1),
+                let journey = (try? JSONSerialization.jsonObject(
+                  with: Data(arguments[journeyArgument + 1].utf8))) as? [String: Any],
+                let route = journey["route"] as? [[Int]], let routeStart = route.first,
+                routeStart.count == 2,
+                let id = journey["targetID"] as? String,
+                let objects = site["objects"] as? [[String: Any]],
+                let target = objects.firstIndex(where: { $0["objectId"] as? String == id }),
+                let service = objects[target]["service"] as? [Int], service.count == 2, route.last == service else {
+            print("\(logPrefix) error=invalid_route")
+            fflush(stdout)
+            return
+          }
+          let clearance = 0.10
+          channel.invokeMethod("replanServiceRoute", arguments: [
+            "from": routeStart, "to": service, "blocked": [] as [[Int]], "clearanceMetres": clearance
+          ]) { result in
+            guard let planner = result as? [String: Any], let walkableFloor = planner["walkableFloor"] as? [[Int]] else {
+              print("\(logPrefix) error=planner_unavailable")
+              fflush(stdout)
+              return
+            }
+            guard WalkSite.isClearanceSafeRoute(route, to: service, walkableFloor: walkableFloor) else {
+              print("\(logPrefix) error=invalid_route")
+              fflush(stdout)
+              return
+            }
+            var scene = site
+            scene["start"] = routeStart
+            scene["target"] = target
+            scene["route"] = route
+            scene["walkableFloor"] = walkableFloor
+            scene["clearanceMetres"] = clearance
+            if visionMode == .journey {
+              presentWithEvidence(scene, targetID: id)
+            } else {
+              present(scene)
+            }
           }
         } else {
-          present(site)
+          site["target"] = 0
+          site["route"] = [start, [start[0], start[1] + 1]]
+          if verificationPoses != nil, let objects = site["objects"] as? [[String: Any]],
+             let targetID = objects.first?["objectId"] as? String {
+            presentWithEvidence(site, targetID: targetID)
+          } else {
+            present(site)
+          }
         }
       }
     }

@@ -96,8 +96,8 @@ Statuses: **Ready → In progress → In review → Done**. The coordinator upda
 | Recognize and highlight the single target | 1 + 3 | In review | `vision/single-target` | On-phone detection of the rendered target produces a stable highlight associated with its mapped 3D object |
 | Complete phase 1 guided walk | 2 + 3 + 4 | iPhone 15 offline pass | `navigation/single-target-walk` | User aligns, sees and follows the route, recognizes the target and reaches its approach point on the actual phone |
 | Expand extraction to multiple 3D assets | 1 + 2 + 3 | In review | `scene/extract-equipment` | After single-target integration, expand persistent boxes and labels for the scored extraction/proximity requirements |
-| Import workbook and map a faulty target | 2 | Ready | `ai/asset-data` | Target and surrounding assets show reproducibly mapped supplied records, clearly labelled synthetic |
-| Validate routes and add automatic inspection playback | 2 + 3 | Ready | `navigation/inspection-route` | Start-to-target movement follows the walkability model; unreachable cases are handled |
+| Import workbook and map a faulty target | 2 | In review (six compatible mappings) | `ai/asset-data` | Target and surrounding assets show reproducibly mapped supplied records, clearly labelled synthetic |
+| Validate routes and add automatic inspection playback | 2 + 3 | In review (scripted inspection) | `navigation/inspection-route` | Start-to-target movement follows the walkability model; unreachable cases are handled |
 | Show nearby assets and their condition | 3 | In review | `ui/proximity-overlays` | Boxes and information change with simulated position without showing every asset at once |
 | Add grounded arrival diagnostics | 2 + 3 | In review | `ai/asset-diagnostics` | Arrival shows observations, hypotheses, evidence references and a supported next check |
 | Write demo story and collect company feedback | 4 | Ready | `demo/story-and-plan` | One user, problem, journey and value are clear; feedback is recorded |
@@ -276,8 +276,13 @@ device classes.
 
 The first six-class context candidate reached 93.2% precision and 50.1%
 recall on 177 held-out renders after threshold selection on validation.
-Its recall was too low to replace the bundled detector. The next experiment
-trains one model with the existing 11 IDs and 19 additional instances.
+Its recall was too low to replace the bundled detector. A unified 30-ID
+candidate found each of its classes at least once on 250 held-out renders,
+but reached only 54.3% precision and 54.2% recall. On the corrected-scan 11-ID
+sets its F1 fell to 33.3% on room views and 58.1% on walking views, compared
+with 91.5% and 81.4% for the bundled detector. The candidate stays local.
+The 33-ID follow-up adds complete labels for the remaining three objects
+and more wide and edge-clipped legacy views.
 
 - The supplied DOCX names the original Industrial Boiler Room PLY. In that
   archive 502,482 of 1,506,136 records pass the structural guard. The team uses
@@ -316,6 +321,10 @@ trains one model with the existing 11 IDs and 19 additional instances.
 - The route regression suite covers all six service targets from twelve starts
   and six replans around a 0.50 m crate. It checks blocked starts and goals,
   disconnected corridors, route recovery and arrival in the planner.
+- Scripted inspection checks the supplied route against the same clearance
+  mask as the live planner. The iOS simulator rejected a raw-floor route
+  outside that mask. Two alternate runs reached P-004 and CV-003 with their
+  workbook evidence; simulator Vision could not create an inference context.
 - The iPhone 15 passed the P-005 route from cell `[69, 65]` (2.0 m), the
   P-003 route (4.5 m) and the crate-recovery check with the 33-object scene.
   A separate fixed-pose check
@@ -329,8 +338,9 @@ trains one model with the existing 11 IDs and 19 additional instances.
   iPhone test put the simulated camera in a newly blocked cell, confirmed an
   empty route and recovered a 32-cell route after returning to the start with
   the same vision-derived footprint.
-- Arrival shows a deterministic summary and the existing workbook evidence
-  report. [Demo plan](DEMO.md) and [technical note](docs/TECHNICAL-NOTE.md)
+- Arrival shows a deterministic summary and the workbook evidence report,
+  including dated telemetry endpoints and the evidence workflow from a matching
+  historical case when present. [Demo plan](DEMO.md) and [technical note](docs/TECHNICAL-NOTE.md)
   record what the submission can demonstrate and what remains unverified.
 
 ## Known gaps and decisions

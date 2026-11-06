@@ -59,6 +59,7 @@ void main() {
           'historical_issue_code': 'DRIFT',
           'case_id': 'case-1',
           'historical_interpretation': 'Possible drift',
+          'safe_evidence_workflow': 'Confirm identity before checking trend.',
           '_source': 'Historical_Service_Cases!2',
         },
         {
@@ -98,6 +99,22 @@ void main() {
       isFalse,
     );
     expect(diagnosis.evidence.every((e) => e.reference.isNotEmpty), isTrue);
+    final comparison = diagnosis.evidence.singleWhere(
+      (e) => e.text.startsWith('Included telemetry samples'),
+    );
+    expect(comparison.text, contains('sensor_bias: 1 to 2'));
+    expect(
+      comparison.reference,
+      'Telemetry_Sample_3d!2; Telemetry_Sample_3d!3',
+    );
+    expect(
+      diagnosis.reportText,
+      contains('Confirm identity before checking trend.'),
+    );
+    expect(
+      diagnosis.reportText,
+      contains('case-1 · Historical_Service_Cases!2'),
+    );
     expect(diagnosis.hypotheses, hasLength(1));
     expect(diagnosis.hypotheses.first.text, contains('not a confirmed cause'));
     expect(diagnosis.qualityIssues.single.reference, contains('dq-1'));

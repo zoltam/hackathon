@@ -72,6 +72,15 @@ struct WalkSite: Decodable {
     SIMD2(Int((x / cellSize).rounded(.down)), Int((z / cellSize).rounded(.down)))
   }
 
+  static func isClearanceSafeRoute(_ route: [[Int]], to service: [Int], walkableFloor: [[Int]]) -> Bool {
+    let walkable = Set(walkableFloor)
+    return route.last == service &&
+      route.allSatisfy { $0.count == 2 && walkable.contains($0) } &&
+      zip(route, route.dropFirst()).allSatisfy { a, b in
+        abs(a[0] - b[0]) + abs(a[1] - b[1]) == 1
+      }
+  }
+
   func isAtServicePosition(_ position: SIMD2<Float>, on route: [[Int]]) -> Bool {
     guard let end = route.last, cellSize > 0 else { return false }
     let radius = arrivalRadiusMetres ?? max(0.30, cellSize / 2)

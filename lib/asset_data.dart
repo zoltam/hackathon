@@ -48,8 +48,7 @@ class AssetDiagnosis {
   ].join('\n\n');
 }
 
-/// Local evidence retrieval and deterministic explanations. No remote model,
-/// inferred equipment identity, or invented thresholds are used here.
+/// Offline diagnostic guidance from workbook records and matching cases.
 class AssetData {
   AssetData.fromJson(String source) : _json = jsonDecode(source) {
     if (_json['schemaVersion'] != 1 || _json['synthetic'] != true) {
@@ -126,6 +125,35 @@ class AssetData {
     );
 
     final telemetry = latest('Telemetry_Sample_3d', 'timestamp');
+    final recent = telemetry.firstOrNull;
+    final oldest = telemetry.lastOrNull;
+    final recentTime = recent?['timestamp'];
+    final oldestTime = oldest?['timestamp'];
+    final comparison = recent == null || oldest == null
+        ? <String>[]
+        : [
+            for (final field in recent.entries)
+              if (field.value is num && oldest[field.key] is num)
+                '${field.key}: ${oldest[field.key]} to ${field.value}',
+          ];
+    final issue = state['issue_code'];
+    final cases = _rows('Historical_Service_Cases')
+        .where(
+          (r) =>
+              issue is String &&
+              issue.isNotEmpty &&
+              r['asset_class'] == asset['asset_class'] &&
+              r['historical_issue_code'] == issue,
+        )
+        .take(3)
+        .toList();
+    final workflow = cases
+        .where(
+          (r) =>
+              r['safe_evidence_workflow'] is String &&
+              (r['safe_evidence_workflow'] as String).trim().isNotEmpty,
+        )
+        .firstOrNull;
     final docs = _rows('Knowledge_Docs').where(
       (r) =>
           r['doc_id'] == state['knowledge_doc_id'] ||
@@ -137,11 +165,22 @@ class AssetData {
         '${state['issue_summary']}. Health score: '
         '${state['health_score']}; urgency: ${state['urgency']}.',
       ),
-      if (telemetry.isNotEmpty)
+      if (recent != null)
         entry(
-          telemetry.first,
-          'Telemetry at ${telemetry.first['timestamp']}: '
-          '${telemetry.first.entries.where((e) => e.value is num).map((e) => '${e.key}=${e.value}').join(', ')}',
+          recent,
+          'Telemetry at ${recent['timestamp']}: '
+          '${recent.entries.where((e) => e.value is num).map((e) => '${e.key}=${e.value}').join(', ')}',
+        ),
+      if (recent != null &&
+          oldest != null &&
+          recentTime is String &&
+          oldestTime is String &&
+          recentTime != oldestTime &&
+          comparison.isNotEmpty)
+        Evidence(
+          '${oldest['_source']}; ${recent['_source']}',
+          'Included telemetry samples from $oldestTime to '
+              '$recentTime. ${comparison.join(', ')}.',
         ),
       for (final r in latest('Alarms_Events', 'timestamp').take(3))
         entry(
@@ -157,6 +196,12 @@ class AssetData {
           'work_order_id',
         ),
       for (final r in docs) entry(r, '${r['content']}', 'doc_id'),
+      if (workflow != null)
+        entry(
+          workflow,
+          'Historical evidence workflow. ${workflow['safe_evidence_workflow']}',
+          'case_id',
+        ),
     ];
     if (!docs.any((r) => r['doc_id'] == state['knowledge_doc_id'])) {
       evidence.add(
@@ -185,14 +230,7 @@ class AssetData {
       mappingNotice: '${_json['mappingNotice']}',
       evidence: evidence,
       hypotheses: [
-        for (final r
-            in _rows('Historical_Service_Cases')
-                .where(
-                  (r) =>
-                      r['asset_class'] == asset['asset_class'] &&
-                      r['historical_issue_code'] == state['issue_code'],
-                )
-                .take(3))
+        for (final r in cases)
           entry(
             r,
             '${r['historical_interpretation']}. '
