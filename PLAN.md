@@ -92,7 +92,7 @@ Statuses: **Ready → In progress → In review → Done**. The coordinator upda
 | Validate scene preparation and coordinate system | 1 + 3 | Ready | `scene/validate-room` | Actual scan renders; axes, scale, floor, filtering and device behaviour are recorded |
 | Agree shared object/data interface | 1 + 2 + 3 | Ready | `integration/asset-contract` | Sample object, bounds, asset mapping and viewer result are understood by all three |
 | Confirm target phone and baseline model/export | 1 + 3 | Ready | `vision/iphone-baseline` | Model loads and predicts on the actual phone; input format, labels, size and latency are recorded |
-| Capture clean rendered frames and run live inference | 3 + 1 | Ready | `vision/rendered-frame-loop` | Boiler-room frames, not real camera images, reach the local model; overlays are excluded; stale frames do not queue |
+| Capture clean rendered frames and run live inference | 3 + 1 | In review | `vision/rendered-frame-loop` | Boiler-room frames, not real camera images, reach the local model; overlays are excluded; stale frames do not queue |
 | Recognize and highlight the single target | 1 + 3 | Ready | `vision/single-target` | On-phone detection of the rendered target produces a stable highlight associated with its mapped 3D object |
 | Complete phase 1 guided walk | 2 + 3 + 4 | Ready | `navigation/single-target-walk` | User aligns, sees and follows the route, recognizes the target and reaches its approach point on the actual phone |
 | Expand extraction to multiple 3D assets | 1 + 2 + 3 | Ready | `scene/extract-equipment` | After single-target integration, expand persistent boxes and labels for the scored extraction/proximity requirements |
@@ -114,6 +114,12 @@ Statuses: **Ready → In progress → In review → Done**. The coordinator upda
 - Use one branch per small milestone, push progress, open a PR, and merge working improvements frequently. Bring updated main into ongoing work when shared interfaces change.
 - Separate AI coding sessions on one machine need separate worktrees, or carefully separated file ownership in a shared workspace. One coordinator handles Git operations for agents sharing a workspace.
 - Mac build/device checks are required for iOS changes. Other members can contribute from Linux. Keep a stable demo version before attempting risky model or rendering improvements.
+
+## Rendered-frame inference device check
+
+6 November 2026, iPhone 15 with iOS 26.5. The release build classified three distinct Metal-rendered views with Apple's local Vision image classifier in 107, 59, and 61 ms. These are one initial and two subsequent inference times, not an end-to-end FPS benchmark. Each readback carries the originating camera pose, projection, and timestamp. The render target excludes the UIKit guidance overlay, and readback is capped at two samples per second with at most one sample in flight. The generic scene classifier does not identify or locate the mapped service target. Verification used the currently readable scan and simulated camera poses rather than a physical walk.
+
+To repeat on a connected, unlocked iPhone with the installed development build, launch it with `xcrun devicectl device process launch --device <device> --terminate-existing --console <bundle-id> -- --verify-rendered-vision` and look for the three `VALMET_VISION` results.
 
 ## Shared agreements before integration
 
