@@ -43,17 +43,23 @@ final class RenderedVision {
     let timestamp: CFTimeInterval
   }
 
+  struct Target {
+    let objectID: String
+    let bounds: PumpBounds
+    let referenceURLs: [URL]
+  }
+
   struct Prediction {
     let frame: Frame
-    let matched: Bool
+    let objectID: String?
+    var matched: Bool { objectID != nil }
     let distance: Float
     let redFraction: Float
     let inferenceMilliseconds: Int
   }
 
   var onPrediction: ((Prediction) -> Void)?
-  var bounds: PumpBounds?
-  var referenceURLs: [URL] = []
+  var target: Target?
   private var references: [VNFeaturePrintObservation]?
   private let queue = DispatchQueue(label: "valmet.rendered-vision", qos: .userInitiated)
   private let available = DispatchSemaphore(value: 1)
@@ -92,15 +98,14 @@ final class RenderedVision {
   func capture(_ texture: MTLTexture, command: MTLCommandBuffer, frame: Frame) {
     guard #available(iOS 17, *), frame.timestamp - lastSample >= 0.5,
           available.wait(timeout: .now()) == .success else { return }
-    let region = bounds?.region(transform: frame.projection * frame.pose.inverse)
-    guard let region, !referenceURLs.isEmpty else {
+    guard let target, !target.referenceURLs.isEmpty,
+          let region = target.bounds.region(transform: frame.projection * frame.pose.inverse) else {
       lastSample = frame.timestamp
       available.signal()
-      onPrediction?(Prediction(frame: frame, matched: false, distance: -1,
+      onPrediction?(Prediction(frame: frame, objectID: nil, distance: -1,
                                redFraction: 0, inferenceMilliseconds: 0))
       return
     }
-    let urls = referenceURLs
     let width = texture.width, height = texture.height
     let stride = ((width * 4 + 255) / 256) * 256
     let length = stride * height
@@ -137,7 +142,7 @@ final class RenderedVision {
           let red = self.redFraction(staging, width: width, height: height, stride: stride, region: region)
           do {
             if self.references == nil {
-              self.references = try urls.compactMap { url in
+              self.references = try target.referenceURLs.compactMap { url in
                 guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
                       let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else { return nil }
                 return try self.feature(VNImageRequestHandler(cgImage: image, orientation: .up))
@@ -157,7 +162,7 @@ final class RenderedVision {
                 }
               }
             }
-            let result = Prediction(frame: frame, matched: closest <= 0.72,
+            let result = Prediction(frame: frame, objectID: closest <= 0.72 ? target.objectID : nil,
                                     distance: closest.isFinite ? closest : -1, redFraction: red,
                                     inferenceMilliseconds: Int((CACurrentMediaTime() - started) * 1000))
             DispatchQueue.main.async { [weak self] in self?.onPrediction?(result) }

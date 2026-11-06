@@ -60,10 +60,10 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
   private let visionStatus = UILabel()
   private let verifyVision: Bool
   private var verificationFrames = 0
-  private var lastTargetMatch: CFTimeInterval?
+  private var lastTargetMatch: RenderedVision.Frame?
+  private var currentPose: simd_float4x4?
   private var targetBounds: PumpBounds?
   private var targetName: String?
-  private var targetID: String?
   private let align = UIButton(type: .system)
   private let toggle = UIButton(type: .system)
   private var alignment: WorldAlignment?
@@ -89,7 +89,6 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
       let target = model.objects[index]
       targetBounds = target.bounds.flatMap(PumpBounds.init)
       targetName = target.name
-      targetID = target.objectId
     }
     super.init(nibName: nil, bundle: nil)
   }
@@ -133,13 +132,13 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     visionStatus.isHidden = true
     renderer.vision.onPrediction = { [weak self] prediction in
       guard let self, self.view.window != nil, !self.virtual.isHidden else { return }
-      self.lastTargetMatch = prediction.matched ? prediction.frame.timestamp : nil
+      guard let pose = self.currentPose, self.isCurrent(prediction.frame, comparedWith: pose) else { return }
+      self.lastTargetMatch = prediction.matched ? prediction.frame : nil
       if self.verifyVision {
-        print("VALMET_VISION sample=\(self.verificationFrames) object=\(prediction.matched ? self.targetID ?? "none" : "none") ts=\(prediction.frame.timestamp) x=\(prediction.frame.pose.columns.3.x) matched=\(prediction.matched) distance=\(prediction.distance) red=\(prediction.redFraction) ms=\(prediction.inferenceMilliseconds)")
+        print("VALMET_VISION sample=\(self.verificationFrames) object=\(prediction.objectID ?? "none") ts=\(prediction.frame.timestamp) x=\(prediction.frame.pose.columns.3.x) matched=\(prediction.matched) distance=\(prediction.distance) red=\(prediction.redFraction) ms=\(prediction.inferenceMilliseconds)")
         fflush(stdout)
         self.verificationFrames += 1
       }
-      guard CACurrentMediaTime() - prediction.frame.timestamp < 2 else { return }
       self.visionStatus.text = prediction.matched ? "Vision matched · \(self.targetName ?? "Target")" : "Vision · Searching for the target"
       self.visionStatus.isHidden = false
     }
@@ -219,7 +218,9 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
         SIMD4(zoom / Float(size.width / size.height), 0, 0, 0), SIMD4(0, zoom, 0, 0),
         SIMD4(0, 0, f / (n - f), -1), SIMD4(0, 0, n * f / (n - f), 0)
       ))
+      currentPose = pose
       renderer.render(pose: pose, projection: projection)
+      drawGuide(projection * pose.inverse)
     }
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.72) { [weak self] in
       self?.verifyRenderedFrame(index: index + 1)
@@ -335,6 +336,13 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     return "At service position · \(model.objects[index].name)"
   }
 
+  private func isCurrent(_ frame: RenderedVision.Frame, comparedWith pose: simd_float4x4) -> Bool {
+    // Don't attach an old appearance match to a newly aligned or turned view.
+    CACurrentMediaTime() - frame.timestamp < 1.2 &&
+      simd_distance(frame.pose.columns.3, pose.columns.3) <= 0.45 &&
+      simd_dot(frame.pose.columns.2, pose.columns.2) >= 0.90
+  }
+
   private func drawGuide(_ transform: simd_float4x4) {
     let bounds = virtual.bounds
     func project(_ point: SIMD3<Float>) -> CGPoint? {
@@ -356,7 +364,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     }
 
     let ring = UIBezierPath()
-    if let match = lastTargetMatch, CACurrentMediaTime() - match < 1.2,
+    if let match = lastTargetMatch, let pose = currentPose, isCurrent(match, comparedWith: pose),
        let region = targetBounds?.region(transform: transform) {
       ring.append(UIBezierPath(roundedRect: CGRect(
         x: region.minX * bounds.width, y: (1 - region.maxY) * bounds.height,
@@ -434,6 +442,11 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     }
     let size = virtual.bounds.size
     if showModel, size.width > 0, size.height > 0 {
+      currentPose = pose
+      if let match = lastTargetMatch, !isCurrent(match, comparedWith: pose) {
+        lastTargetMatch = nil
+        visionStatus.text = "Vision · Searching for the target"
+      }
       virtual.isHidden = false
       let projection = frame.camera.projectionMatrix(for: orientation, viewportSize: size, zNear: 0.04, zFar: 40)
       renderer.render(pose: pose, projection: projection)
@@ -471,6 +484,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
       buttons.removeAll()
       visionStatus.isHidden = true
       lastTargetMatch = nil
+      currentPose = nil
     }
     align.isEnabled = ready || alignment != nil
     toggle.isEnabled = alignment != nil && ready

@@ -89,13 +89,13 @@ Statuses: **Ready → In progress → In review → Done**. The coordinator upda
 
 | Task | Owner | Status | Suggested branch | Done when |
 | --- | --- | --- | --- | --- |
-| Validate scene preparation and coordinate system | 1 + 3 | Ready | `scene/validate-room` | Actual scan renders; axes, scale, floor, filtering and device behaviour are recorded |
+| Validate scene preparation and coordinate system | 1 + 3 | In review | `scene/validate-room` | Actual scan renders; axes, scale, floor, filtering and device behaviour are recorded |
 | Agree shared object/data interface | 1 + 2 + 3 | Ready | `integration/asset-contract` | Sample object, bounds, asset mapping and viewer result are understood by all three |
 | Confirm target phone and baseline model/export | 1 + 3 | Ready | `vision/iphone-baseline` | Model loads and predicts on the actual phone; input format, labels, size and latency are recorded |
 | Capture clean rendered frames and run live inference | 3 + 1 | In review | `vision/rendered-frame-loop` | Boiler-room frames, not real camera images, reach the local model; overlays are excluded; stale frames do not queue |
 | Recognize and highlight the single target | 1 + 3 | In review | `vision/single-target` | On-phone detection of the rendered target produces a stable highlight associated with its mapped 3D object |
 | Complete phase 1 guided walk | 2 + 3 + 4 | Ready | `navigation/single-target-walk` | User aligns, sees and follows the route, recognizes the target and reaches its approach point on the actual phone |
-| Expand extraction to multiple 3D assets | 1 + 2 + 3 | Ready | `scene/extract-equipment` | After single-target integration, expand persistent boxes and labels for the scored extraction/proximity requirements |
+| Expand extraction to multiple 3D assets | 1 + 2 + 3 | In review | `scene/extract-equipment` | After single-target integration, expand persistent boxes and labels for the scored extraction/proximity requirements |
 | Import workbook and map a faulty target | 2 | Ready | `ai/asset-data` | Target and surrounding assets show reproducibly mapped supplied records, clearly labelled synthetic |
 | Validate routes and add automatic inspection playback | 2 + 3 | Ready | `navigation/inspection-route` | Start-to-target movement follows the walkability model; unreachable cases are handled |
 | Show nearby assets and their condition | 3 | Ready | `ui/proximity-overlays` | Boxes and information change with simulated position without showing every asset at once |
@@ -121,7 +121,13 @@ Statuses: **Ready → In progress → In review → Done**. The coordinator upda
 
 To repeat on a connected, unlocked iPhone with the installed development build, launch it with `xcrun devicectl device process launch --device <device> --terminate-existing --console <bundle-id> -- --verify-rendered-vision` and look for seven `VALMET_VISION` results. Expected outcomes in order: match, match, no match, no match, match, match, match.
 
-The first mapped asset is `boiler-room:red-circulation-pump`. Its manually registered 3D bounds are `[5.77, 1.045, 2.27]` to `[6.10, 1.32, 2.63]` in model metres. The observed-floor route to its separate service cell `[21, 7]` is 3.25 m. The iPhone projects the mapped volume with the sampled frame pose and compares its rendered pixels with three local reference crops via Apple Vision feature prints. This is a verifier for a known 3D location. It does not search the whole image for arbitrary equipment or infer identity from workbook data. On iPhone 15, five target views matched, including one partially occluded view. A view aimed at a different pump and a view aimed away produced no match. Feature distances for the five accepted views were 0.397–0.474, and inference took 12–88 ms including first-use setup. This small pose-driven test does not establish generalization or physical walk acceptance. The scan and its derived reference images are local.
+The first mapped asset is `boiler-room:red-circulation-pump`. Its manually registered 3D bounds are `[5.77, 1.045, 2.27]` to `[6.10, 1.32, 2.63]` in model metres. The observed-floor route to its separate service cell `[21, 7]` is 3.25 m. The iPhone projects the mapped volume with the sampled frame pose and compares its rendered pixels with three local reference crops via Apple Vision feature prints. This is a verifier for a known 3D location. It does not search the whole image for arbitrary equipment or infer identity from workbook data. On iPhone 15, five target views matched, including one partially occluded view. A view aimed at a different pump and a view aimed away produced no match. Feature distances for the five accepted views were 0.397–0.474, and inference took 12–88 ms including first-use setup. In a separate reproducible macOS evaluation, two held-out target crops scored 0.380 and 0.650 and three other equipment crops scored 0.950–1.075 (lower is closer; threshold 0.72). Run the reference tool with `--evaluate` to repeat. These small pose-driven tests do not establish generalization or physical walk acceptance. The scan and its derived reference images are local.
+
+## Scene and equipment handoff
+
+The local builder validates 502,482 of 1,506,136 declared EGS records. The unreadable PLY payload tail is not mapped. The rendered coordinates are `(x + 5, 1.07 − y, −0.7 − z)` from the source; model +Y is up and floor height is estimated at source y=1.07. The navigation grid uses 0.25 model units per cell. The source has no independent scale calibration, so distances assume one source unit is one metre.
+
+The generated `assets/valmet/site.json` now has 11 reviewed objects: five pumps, one inline valve, two control cabinets and three blue actuators. This is semi-automatic extraction using reviewed seed volumes and quantiles of the supporting Gaussians, not discovery of every object in the room. The bounds were inspected in multiple rendered views. Each record has stable `objectId`, `equipmentType`, metric `bounds` and `supportingSplats`. Keep `objectId` separate from the synthetic workbook's `asset_id`. Only the primary pump has a walkable `service` cell and an evaluated on-device visual verifier. The verifier returns the mapped `objectID` with its capture pose, timestamp, and feature distance. Other catalog boxes are available for proximity and workbook mapping; their existence does not imply live recognition.
 
 ## Shared agreements before integration
 
@@ -141,7 +147,7 @@ The first mapped asset is `boiler-room:red-circulation-pump`. Its manually regis
 ## Known gaps and decisions
 
 - The full brief favours lightweight UI and backend intelligence. iOS with live on-phone recognition is our chosen product requirement; keep it focused so the scored spatial/data/diagnostic work is delivered.
-- The main scene builder currently selects a generic geometric inspection target; this is not semantic recognition or fine-tuning.
+- The scene builder uses 11 visually reviewed seed volumes. The on-device feature model verifies one mapped pump; it has not been fine-tuned for general equipment detection.
 - The source PLY produced suspicious values in a basic binary inspection. Current code filters invalid records; validate retained scene coverage rather than treating filtering as proof that the source issue is resolved.
 - Workbook scene coordinates are placeholders. Remap them to extracted objects; the brief explicitly allows procedural/random metadata association.
 - The local workbook contains 4,320 telemetry samples. Its referenced `telemetry_full_14d_30min.csv` is not in the supplied ZIP. Use the included sample unless more data is provided.

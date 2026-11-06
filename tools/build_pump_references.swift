@@ -1,6 +1,7 @@
 // Run from the repository root after tools/build_boiler_room.py.
 import AppKit
 import Metal
+import Vision
 import simd
 
 struct Uniforms {
@@ -56,13 +57,14 @@ pass.colorAttachments[0].storeAction = .store
 pass.colorAttachments[0].clearColor = MTLClearColor(red: 0.10, green: 0.11, blue: 0.12, alpha: 1)
 
 struct Site: Decodable {
-  struct Object: Decodable { let bounds: [[Float]] }
+  struct Object: Decodable { let objectId: String; let bounds: [[Float]] }
   let width, depth: Int
   let cellSize: Float
   let objects: [Object]
 }
 let site = try JSONDecoder().decode(Site.self, from: Data(contentsOf: assets.appendingPathComponent("site.json")))
-let bounds = site.objects[0].bounds
+let target = site.objects[0]
+let evaluate = CommandLine.arguments.contains("--evaluate")
 let aim = SIMD3<Float>(5.943, 1.164, 2.447)
 let near: Float = 0.04, far: Float = 40, zoom: Float = 1.35
 let projection = simd_float4x4(columns: (
@@ -71,11 +73,7 @@ let projection = simd_float4x4(columns: (
 ))
 func vector(_ p: SIMD3<Float>, _ w: Float) -> SIMD4<Float> { SIMD4(p.x, p.y, p.z, w) }
 
-for (name, eye) in [
-  ("a", SIMD3<Float>(5.375, 1.50, 1.875)),
-  ("b", SIMD3<Float>(5.125, 1.50, 1.875)),
-  ("e", SIMD3<Float>(5.420, 1.53, 1.960)),
-] {
+func render(eye: SIMD3<Float>, aim: SIMD3<Float>, bounds: [[Float]]) -> NSBitmapImageRep {
   let forward = simd_normalize(aim - eye)
   let right = simd_normalize(simd_cross(SIMD3(0, 1, 0), -forward))
   let up = simd_cross(-forward, right)
@@ -120,6 +118,51 @@ for (name, eye) in [
     bytesPerRow: w * 4, bitsPerPixel: 32)!
   texture.getBytes(image.bitmapData!, bytesPerRow: w * 4,
                    from: MTLRegionMake2D(minX, minY, w, h), mipmapLevel: 0)
+  return image
+}
+
+let trainingEyes: [(String, SIMD3<Float>)] = [
+  ("a", SIMD3(5.375, 1.50, 1.875)), ("b", SIMD3(5.125, 1.50, 1.875)),
+  ("e", SIMD3(5.420, 1.53, 1.960)),
+]
+let references = try trainingEyes.map { name, eye in
+  let image = render(eye: eye, aim: aim, bounds: target.bounds)
   try image.representation(using: .png, properties: [:])!
     .write(to: assets.appendingPathComponent("pump-reference-\(name).png"), options: .atomic)
+  return image
+}
+
+if evaluate {
+  func feature(_ image: NSBitmapImageRep) throws -> VNFeaturePrintObservation {
+    let request = VNGenerateImageFeaturePrintRequest()
+    if #available(macOS 14, *) { request.revision = VNGenerateImageFeaturePrintRequestRevision2 }
+    request.imageCropAndScaleOption = .scaleFill
+    try VNImageRequestHandler(cgImage: image.cgImage!, orientation: .up).perform([request])
+    return request.results!.first!
+  }
+  let prints = try references.map(feature)
+  let checks: [(String, SIMD3<Float>, Site.Object, Bool)] = [
+    ("held-out nearby", SIMD3(5.31, 1.50, 1.96), target, true),
+    ("held-out partially occluded", SIMD3(4.625, 1.50, 1.625), target, true),
+    ("different red pump", SIMD3(5.375, 1.50, 1.875), site.objects[1], false),
+    ("different wall pump", SIMD3(6.50, 1.50, 1.25), site.objects[2], false),
+    ("blue inline valve", SIMD3(6.50, 1.50, 1.25), site.objects[5], false),
+  ]
+  var errors = 0
+  for (name, eye, object, expected) in checks {
+    let box = object.bounds
+    let center = (0..<3).map { (box[0][$0] + box[1][$0]) / 2 }
+    let look = SIMD3(center[0], center[1], center[2])
+    let observation = try feature(render(eye: eye, aim: look, bounds: box))
+    let distances = try prints.map { reference in
+      var distance: Float = 0
+      try observation.computeDistance(&distance, to: reference)
+      return distance
+    }
+    let distance = distances.min()!
+    let matched = distance <= 0.72
+    if matched != expected { errors += 1 }
+    print("\(name): distance \(String(format: "%.3f", distance)) · expected \(expected), matched \(matched)")
+  }
+  if errors != 0 { exit(1) }
 }
