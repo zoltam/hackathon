@@ -24,7 +24,7 @@ def prepare(source, destination):
     count = int(next(line.split()[-1] for line in header if line.startswith('element vertex ')))
     columns = [line.split()[-1] for line in header if line.startswith('property float ')]
     raw = np.memmap(source, dtype='<f4', mode='r', offset=offset, shape=(count, len(columns)))
-    keys = ('x', 'y', 'z', 'rot_0', 'rot_1', 'rot_2', 'rot_3', 'f_dc_0', 'f_dc_1', 'f_dc_2', 'opacity')
+    keys = ('x', 'y', 'z', 'rot_0', 'rot_1', 'rot_2', 'rot_3', 'f_dc_0', 'f_dc_1', 'f_dc_2', 'opacity', 'scale_0', 'scale_1', 'scale_2')
     values = raw[:, [columns.index(key) for key in keys]]
     valid = np.isfinite(values).all(axis=1) & (np.abs(values) < 40).all(axis=1)
     values = values[valid]
@@ -97,16 +97,29 @@ def prepare(source, destination):
         }],
     }
 
-    # XYZ and DC spherical-harmonic color, interleaved float32. Keep one
-    # representative point per 8 mm voxel to limit work on the iPhone.
-    _, indices = np.unique(np.floor(xyz / .008).astype(np.int32), axis=0, return_index=True)
-    rgb = np.clip(.5 + .28209479 * values[indices, 7:10], 0, 1)
-    rgba = np.column_stack((rgb, np.ones(len(indices))))
-    points = np.column_stack((xyz[indices], rgba)).astype('<f4')
+    # Keep anisotropic Gaussian shape, opacity, and DC color for Metal.
+    # Convert the quaternion's coordinate frame by rotating 180° around x.
+    q = values[:, 3:7] * [1, 1, -1, -1]
+    w, qx, qy, qz = q.T
+    rotation = np.column_stack((
+        1 - 2*(qy*qy + qz*qz), 2*(qx*qy - qz*w), 2*(qx*qz + qy*w),
+        2*(qx*qy + qz*w), 1 - 2*(qx*qx + qz*qz), 2*(qy*qz - qx*w),
+        2*(qx*qz - qy*w), 2*(qy*qz + qx*w), 1 - 2*(qx*qx + qy*qy),
+    )).reshape(-1, 3, 3)
+    axes = rotation * np.exp(np.clip(values[:, 11:14], -11, -1))[..., None, :]
+    covariance = axes @ np.swapaxes(axes, 1, 2)
+    rgb = np.clip(.5 + .28209479 * values[:, 7:10], 0, 1)
+    opacity = 1 / (1 + np.exp(-values[:, 10]))
+    zero = np.zeros(len(values))
+    points = np.column_stack((
+        xyz, opacity, rgb, zero,
+        covariance[:, 0, 0], covariance[:, 0, 1], covariance[:, 0, 2], covariance[:, 1, 1],
+        covariance[:, 1, 2], covariance[:, 2, 2], zero, zero,
+    )).astype('<f4')
     destination.mkdir(parents=True, exist_ok=True)
     (destination / 'site.json').write_text(json.dumps(model) + '\n', encoding='utf-8')
-    points.tofile(destination / 'boiler-room.bin')
-    print(f'{len(points):,} colored points, {len(best)} walkable cells, {dist[service]} route steps')
+    points.tofile(destination / 'boiler-room.splats')
+    print(f'{len(points):,} Gaussian splats, {len(best)} walkable cells, {dist[service]} route steps')
 
 
 if __name__ == '__main__':
