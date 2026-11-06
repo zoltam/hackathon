@@ -264,6 +264,28 @@ final class RouteMapView: UIControl {
 final class WorldWalk: UIViewController, ARSessionDelegate {
   enum VisionMode { case normal, verify, benchmark, journey, obstacle }
 
+  struct VerificationPose: Decodable {
+    let id: String
+    let eye, look: SIMD3<Float>
+    let expectedIDs, absentIDs: [String]?
+
+    var isValid: Bool {
+      let delta = look - eye
+      let horizontal = simd_length_squared(SIMD2(delta.x, delta.z))
+      return !id.isEmpty && id.allSatisfy { $0.isLetter || $0.isNumber || "-_".contains($0) } &&
+        [eye.x, eye.y, eye.z, look.x, look.y, look.z].allSatisfy(\.isFinite) &&
+        simd_length_squared(delta).isFinite && horizontal > 0.000001
+    }
+  }
+
+  private struct VerificationSamples {
+    let started = CACurrentMediaTime()
+    var count = 0
+    var raw = Set<String>()
+    var projected = Set<String>()
+    var confirmed = Set<String>()
+  }
+
   private let model: WalkSite
   private let renderer: SplatRenderer
   private let reality = ARSCNView()
@@ -281,6 +303,9 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
   private lazy var routeMap = RouteMapView(model: model, image: mapImage)
   private weak var expandedMap: RouteMapView?
   private var panelTrailing: NSLayoutConstraint?
+  private let verificationPoses: [VerificationPose]?
+  private var verificationSamples: VerificationSamples?
+  private var verificationFailures = 0
   private var verificationFrames = 0
   private var journeyStart: CFTimeInterval?
   private var journeyConfirmedTarget = false
@@ -341,12 +366,13 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
   override var canBecomeFirstResponder: Bool { model.keyControls }
 
   init(model: WalkSite, renderer: SplatRenderer, detectorURL: URL?, visionMode: VisionMode = .normal,
-       mapImage: UIImage? = nil) {
+       mapImage: UIImage? = nil, verificationPoses: [VerificationPose]? = nil) {
     self.model = model
     self.renderer = renderer
     self.detectorURL = detectorURL
     self.mapImage = mapImage
     self.visionMode = visionMode
+    self.verificationPoses = verificationPoses
     super.init(nibName: nil, bundle: nil)
   }
 
@@ -403,17 +429,26 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
         self.benchmarkLatencies.append(prediction.inferenceMilliseconds)
       }
       guard self.view.window != nil, !self.virtual.isHidden, let pose = self.currentPose else { return }
+      if self.verificationPoses != nil {
+        guard let samples = self.verificationSamples,
+              prediction.frame.timestamp >= samples.started else { return }
+      }
       self.observeObstacle(in: prediction)
       guard self.isCurrent(prediction.frame, comparedWith: pose) else {
         self.clearDetections()
         return
       }
       let viewProjection = prediction.frame.projection * prediction.frame.pose.inverse
+      var projectedIDs = Set<String>()
       let detections = prediction.detections.filter { detection in
         guard let object = self.model.objects.first(where: { $0.objectId == detection.objectID }) else { return false }
-        guard self.model.hasWorkbook != true || object.workbookTag != nil else { return false }
-        guard let bounds = object.bounds else { return true }
-        return RenderedVision.matches(detection, to: bounds, viewProjection: viewProjection)
+        let eligible = self.model.hasWorkbook != true || object.workbookTag != nil
+        guard eligible || self.verificationPoses != nil else { return false }
+        if let bounds = object.bounds {
+          guard RenderedVision.matches(detection, to: bounds, viewProjection: viewProjection) else { return false }
+          if self.verificationPoses != nil { projectedIDs.insert(detection.objectID) }
+        }
+        return eligible
       }
       self.lastDetection = detections.isEmpty ? nil : prediction.frame
       let confirmedIDs = self.drawDetections(detections)
@@ -427,7 +462,12 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
         print("VALMET_JOURNEY phase=target_confirmed id=\(id)")
         fflush(stdout)
       }
-      if self.visionMode == .verify {
+      if self.verificationPoses != nil {
+        self.verificationSamples?.count += 1
+        self.verificationSamples?.raw.formUnion(prediction.detections.map(\.objectID))
+        self.verificationSamples?.projected.formUnion(projectedIDs)
+        self.verificationSamples?.confirmed.formUnion(confirmedIDs)
+      } else if self.visionMode == .verify {
         let labels = detections.map { detection in
           let box = detection.bounds
           let details = String(format: "%.3f[%.3f,%.3f,%.3f,%.3f]", detection.confidence,
@@ -517,11 +557,17 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
         self.visionStatus.isHidden = false
         let log = self.visionMode == .obstacle ? "VALMET_OBSTACLE error=detector_unavailable" :
           self.visionMode == .journey ? "VALMET_JOURNEY error=detector_unavailable" :
-          self.visionMode == .benchmark ? "VALMET_BENCH error=detector_unavailable" : "VALMET_VISION detector unavailable"
+          self.visionMode == .benchmark ? "VALMET_BENCH error=detector_unavailable" :
+          self.verificationPoses == nil ? "VALMET_VISION detector unavailable" : "VALMET_VISION result=failed error=detector_unavailable"
         print(log)
         fflush(stdout)
       } else if self.visionMode == .verify {
-        self.verifyRenderedFrame(index: 0)
+        if self.verificationPoses == nil {
+          self.verifyRenderedFrame(index: 0)
+        } else {
+          self.keepVerificationScreenAwake()
+          self.verifyCatalogPose(index: 0)
+        }
       } else if self.visionMode == .benchmark {
         self.startBenchmark()
       } else if self.visionMode == .obstacle {
@@ -569,6 +615,52 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     let look = origin + (index == 2 ? SIMD3<Float>(6.90, 1.15, 2.43) :
       index == 3 ? SIMD3(3.0, 1.15, 1.875) : SIMD3(5.943, 1.164, 2.447))
     renderScriptedView(eye: eye, look: look)
+  }
+
+  private func verifyCatalogPose(index: Int) {
+    guard let poses = verificationPoses, view.window != nil else { return }
+    guard view.window?.windowScene?.activationState == .foregroundActive else {
+      verificationSamples = nil
+      restoreVerificationIdleTimer()
+      print("VALMET_VISION result=failed error=inactive")
+      fflush(stdout)
+      return
+    }
+    guard poses.indices.contains(index) else {
+      restoreVerificationIdleTimer()
+      print("VALMET_VISION result=\(verificationFailures == 0 ? "passed" : "failed") poses=\(poses.count) failures=\(verificationFailures)")
+      fflush(stdout)
+      return
+    }
+    let pose = poses[index]
+    if let samples = verificationSamples {
+      let elapsed = CACurrentMediaTime() - samples.started
+      if elapsed >= 3 || (elapsed >= 1 && samples.count >= 2) {
+        let missing = Set(pose.expectedIDs ?? []).subtracting(samples.confirmed)
+        let unexpected = Set(pose.absentIDs ?? []).intersection(samples.confirmed)
+        let passed = samples.count >= 2 && missing.isEmpty && unexpected.isEmpty
+        if !passed { verificationFailures += 1 }
+        func list(_ ids: Set<String>) -> String { ids.isEmpty ? "none" : ids.sorted().joined(separator: ",") }
+        let tags = model.objects.compactMap { object -> String? in
+          guard let id = object.objectId, samples.confirmed.contains(id), let tag = object.workbookTag else { return nil }
+          return "\(id)@\(tag)"
+        }
+        print("VALMET_VISION pose=\(pose.id) samples=\(samples.count) raw=\(list(samples.raw)) projected=\(list(samples.projected)) confirmed=\(list(samples.confirmed)) workbook=\(model.hasWorkbook == true) tags=\(list(Set(tags))) missing=\(list(missing)) unexpected=\(list(unexpected)) status=\(passed ? "passed" : "failed")")
+        fflush(stdout)
+        verificationSamples = nil
+        verifyCatalogPose(index: index + 1)
+        return
+      }
+    } else {
+      clearDetections()
+      verificationSamples = VerificationSamples()
+      virtual.isHidden = false
+      visionStatus.isHidden = false
+    }
+    renderScriptedView(eye: pose.eye, look: pose.look)
+    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0 / 30.0) { [weak self] in
+      self?.verifyCatalogPose(index: index)
+    }
   }
 
   private func renderScriptedView(eye: SIMD3<Float>, look: SIMD3<Float>) {
@@ -1436,6 +1528,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
   }
 
   @objc private func closeWalk() {
+    if verificationPoses != nil { restoreVerificationIdleTimer() }
     reality.session.pause()
     dismiss(animated: true)
   }

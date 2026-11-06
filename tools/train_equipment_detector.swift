@@ -14,15 +14,19 @@ func value(for option: String) -> String? {
 }
 let dataset = value(for: "--dataset").map { URL(fileURLWithPath: $0) } ??
   root.appendingPathComponent("build/valmet-detection-hq")
+let evaluateOnly = arguments.contains("--evaluate-only")
+let checkpointPath = value(for: "--checkpoint-dir")
+let writesModel = checkpointPath != nil || !evaluateOnly
 let output = value(for: "--model").map { URL(fileURLWithPath: $0) } ??
-  root.appendingPathComponent("assets/valmet/equipment-detector.mlmodel")
+  (writesModel ? dataset.appendingPathComponent("candidate.mlmodel") :
+    root.appendingPathComponent("assets/valmet/equipment-detector.mlmodel"))
 let iterations = arguments.compactMap(Int.init).first ?? 600
 let split = value(for: "--split") ?? "validation"
 guard ["validation", "test"].contains(split) else { fatalError("Unknown evaluation split") }
 let annotation: MLObjectDetector.AnnotationType = .boundingBox()
 setbuf(stdout, nil)
 
-if let path = value(for: "--checkpoint-dir") {
+if let path = checkpointPath {
   let directory = URL(fileURLWithPath: path)
   let session = try MLObjectDetector.restoreTrainingSession(
     sessionParameters: MLTrainingSessionParameters(sessionDirectory: directory)
@@ -34,7 +38,7 @@ if let path = value(for: "--checkpoint-dir") {
   let detector = try MLObjectDetector(checkpoint: snapshot)
   try detector.write(to: output)
   print("Exported \(output.lastPathComponent)")
-} else if !arguments.contains("--evaluate-only") {
+} else if !evaluateOnly {
   let parameters = MLObjectDetector.ModelParameters(
     validation: .dataSource(.directoryWithImagesAndJsonAnnotation(at: dataset.appendingPathComponent("validation"))),
     batchSize: 8,
@@ -126,8 +130,13 @@ for image in labels {
   falseNegative += image.annotation.count - used.count
 }
 for label in support.keys.sorted() { print("\(label): \(correct[label, default: 0])/\(support[label]!)") }
-if let label = value(for: "--report-label") {
-  print("VALMET_EVAL label=\(label) tp=\(correct[label, default: 0]) fp=\(incorrect[label, default: 0]) support=\(support[label, default: 0])")
+var reportLabels = Set(support.keys).union(incorrect.keys)
+if let label = value(for: "--report-label") { reportLabels.insert(label) }
+for label in reportLabels.sorted() {
+  let tp = correct[label, default: 0]
+  let fp = incorrect[label, default: 0]
+  let total = support[label, default: 0]
+  print("VALMET_EVAL label=\(label) tp=\(tp) fp=\(fp) support=\(total) fn=\(total - tp)")
 }
 if partialLabels { print("Partial labels: predictions for unannotated classes are ignored.") }
 print("Held-out \(partialLabels ? "partial-camera" : "rendered") \(split) · \(labels.count) frames · TP \(truePositive) FP \(falsePositive) FN \(falseNegative) · IoU ≥ 0.50")

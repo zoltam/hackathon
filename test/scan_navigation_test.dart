@@ -12,12 +12,16 @@ void main() {
     () {
       final source = scan.readAsStringSync();
       final site = Site.fromJson(source);
-      final catalog =
-          (jsonDecode(source) as Map<String, dynamic>)['objects'] as List;
+      final scene = jsonDecode(source) as Map<String, dynamic>;
+      final catalog = scene['objects'] as List;
       const clearance = .1;
       expect(site.cellSize, .1);
       expect(site.originShift, [2, 0, 6.25]);
-      expect(site.objects, hasLength(17));
+      expect(site.objects, hasLength(33));
+      expect(
+        site.objects.map((object) => object.objectId).toSet(),
+        hasLength(33),
+      );
       expect(
         catalog.where((object) => object['detectorEnabled'] != false),
         hasLength(11),
@@ -29,8 +33,9 @@ void main() {
         [7.77, 1.045, 8.52],
         [8.1, 1.32, 8.88],
       ]);
-      // Centre, left, upper-left, upper-middle, upper-right, lower-left, bottom.
-      for (final cell in <Cell>[
+      // Entrance, centre, left, upper aisle, lower-left, bottom.
+      final starts = <Cell>[
+        site.start,
         (69, 65),
         (33, 43),
         (53, 29),
@@ -42,13 +47,7 @@ void main() {
         (96, 36),
         (42, 83),
         (66, 92),
-      ]) {
-        expect(
-          site.route(site.start, cell, clearanceMetres: clearance),
-          isNotEmpty,
-          reason: 'Reviewed region $cell must be reachable',
-        );
-      }
+      ];
       for (final obstacle in <Cell>[(90, 32), (91, 32)]) {
         expect(site.isWalkable(obstacle, clearanceMetres: clearance), isFalse);
       }
@@ -67,45 +66,99 @@ void main() {
       final walkable = site.walkableCells(clearanceMetres: clearance).toSet();
       final approaches = <Cell>{};
       for (final device in devices) {
-        final approach = device.service!;
-        final id = device.objectId;
         expect(
-          approaches.add(approach),
+          approaches.add(device.service!),
           isTrue,
-          reason: '$id shares an approach',
+          reason: '${device.objectId} shares an approach',
         );
-        final route = NavigationJourney(
-          site: site,
-          target: device,
-          clearanceMetres: clearance,
-        ).route;
-        expect(route, isNotEmpty, reason: id);
-        expect(route.first, site.start, reason: id);
-        expect(route.last, approach, reason: id);
-        expect(
-          route.where((cell) => !walkable.contains(cell)),
-          isEmpty,
-          reason: id,
+      }
+      for (final start in starts) {
+        final layout = Site.fromJson(
+          jsonEncode({
+            ...scene,
+            'start': [start.$1, start.$2],
+          }),
         );
-        for (var i = 1; i < route.length; i++) {
-          final (x, z) = route[i];
-          final (previousX, previousZ) = route[i - 1];
-          expect((x - previousX).abs() + (z - previousZ).abs(), 1, reason: id);
+        for (final target in devices) {
+          final approach = target.service!;
+          final reason = '${target.objectId} from $start';
+          final journey = NavigationJourney(
+            site: layout,
+            target: target,
+            clearanceMetres: clearance,
+          );
+          expectRoute(journey.route, start, approach, walkable, reason);
+          expect(journey.status, JourneyStatus.ready, reason: reason);
+          journey.play();
+          journey.advance(const Duration(minutes: 1));
+          expect(journey.status, JourneyStatus.arrived, reason: reason);
+          expect(journey.remainingMetres, 0, reason: reason);
+          expect(journey.position.x, closeTo((approach.$1 + .5) * .1, 1e-9));
+          expect(journey.position.y, closeTo((approach.$2 + .5) * .1, 1e-9));
         }
       }
-      final journey = NavigationJourney(
-        site: site,
-        target: pump,
-        clearanceMetres: clearance,
-      );
       expect(pump.service, (73, 81));
-      expect(journey.route, hasLength(32));
-      journey.play();
-      journey.advance(const Duration(minutes: 1));
-      expect(journey.status, JourneyStatus.arrived);
+      expect(
+        site.route(site.start, pump.service!, clearanceMetres: clearance),
+        hasLength(32),
+      );
+
+      const current = (61, 65);
+      // The native demo's 0.50 m crate with 0.02 m padding on each side.
+      final crate = <Cell>{
+        for (var x = 66; x <= 72; x++)
+          for (var z = 62; z <= 68; z++) (x, z),
+      };
+      final detourFloor = site
+          .walkableCells(clearanceMetres: clearance, additionalBlocked: crate)
+          .toSet();
+      final barrier = <Cell>{for (var z = 0; z < site.depth; z++) (70, z)};
+      final splitFloor = site
+          .walkableCells(clearanceMetres: clearance, additionalBlocked: barrier)
+          .toSet();
+      for (final target in devices) {
+        final goal = target.service!;
+        final id = target.objectId;
+        List<Cell> route(Cell from, Set<Cell> blocked) => site.route(
+          from,
+          goal,
+          clearanceMetres: clearance,
+          additionalBlocked: blocked,
+        );
+
+        final original = route(current, {});
+        expect(original.any(crate.contains), isTrue, reason: id);
+        final detour = route(current, crate);
+        expectRoute(detour, current, goal, detourFloor, '$id around crate');
+        expect(detour, isNot(original), reason: id);
+        expect(route((69, 65), crate), isEmpty, reason: '$id blocked start');
+        expect(route(current, {goal}), isEmpty, reason: '$id blocked goal');
+        expect(splitFloor, containsAll([current, goal]), reason: id);
+        expect(route(current, barrier), isEmpty, reason: '$id cut off');
+        expect(route(current, {}), original, reason: '$id cleared');
+      }
     },
     skip: !scan.existsSync()
         ? 'Generate the local Equipment Room scan first'
         : false,
   );
+}
+
+void expectRoute(
+  List<Cell> route,
+  Cell start,
+  Cell goal,
+  Set<Cell> walkable,
+  String reason,
+) {
+  expect(route, isNotEmpty, reason: reason);
+  expect(route.first, start, reason: reason);
+  expect(route.last, goal, reason: reason);
+  expect(route, everyElement(isIn(walkable)), reason: reason);
+  expect(route.toSet(), hasLength(route.length), reason: reason);
+  for (var i = 1; i < route.length; i++) {
+    final (x, z) = route[i];
+    final (previousX, previousZ) = route[i - 1];
+    expect((x - previousX).abs() + (z - previousZ).abs(), 1, reason: reason);
+  }
 }
