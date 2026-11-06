@@ -11,7 +11,10 @@ Cell _cell(Object? value) {
 
 class SiteObject {
   SiteObject(Map<String, dynamic> json)
-    : name = json['name'] as String,
+    : objectId =
+          json['object_id'] as String? ??
+          'grid:${json['x']}:${json['z']}:${json['width']}:${json['depth']}',
+      name = json['name'] as String,
       x = json['x'] as int,
       z = json['z'] as int,
       width = json['width'] as int,
@@ -21,6 +24,7 @@ class SiteObject {
       cells = (json['cells'] as List?)?.map(_cell).toList(),
       service = json['service'] == null ? null : _cell(json['service']);
 
+  final String objectId;
   final String name;
   final int x, z, width, depth;
   final double height;
@@ -54,7 +58,13 @@ class Site {
       floor = (json['floor'] as List?)?.map(_cell).toSet(),
       objects = (json['objects'] as List)
           .map((item) => SiteObject(item as Map<String, dynamic>))
-          .toList();
+          .toList() {
+    if (width <= 0 || depth <= 0 || !cellSize.isFinite || cellSize <= 0) {
+      throw const FormatException(
+        'Site dimensions and cell size must be positive',
+      );
+    }
+  }
 
   final String name;
   final int width, depth;
@@ -66,21 +76,61 @@ class Site {
   Iterable<SiteObject> visibleObjects(bool moved) =>
       objects.where((object) => !(moved && object.movable));
 
-  List<Cell> route(Cell from, Cell to, {bool moved = false}) {
-    final blocked = <Cell>{};
+  /// Radius is measured from each cell centre. Unknown floor and the map
+  /// boundary count as obstacles. Zero preserves the original point routing.
+  bool isWalkable(
+    Cell cell, {
+    bool moved = false,
+    double clearanceMetres = 0,
+    Set<Cell> additionalBlocked = const {},
+  }) {
+    if (!clearanceMetres.isFinite || clearanceMetres < 0) {
+      throw ArgumentError.value(clearanceMetres, 'clearanceMetres');
+    }
+    final blocked = <Cell>{...additionalBlocked};
     for (final object in visibleObjects(moved)) {
       blocked.addAll(object.footprint);
     }
+    return _walkable(cell, blocked, clearanceMetres);
+  }
 
-    bool walkable(Cell cell) {
-      final (x, z) = cell;
-      return x >= 0 &&
-          x < width &&
-          z >= 0 &&
-          z < depth &&
-          (floor?.contains(cell) ?? true) &&
-          !blocked.contains(cell);
+  bool _walkable(Cell cell, Set<Cell> blocked, double radius) {
+    bool allowed(Cell p) =>
+        p.$1 >= 0 &&
+        p.$1 < width &&
+        p.$2 >= 0 &&
+        p.$2 < depth &&
+        (floor?.contains(p) ?? true) &&
+        !blocked.contains(p);
+    if (!allowed(cell)) return false;
+    if (radius == 0) return true;
+    final reach = (radius / cellSize + 0.5).ceil();
+    for (var dx = -reach; dx <= reach; dx++) {
+      for (var dz = -reach; dz <= reach; dz++) {
+        if (allowed((cell.$1 + dx, cell.$2 + dz))) continue;
+        final gapX = max(0.0, dx.abs() - 0.5) * cellSize;
+        final gapZ = max(0.0, dz.abs() - 0.5) * cellSize;
+        if (gapX * gapX + gapZ * gapZ < radius * radius) return false;
+      }
     }
+    return true;
+  }
+
+  List<Cell> route(
+    Cell from,
+    Cell to, {
+    bool moved = false,
+    double clearanceMetres = 0,
+    Set<Cell> additionalBlocked = const {},
+  }) {
+    if (!clearanceMetres.isFinite || clearanceMetres < 0) {
+      throw ArgumentError.value(clearanceMetres, 'clearanceMetres');
+    }
+    final blocked = <Cell>{...additionalBlocked};
+    for (final object in visibleObjects(moved)) {
+      blocked.addAll(object.footprint);
+    }
+    bool walkable(Cell cell) => _walkable(cell, blocked, clearanceMetres);
 
     if (!walkable(from) || !walkable(to)) return [];
     // Every legal move has the same distance. Breadth-first search finds

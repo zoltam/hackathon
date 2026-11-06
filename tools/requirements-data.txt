@@ -1,0 +1,2 @@
+# Local workbook import only; no Python runtime is needed on the phone.
+openpyxl>=3.1,<4

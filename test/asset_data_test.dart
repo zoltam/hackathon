@@ -1,0 +1,118 @@
+import 'dart:convert';
+
+import 'package:flutter_test/flutter_test.dart';
+import 'package:valmet_field_app/asset_data.dart';
+
+void main() {
+  Map<String, dynamic> bundle() => {
+    'schemaVersion': 1,
+    'synthetic': true,
+    'mappingNotice': 'Synthetic test mapping',
+    'mappings': {'object-1': 'asset-1'},
+    'tables': {
+      'Asset_Master': [
+        {'asset_id': 'asset-1', 'tag': 'TEST-1', 'asset_class': 'TEST'},
+      ],
+      'Current_State': [
+        {
+          'asset_id': 'asset-1',
+          'condition_state': 'watch',
+          'last_updated': '2026-01-03',
+          'model_confidence': .7,
+          'issue_summary': 'Test observation',
+          'recommended_next_check': 'Verify reference',
+          'issue_code': 'DRIFT',
+          'knowledge_doc_id': 'doc-1',
+          '_source': 'Current_State!2',
+        },
+      ],
+      'Telemetry_Sample_3d': [
+        {
+          'asset_id': 'asset-1',
+          'timestamp': '2026-01-02',
+          'sensor_bias': 2,
+          '_source': 'Telemetry_Sample_3d!3',
+        },
+        {
+          'asset_id': 'asset-1',
+          'timestamp': '2026-01-01',
+          'sensor_bias': 1,
+          '_source': 'Telemetry_Sample_3d!2',
+        },
+        {
+          'asset_id': 'other',
+          'timestamp': '2026-01-03',
+          'sensor_bias': 99,
+          '_source': 'Telemetry_Sample_3d!4',
+        },
+      ],
+      'Knowledge_Docs': [
+        {
+          'doc_id': 'doc-1',
+          'content': 'Test context',
+          '_source': 'Knowledge_Docs!2',
+        },
+      ],
+      'Historical_Service_Cases': [
+        {
+          'asset_class': 'TEST',
+          'historical_issue_code': 'DRIFT',
+          'case_id': 'case-1',
+          'historical_interpretation': 'Possible drift',
+          '_source': 'Historical_Service_Cases!2',
+        },
+        {
+          'asset_class': 'OTHER',
+          'historical_issue_code': 'DRIFT',
+          'case_id': 'case-2',
+          'historical_interpretation': 'Wrong equipment',
+          '_source': 'Historical_Service_Cases!3',
+        },
+      ],
+      'Alarms_Events': [],
+      'Maintenance_History': [],
+      'Data_Quality': [
+        {
+          'asset_id': 'asset-1',
+          'issue_id': 'dq-1',
+          'issue_type': 'missing_data',
+          'severity': 'high',
+          'source_sheet': 'Telemetry_Sample_3d',
+          'recommended_handling': 'review',
+          '_source': 'Data_Quality!2',
+        },
+      ],
+    },
+  };
+
+  test('retrieves only mapped asset evidence with source references', () {
+    final data = AssetData.fromJson(jsonEncode(bundle()));
+    final diagnosis = data.forObject('object-1')!;
+    expect(diagnosis.assetId, 'asset-1');
+    expect(
+      diagnosis.evidence.any((e) => e.text.contains('sensor_bias=2')),
+      isTrue,
+    );
+    expect(
+      diagnosis.evidence.any((e) => e.text.contains('sensor_bias=99')),
+      isFalse,
+    );
+    expect(diagnosis.evidence.every((e) => e.reference.isNotEmpty), isTrue);
+    expect(diagnosis.hypotheses, hasLength(1));
+    expect(diagnosis.hypotheses.first.text, contains('not a confirmed cause'));
+    expect(diagnosis.qualityIssues.single.reference, contains('dq-1'));
+    expect(data.forObject('unknown'), isNull);
+  });
+
+  test('missing evidence is explicit and confidence is not manufactured', () {
+    final json = jsonDecode(jsonEncode(bundle())) as Map<String, dynamic>;
+    final tables = json['tables'] as Map;
+    tables['Telemetry_Sample_3d'] = [];
+    tables['Knowledge_Docs'] = [];
+    (tables['Current_State'] as List).first['model_confidence'] = null;
+    final d = AssetData.fromJson(jsonEncode(json)).forObject('object-1')!;
+    expect(d.confidence, isNull);
+    expect(d.evidence.any((e) => e.text.contains('No telemetry')), isTrue);
+    expect(d.evidence.any((e) => e.text.contains('unavailable')), isTrue);
+  });
+}

@@ -21,6 +21,24 @@ struct WalkSite: Decodable {
   let floor: [[Int]]?
   let target: Int?
   let objects: [Block]
+  let arrivalRadiusMetres: Float?
+  let inspectionReport: String?
+
+  var routeLength: Float { Float(max(0, route.count - 1)) * cellSize }
+
+  func playbackPose(distance: Float) -> simd_float4x4? {
+    guard route.count > 1 else { return nil }
+    let step = min(max(0, distance), routeLength) / cellSize
+    let index = min(Int(step), route.count - 2)
+    let a = center(route[index], height: assumedPhoneHeight)
+    let b = center(route[index + 1], height: assumedPhoneHeight)
+    let position = a + (b - a) * min(1, step - Float(index))
+    let forward = simd_normalize(b - a)
+    let yaw = atan2(-forward.x, -forward.z)
+    var pose = simd_float4x4(simd_quatf(angle: yaw, axis: SIMD3(0, 1, 0)))
+    pose.columns.3 = SIMD4(position.x, position.y, position.z, 1)
+    return pose
+  }
 
   func center(_ cell: [Int], height: Float = 0) -> SIMD3<Float> {
     SIMD3((Float(cell[0]) + 0.5) * cellSize, height, (Float(cell[1]) + 0.5) * cellSize)
@@ -56,6 +74,13 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
   private let message = UILabel()
   private let align = UIButton(type: .system)
   private let toggle = UIButton(type: .system)
+  private let playback = UIButton(type: .system)
+  private let inspect = UIButton(type: .system)
+  private var previewMode = false
+  private var playbackRunning = false
+  private var playbackDistance: Float = 0
+  private var previousFrameTime: TimeInterval?
+  private var arrived = false
   private var alignment: WorldAlignment?
   private var showModel = false
   private var requestedCamera = false
@@ -113,10 +138,16 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     close.setTitle("Close", for: .normal)
     close.addTarget(self, action: #selector(closeWalk), for: .touchUpInside)
 
+    playback.configuration = .filled()
+    playback.setTitle("Play route preview", for: .normal)
+    playback.addTarget(self, action: #selector(togglePlayback), for: .touchUpInside)
+    inspect.configuration = .tinted()
+    inspect.setTitle("Inspection evidence", for: .normal)
+    inspect.addTarget(self, action: #selector(showInspection), for: .touchUpInside)
     let row = UIStackView(arrangedSubviews: [toggle, close])
     row.distribution = .fillEqually
     row.spacing = 8
-    let panel = UIStackView(arrangedSubviews: [message, align, row])
+    let panel = UIStackView(arrangedSubviews: [message, align, playback, inspect, row])
     panel.axis = .vertical
     panel.spacing = 8
     panel.isLayoutMarginsRelativeArrangement = true
@@ -194,6 +225,11 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
 
   @objc private func calibrate() {
     if alignment != nil {
+      previewMode = false
+      playbackRunning = false
+      playbackDistance = 0
+      previousFrameTime = nil
+      arrived = false
       alignment = nil
       showModel = false
       updateDisplay("Stand at your start, hold the phone upright and face the first direction of the route.")
@@ -223,6 +259,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
 
   func session(_ session: ARSession, didUpdate frame: ARFrame) {
     guard case .normal = frame.camera.trackingState else {
+      previousFrameTime = nil
       if ready {
         ready = false
         updateDisplay("Tracking paused. Hold still and point at recognizable features.")
@@ -241,7 +278,16 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
   private func updatePose(_ frame: ARFrame) {
     guard let alignment else { return }
     let orientation = view.window?.windowScene?.interfaceOrientation ?? .portrait
-    let pose = alignment.modelPose(frame.camera.viewMatrix(for: orientation).inverse)
+    if previewMode && playbackRunning {
+      if let last = previousFrameTime {
+        playbackDistance = min(model.routeLength,
+          playbackDistance + Float(max(0, min(frame.timestamp - last, 0.1))) * 0.7)
+      }
+      if playbackDistance >= model.routeLength { playbackRunning = false }
+    }
+    previousFrameTime = frame.timestamp
+    let physicalPose = alignment.modelPose(frame.camera.viewMatrix(for: orientation).inverse)
+    let pose = previewMode ? (model.playbackPose(distance: playbackDistance) ?? physicalPose) : physicalPose
     let size = virtual.bounds.size
     if showModel, size.width > 0, size.height > 0 {
       virtual.isHidden = false
@@ -252,17 +298,56 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     let position = pose.columns.3
     let cell = SIMD2(Int(floor(position.x / model.cellSize)), Int(floor(position.z / model.cellSize)))
     let outOfBounds = cell.x < 0 || cell.y < 0 || cell.x >= model.width || cell.y >= model.depth
+    arrived = false
     if outOfBounds || floorCells?.contains(cell) == false {
       updateDisplay("Outside the model’s walkable area. Return to the route or show the camera.")
-    } else if let end = model.route.last, cell == SIMD2(end[0], end[1]),
+    } else if let end = model.route.last,
+              simd_distance(SIMD2(position.x, position.z),
+                SIMD2(model.center(end).x, model.center(end).z)) <= (model.arrivalRadiusMetres ?? model.cellSize / 2),
               let index = model.target, model.objects.indices.contains(index) {
-      updateDisplay("At service position · \(model.objects[index].name)")
+      arrived = true
+      updateDisplay((previewMode ? "Preview at service position · " : "At service position · ") +
+        model.objects[index].name + "\nTarget recognition is checked separately.")
     } else {
-      updateDisplay(model.name + (model.route.isEmpty ? " · Explore the model" : " · Follow the green route"))
+      updateDisplay(model.name + (previewMode ? " · Automatic route preview" :
+        (model.route.isEmpty ? " · Explore the model" : " · Follow the green route")))
     }
   }
 
+  @objc private func togglePlayback() {
+    guard alignment != nil, ready, model.route.count > 1 else { return }
+    if !previewMode || playbackDistance >= model.routeLength {
+      previewMode = true
+      playbackDistance = 0
+    }
+    playbackRunning.toggle()
+    previousFrameTime = nil
+    showModel = true
+    updateDisplay(model.name + " · Automatic route preview")
+  }
+
+  @objc private func showInspection() {
+    guard arrived else { return }
+    let report = UIViewController()
+    report.title = "Inspection evidence"
+    report.view.backgroundColor = .systemBackground
+    let text = UITextView()
+    text.isEditable = false
+    text.font = .preferredFont(forTextStyle: .body)
+    text.text = model.inspectionReport ?? "No workbook evidence is available for this target."
+    text.translatesAutoresizingMaskIntoConstraints = false
+    report.view.addSubview(text)
+    NSLayoutConstraint.activate([
+      text.leadingAnchor.constraint(equalTo: report.view.safeAreaLayoutGuide.leadingAnchor, constant: 16),
+      text.trailingAnchor.constraint(equalTo: report.view.safeAreaLayoutGuide.trailingAnchor, constant: -16),
+      text.topAnchor.constraint(equalTo: report.view.safeAreaLayoutGuide.topAnchor, constant: 16),
+      text.bottomAnchor.constraint(equalTo: report.view.safeAreaLayoutGuide.bottomAnchor, constant: -16),
+    ])
+    present(report, animated: true)
+  }
+
   func sessionWasInterrupted(_ session: ARSession) {
+    previousFrameTime = nil
     ready = false
     updateDisplay("Tracking interrupted. Return to the original area.")
   }
@@ -278,6 +363,10 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
   private func updateDisplay(_ text: String) {
     let visible = ready && showModel && alignment != nil
     virtual.isHidden = !visible
+    playback.isEnabled = ready && alignment != nil && model.route.count > 1
+    playback.setTitle(playbackRunning ? "Pause route preview" :
+      (playbackDistance >= model.routeLength ? "Replay route preview" : "Play route preview"), for: .normal)
+    inspect.isEnabled = arrived
     align.isEnabled = ready || alignment != nil
     toggle.isEnabled = alignment != nil && ready
     align.setTitle(alignment == nil ? "Set start and direction" : "Reset alignment", for: .normal)
@@ -290,6 +379,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
 
   @objc private func toggleView() {
     showModel.toggle()
+    if !showModel { playbackRunning = false; previousFrameTime = nil }
     updateDisplay(lastMessage ?? model.name)
   }
 
