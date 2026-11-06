@@ -3,8 +3,12 @@ import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/scheduler.dart';
 
 import 'site.dart';
+import 'asset_data.dart';
+import 'navigation.dart';
+import 'inspection_details.dart';
 
 void main() => runApp(const ValmetApp());
 
@@ -85,40 +89,109 @@ class SiteSimulation extends StatefulWidget {
     super.key,
     required this.site,
     required this.openNative,
+    this.loadAssetData,
   });
 
   final Site site;
   final Future<void> Function(String, [String?]) openNative;
+  final Future<AssetData?> Function()? loadAssetData;
 
   @override
   State<SiteSimulation> createState() => _SiteSimulationState();
 }
 
-class _SiteSimulationState extends State<SiteSimulation> {
+class _SiteSimulationState extends State<SiteSimulation>
+    with SingleTickerProviderStateMixin {
   late final _devices = widget.site.objects
       .where((o) => o.service != null)
       .toList();
   late SiteObject? _target = _devices.firstOrNull;
-  late List<Cell> _route = _findRoute();
+  late NavigationJourney? _journey = _createJourney();
+  List<Cell> get _route => _journey?.route ?? [];
+  late final Ticker _ticker;
+  Duration _lastTick = Duration.zero;
   bool _moved = false;
   bool _keyControls = false;
 
-  List<Cell> _findRoute() {
-    final destination = _target?.service;
-    return destination == null
-        ? []
-        : widget.site.route(widget.site.start, destination, moved: _moved);
+  NavigationJourney? _createJourney() {
+    final target = _target;
+    return target == null
+        ? null
+        : NavigationJourney(
+            site: widget.site,
+            target: target,
+            moved: _moved,
+            clearanceMetres: _clearanceMetres,
+          );
   }
 
-  void _openWorld() {
+  @override
+  void initState() {
+    super.initState();
+    _ticker = createTicker((elapsed) {
+      setState(() {
+        _journey?.advance(elapsed - _lastTick);
+        _lastTick = elapsed;
+      });
+      if (_journey?.status != JourneyStatus.playing) _ticker.stop();
+    });
+  }
+
+  void _resetJourney() {
+    _ticker.stop();
+    _journey = _createJourney();
+  }
+
+  void _togglePlayback() {
+    setState(() {
+      if (_journey?.status == JourneyStatus.playing) {
+        _journey?.pause();
+        _ticker.stop();
+      } else {
+        _journey?.play();
+        if (_journey?.status == JourneyStatus.playing) {
+          _lastTick = Duration.zero;
+          _ticker.start();
+        }
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _ticker.dispose();
+    super.dispose();
+  }
+
+  Future<void> _openWorld() async {
+    setState(() {
+      _journey?.pause();
+      _ticker.stop();
+    });
+    final selectedTarget = _target;
+    String? report;
+    try {
+      final data = widget.loadAssetData != null
+          ? await widget.loadAssetData!()
+          : AssetData.fromJson(
+              await rootBundle.loadString('assets/valmet/asset-data.json'),
+            );
+      report = data?.forObject(selectedTarget?.objectId ?? '')?.reportText;
+    } on FlutterError {
+      // Navigation remains available when local workbook data is absent.
+    } on FormatException {
+      // The viewer will explicitly report unavailable inspection evidence.
+    }
+    if (!mounted || selectedTarget != _target) return;
     final site = widget.site;
     final visible = site.visibleObjects(_moved).toList();
     final target = visible.indexWhere((object) => object == _target);
     List<int> pair(Cell cell) => [cell.$1, cell.$2];
 
-    widget.openNative(
+    await widget.openNative(
       'openWorld',
       jsonEncode({
+        'inspectionReport': report,
         'name': site.name,
         'keyControls': _keyControls,
         'width': site.width,
@@ -128,11 +201,14 @@ class _SiteSimulationState extends State<SiteSimulation> {
         'shRotation': site.shRotation,
         'start': pair(site.start),
         'route': _route.map(pair).toList(),
+        'clearanceMetres': _journey?.clearanceMetres,
+        'arrivalRadiusMetres': site.cellSize / 2,
         'floor': site.floor?.map(pair).toList(),
         'target': target < 0 ? null : target,
         'objects': [
           for (final object in visible)
             {
+              'object_id': object.objectId,
               'name': object.name,
               'objectId': object.objectId,
               'x': object.x,
@@ -167,7 +243,7 @@ class _SiteSimulationState extends State<SiteSimulation> {
               ? null
               : (target) => setState(() {
                   _target = target;
-                  _route = _findRoute();
+                  _resetJourney();
                 }),
         ),
         const SizedBox(height: 12),
@@ -180,7 +256,7 @@ class _SiteSimulationState extends State<SiteSimulation> {
           onChanged: (value) => setState(() => _keyControls = value),
         ),
         FilledButton.icon(
-          onPressed: _openWorld,
+          onPressed: _route.isEmpty ? null : _openWorld,
           icon: const Icon(Icons.directions_walk),
           label: const Text('Walk inside the 3D model'),
         ),
@@ -191,7 +267,7 @@ class _SiteSimulationState extends State<SiteSimulation> {
             value: _moved,
             onChanged: (value) => setState(() {
               _moved = value;
-              _route = _findRoute();
+              _resetJourney();
             }),
           ),
         ConstrainedBox(
@@ -199,27 +275,73 @@ class _SiteSimulationState extends State<SiteSimulation> {
           child: AspectRatio(
             aspectRatio: 1.28,
             child: CustomPaint(
-              painter: SitePainter(site, _target, _route, _moved),
+              painter: SitePainter(
+                site,
+                _target,
+                _route,
+                _moved,
+                position: _journey?.position,
+              ),
             ),
           ),
         ),
         Text(
           _route.isEmpty
-              ? 'No walkable route to this device.'
-              : '${site.metres(_route).toStringAsFixed(1)} m · shortest walkable grid route',
+              ? 'No route with ${_clearanceMetres.toStringAsFixed(2)} m clearance to this device.'
+              : '${site.metres(_route).toStringAsFixed(1)} m · route with ${_clearanceMetres.toStringAsFixed(2)} m clearance',
         ),
+        const Text('Automatic route preview · 0.7 m/s'),
+        Row(
+          children: [
+            Expanded(
+              child: FilledButton.icon(
+                onPressed:
+                    _journey == null ||
+                        _route.isEmpty ||
+                        _journey?.status == JourneyStatus.arrived
+                    ? null
+                    : _togglePlayback,
+                icon: Icon(
+                  _journey?.status == JourneyStatus.playing
+                      ? Icons.pause
+                      : Icons.play_arrow,
+                ),
+                label: Text(
+                  _journey?.status == JourneyStatus.playing
+                      ? 'Pause preview'
+                      : 'Play route preview',
+                ),
+              ),
+            ),
+            TextButton(
+              onPressed: () => setState(_resetJourney),
+              child: const Text('Reset'),
+            ),
+          ],
+        ),
+        Text(
+          _journey?.status == JourneyStatus.arrived
+              ? 'At service position · target recognition is checked separately.'
+              : '${(_journey?.remainingMetres ?? 0).toStringAsFixed(1)} m remaining',
+        ),
+        if (_target case final target?)
+          InspectionDetails(
+            objectId: target.objectId,
+            arrived: _journey?.status == JourneyStatus.arrived,
+          ),
       ],
     );
   }
 }
 
 class SitePainter extends CustomPainter {
-  SitePainter(this.site, this.target, this.route, this.moved);
+  SitePainter(this.site, this.target, this.route, this.moved, {this.position});
 
   final Site site;
   final SiteObject? target;
   final List<Cell> route;
   final bool moved;
+  final Point<double>? position;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -330,9 +452,14 @@ class SitePainter extends CustomPainter {
       );
     }
 
-    final (startX, startZ) = site.start;
+    final startX = position == null
+        ? site.start.$1 + 0.5
+        : position!.x / site.cellSize;
+    final startZ = position == null
+        ? site.start.$2 + 0.5
+        : position!.y / site.cellSize;
     canvas.drawCircle(
-      point(startX + 0.5, startZ + 0.5),
+      point(startX, startZ),
       5,
       Paint()..color = const Color(0xff173751),
     );
@@ -343,5 +470,6 @@ class SitePainter extends CustomPainter {
       site != oldDelegate.site ||
       target != oldDelegate.target ||
       route != oldDelegate.route ||
-      moved != oldDelegate.moved;
+      moved != oldDelegate.moved ||
+      position != oldDelegate.position;
 }
