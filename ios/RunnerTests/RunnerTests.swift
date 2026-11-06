@@ -6,22 +6,16 @@ import simd
 
 class RunnerTests: XCTestCase {
   private func routeSite() throws -> WalkSite {
-    let json = #"{"name":"Test","width":3,"depth":3,"cellSize":1,"start":[0,0],"route":[[0,0],[1,0],[1,1]],"objects":[]}"#
+    let json = #"{"name":"Test","keyControls":false,"width":3,"depth":3,"cellSize":1,"start":[0,0],"route":[[0,0],[1,0],[1,1]],"objects":[]}"#
     return try JSONDecoder().decode(WalkSite.self, from: Data(json.utf8))
   }
 
-  func testPlaybackFollowsCornerAndClampsAtServicePosition() throws {
+  func testRouteCellsMapToModelPositions() throws {
     let site = try routeSite()
-    let halfway = try XCTUnwrap(site.playbackPose(distance: 0.5))
-    XCTAssertEqual(halfway.columns.3.x, 1, accuracy: 0.0001)
-    XCTAssertEqual(halfway.columns.3.z, 0.5, accuracy: 0.0001)
-    let corner = try XCTUnwrap(site.playbackPose(distance: 1))
-    XCTAssertEqual(corner.columns.3.x, 1.5, accuracy: 0.0001)
-    XCTAssertEqual(corner.columns.3.z, 0.5, accuracy: 0.0001)
-    let end = try XCTUnwrap(site.playbackPose(distance: 100))
-    XCTAssertEqual(end.columns.3.x, 1.5, accuracy: 0.0001)
-    XCTAssertEqual(end.columns.3.z, 1.5, accuracy: 0.0001)
-    XCTAssertEqual(end.columns.3.y, assumedPhoneHeight, accuracy: 0.0001)
-    XCTAssertEqual(site.routeLength, 2)
+    XCTAssertEqual(site.route.map { site.center($0) }, [
+      SIMD3<Float>(0.5, 0, 0.5),
+      SIMD3<Float>(1.5, 0, 0.5),
+      SIMD3<Float>(1.5, 0, 1.5),
+    ])
   }
 }

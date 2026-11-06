@@ -32,7 +32,7 @@ swiftc -O tools/build_pump_references.swift -o /tmp/valmet-pump-references
 
 The importer requires the complete Equipment Room scan. It registers the scan against the reviewed equipment frame and renders all 1,676,481 splats with their anisotropic covariance, opacity, and degree-3 view-dependent color. The navigation grid comes from observed floor and obstacle geometry. A neutral backing surface fills missing floor pixels and leaves walkability unchanged. Distances assume the reviewed scene uses metres. Keep the organizer's scan and derived assets local unless public redistribution is authorized.
 
-The iPhone detector analyzes the full rendered image locally. It returns image-space boxes for the catalog objects, without reading coordinates or camera images as recognition input. Routing and arrival use the separately mapped walkable approach.
+The iPhone detector samples the full rendered image locally at up to 15 frames per second. It skips frames while inference is busy. It returns image-space boxes for the catalog objects, without reading coordinates or camera images as recognition input. Routing and arrival use the separately mapped walkable approach.
 
 To prepare and train the detector on macOS with Xcode and Pillow installed:
 
@@ -61,19 +61,23 @@ xcrun devicectl device process launch --device <device> --terminate-existing --c
 xcrun devicectl device process launch --device <device> --terminate-existing --console <bundle-id> -- --benchmark-rendered-vision
 ```
 
-The verification prints image-space boxes for several rendered views. The benchmark prints the number of GPU-completed frames, frame rate and inference latency for a 15-second scripted view sequence. The benchmark is invalidated if the app loses foreground focus.
+The verification prints image-space boxes for several rendered views. The benchmark prints the number of GPU-completed frames, frame rate, inference latency, and frame-to-overlay latency for a 15-second scripted view sequence. The benchmark is invalidated if the app loses foreground focus.
 
 ## Navigation and inspection evidence (member 2)
 
 The Flutter screen plans four-neighbour routes over the observed floor. The
 **Virtual avatar radius** selector checks clearance against obstacles, unknown
-floor and map boundaries. No route disables walkthrough/playback. The Equipment Room grid opens with a 0.10 m virtual camera radius and supports a 2.75 m route to the pump. The route becomes unavailable at 0.20 m. This radius describes the simulation; clearance for a person requires a calibrated floor and scale.
+floor and map boundaries. The walkthrough requires a route. The Equipment Room
+grid opens with a 0.10 m virtual camera radius and supports a 2.75 m route to the
+pump. The route becomes unavailable at 0.20 m. This radius describes the
+simulation. Clearance for a person requires a calibrated floor and scale.
 
-**Play route preview** animates the map marker at 0.7 m/s, with pause and reset.
-On the iPhone, align first, then use **Play route preview** in the 3D viewer for
-an automatic camera journey. Pause holds the virtual pose. **Show camera** pauses
-playback and returns control to physical tracking. **Reset alignment** lets you align again. Arrival uses horizontal distance to the service point, separately
-from target recognition. The yellow mapped marker is not a vision detection.
+On the iPhone, set the start and direction, then follow the green route in the
+3D viewer. Walk with the phone or enable **Forward and backward controls** to
+move with arrows and turn by rotating the phone. **Show camera** switches to
+the camera feed, and **Reset alignment** lets you align again. Arrival uses
+horizontal distance to the service point, separately from target recognition.
+At the service point, open **Inspection evidence** for the selected target.
 
 Import the supplied workbook after generating `assets/valmet/site.json`:
 
@@ -96,8 +100,7 @@ it with `--mapping /path/to/mapping.json`, whose JSON object maps scene
 older objects use `grid:x:z:width:depth`. Regenerate/review the mapping when
 fallback geometry IDs change. Unknown or duplicate IDs are rejected.
 
-The arrival panel and iPhone **Inspection evidence** button show supplied current
-state, latest included telemetry, recent events/work orders, context documents,
+The iPhone **Inspection evidence** panel shows supplied current state, latest included telemetry, recent events/work orders, context documents,
 matching historical hypotheses and data-quality flags, all with source references.
 The snapshot date and supplied model confidence stay visible. This is a local,
 deterministic evidence-retrieval baseline; it does not call a generative AI model

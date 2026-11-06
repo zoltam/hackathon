@@ -34,22 +34,6 @@ struct WalkSite: Decodable {
   let arrivalRadiusMetres: Float?
   let inspectionReport: String?
 
-  var routeLength: Float { Float(max(0, route.count - 1)) * cellSize }
-
-  func playbackPose(distance: Float) -> simd_float4x4? {
-    guard route.count > 1 else { return nil }
-    let step = min(max(0, distance), routeLength) / cellSize
-    let index = min(Int(step), route.count - 2)
-    let a = center(route[index], height: assumedPhoneHeight)
-    let b = center(route[index + 1], height: assumedPhoneHeight)
-    let position = a + (b - a) * min(1, step - Float(index))
-    let forward = simd_normalize(b - a)
-    let yaw = atan2(-forward.x, -forward.z)
-    var pose = simd_float4x4(simd_quatf(angle: yaw, axis: SIMD3(0, 1, 0)))
-    pose.columns.3 = SIMD4(position.x, position.y, position.z, 1)
-    return pose
-  }
-
   func center(_ cell: [Int], height: Float = 0) -> SIMD3<Float> {
     SIMD3((Float(cell[0]) + 0.5) * cellSize, height, (Float(cell[1]) + 0.5) * cellSize)
   }
@@ -92,17 +76,13 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
   private var benchmarkStart: CFTimeInterval?
   private var benchmarkLink: CADisplayLink?
   private var benchmarkLatencies: [Int] = []
+  private var benchmarkOverlayAges: [Int] = []
   private var lastDetection: RenderedVision.Frame?
   private var visionIdleText = "Vision · Loading detector"
   private var currentPose: simd_float4x4?
   private let align = UIButton(type: .system)
   private let toggle = UIButton(type: .system)
-  private let playback = UIButton(type: .system)
   private let inspect = UIButton(type: .system)
-  private var previewMode = false
-  private var playbackRunning = false
-  private var playbackDistance: Float = 0
-  private var previousFrameTime: TimeInterval?
   private var arrived = false
   private var alignment: WorldAlignment?
   private var showModel = false
@@ -174,6 +154,9 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
       let detections = prediction.detections
       self.lastDetection = detections.isEmpty ? nil : prediction.frame
       self.drawDetections(detections)
+      if self.visionMode == .benchmark, self.inBenchmarkWindow(CACurrentMediaTime()) {
+        self.benchmarkOverlayAges.append(Int((CACurrentMediaTime() - prediction.frame.timestamp) * 1000))
+      }
       if self.visionMode == .verify {
         let labels = detections.map { detection in
           let box = detection.bounds
@@ -201,9 +184,6 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     close.setTitle("Close", for: .normal)
     close.addTarget(self, action: #selector(closeWalk), for: .touchUpInside)
 
-    playback.configuration = .filled()
-    playback.setTitle("Play route preview", for: .normal)
-    playback.addTarget(self, action: #selector(togglePlayback), for: .touchUpInside)
     inspect.configuration = .tinted()
     inspect.setTitle("Inspection evidence", for: .normal)
     inspect.addTarget(self, action: #selector(showInspection), for: .touchUpInside)
@@ -211,7 +191,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     row.distribution = .fillEqually
     row.spacing = 8
     movementControls = model.keyControls ? makeControls() : nil
-    let panel = UIStackView(arrangedSubviews: [message, visionStatus, movementControls, align, playback, inspect, row].compactMap { $0 })
+    let panel = UIStackView(arrangedSubviews: [message, visionStatus, movementControls, align, inspect, row].compactMap { $0 })
     panel.axis = .vertical
     panel.spacing = 8
     panel.isLayoutMarginsRelativeArrangement = true
@@ -349,14 +329,15 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     guard benchmarkStart != nil else { return }
     benchmarkStart = nil
     let samples = benchmarkLatencies.sorted()
-    func percentile(_ fraction: Double) -> String {
+    func percentile(_ samples: [Int], _ fraction: Double) -> String {
       guard !samples.isEmpty else { return "na" }
       return String(samples[Int(ceil(Double(samples.count) * fraction)) - 1])
     }
+    let overlayAges = benchmarkOverlayAges.sorted()
     let elapsed = String(format: "%.3f", Self.benchmarkDuration)
     let fps = String(format: "%.2f", Double(frames) / Self.benchmarkDuration)
     let thermal = ProcessInfo.processInfo.thermalState.rawValue
-    print("VALMET_BENCH elapsed_s=\(elapsed) gpu_frames=\(frames) fps=\(fps) inference_samples=\(samples.count) p50_ms=\(percentile(0.50)) p95_ms=\(percentile(0.95)) thermal_state=\(thermal)")
+    print("VALMET_BENCH elapsed_s=\(elapsed) gpu_frames=\(frames) fps=\(fps) inference_samples=\(samples.count) p50_ms=\(percentile(samples, 0.50)) p95_ms=\(percentile(samples, 0.95)) overlay_updates=\(overlayAges.count) overlay_p95_ms=\(percentile(overlayAges, 0.95)) thermal_state=\(thermal)")
     fflush(stdout)
   }
 
@@ -477,12 +458,12 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
           simd_distance(SIMD2(position.x, position.z), SIMD2(model.center(end).x, model.center(end).z))
             <= (model.arrivalRadiusMetres ?? model.cellSize / 2),
           let index = model.target, model.objects.indices.contains(index) else { return nil }
-    return "\(previewMode ? "Preview at" : "At") service position · \(model.objects[index].name)"
+    return "At service position · \(model.objects[index].name)"
   }
 
   private func isCurrent(_ frame: RenderedVision.Frame, comparedWith pose: simd_float4x4) -> Bool {
     // Avoid drawing boxes from an older view after the camera moves.
-    CACurrentMediaTime() - frame.timestamp < 1.2 &&
+    CACurrentMediaTime() - frame.timestamp < 0.25 &&
       simd_distance(frame.pose.columns.3, pose.columns.3) <= 0.16 &&
       simd_dot(frame.pose.columns.2, pose.columns.2) >= 0.99 &&
       simd_dot(frame.pose.columns.0, pose.columns.0) >= 0.99
@@ -543,10 +524,6 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
 
   @objc private func calibrate() {
     if alignment != nil {
-      previewMode = false
-      playbackRunning = false
-      playbackDistance = 0
-      previousFrameTime = nil
       arrived = false
       alignment = nil
       showModel = false
@@ -580,7 +557,6 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
 
   func session(_ session: ARSession, didUpdate frame: ARFrame) {
     guard case .normal = frame.camera.trackingState else {
-      previousFrameTime = nil
       if ready {
         ready = false
         lastFrame = nil
@@ -604,17 +580,8 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     if model.keyControls {
       let seconds = Float(min(0.05, max(0, frame.timestamp - (lastFrame ?? frame.timestamp))))
       lastFrame = frame.timestamp
-      if showModel && !previewMode { move(motions: buttons.union(keys.values), seconds: seconds, pose: pose) }
+      if showModel { move(motions: buttons.union(keys.values), seconds: seconds, pose: pose) }
       pose.columns.3 = SIMD4(manualPosition.x, manualPosition.y, manualPosition.z, 1)
-    }
-    if previewMode {
-      if playbackRunning, let last = previousFrameTime {
-        playbackDistance = min(model.routeLength,
-          playbackDistance + Float(max(0, min(frame.timestamp - last, 0.1))) * 0.7)
-        if playbackDistance >= model.routeLength { playbackRunning = false }
-      }
-      previousFrameTime = frame.timestamp
-      pose = model.playbackPose(distance: playbackDistance) ?? pose
     }
     let size = virtual.bounds.size
     if showModel, size.width > 0, size.height > 0 {
@@ -633,21 +600,8 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
       arrived = true
       updateDisplay(arrival)
     } else {
-      updateDisplay(model.name + (previewMode ? " · Automatic route preview" :
-        (model.route.isEmpty ? " · Explore the model" : " · Follow the green route")))
+      updateDisplay(model.name + (model.route.isEmpty ? " · Explore the model" : " · Follow the green route"))
     }
-  }
-
-  @objc private func togglePlayback() {
-    guard alignment != nil, ready, model.route.count > 1 else { return }
-    if !previewMode || playbackDistance >= model.routeLength {
-      previewMode = true
-      playbackDistance = 0
-    }
-    playbackRunning.toggle()
-    previousFrameTime = nil
-    showModel = true
-    updateDisplay(model.name + " · Automatic route preview")
   }
 
   @objc private func showInspection() {
@@ -671,7 +625,6 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
   }
 
   func sessionWasInterrupted(_ session: ARSession) {
-    previousFrameTime = nil
     ready = false
     updateDisplay("Tracking interrupted. Return to the original area.")
   }
@@ -687,10 +640,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
   private func updateDisplay(_ text: String) {
     let visible = ready && showModel && alignment != nil
     virtual.isHidden = !visible
-    movementControls?.isHidden = !visible || previewMode
-    playback.isHidden = !visible || model.route.count < 2
-    playback.setTitle(playbackRunning ? "Pause route preview" :
-      (playbackDistance >= model.routeLength ? "Replay route preview" : "Play route preview"), for: .normal)
+    movementControls?.isHidden = !visible
     inspect.isHidden = !visible || !arrived
     visionStatus.isHidden = !visible
     if !visible {
@@ -712,11 +662,6 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
 
   @objc private func toggleView() {
     showModel.toggle()
-    if !showModel {
-      previewMode = false
-      playbackRunning = false
-      previousFrameTime = nil
-    }
     updateDisplay(lastMessage ?? model.name)
   }
 

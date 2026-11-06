@@ -15,13 +15,11 @@ void main() {
     final site = Site.fromJson(
       File('test/fixtures/site.json').readAsStringSync(),
     );
-    await tester.pumpWidget(ValmetApp(site: site));
-    await tester.pumpAndSettle();
-
-    expect(find.text('Walk inside the 3D model'), findsOneWidget);
     const channel = MethodChannel('valmet/field');
     final messages = <bool>[];
     final messenger = tester.binding.defaultBinaryMessenger;
+    messenger.setMockMessageHandler('flutter/assets', (_) async => null);
+    addTearDown(() => messenger.setMockMessageHandler('flutter/assets', null));
     messenger.setMockMethodCallHandler(channel, (call) async {
       expect(call.method, 'openWorld');
       final request =
@@ -30,7 +28,11 @@ void main() {
       return null;
     });
     addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+    await tester.pumpWidget(ValmetApp(site: site));
+    await tester.pumpAndSettle();
+
     final open = find.text('Walk inside the 3D model');
+    expect(open, findsOneWidget);
     await tester.tap(open);
     await tester.tap(find.text('Forward and backward controls'));
     await tester.pumpAndSettle();
@@ -38,24 +40,16 @@ void main() {
     expect(messages, [false, true]);
   });
 
-  testWidgets('preview pauses and resets without skipping the journey', (
-    tester,
-  ) async {
+  testWidgets('shows route distance without playback controls', (tester) async {
     final site = Site.fromJson(
       File('test/fixtures/site.json').readAsStringSync(),
     );
     await tester.pumpWidget(ValmetApp(site: site));
     await tester.pumpAndSettle();
-    await tester.scrollUntilVisible(find.text('Play route preview'), 200);
-    await tester.tap(find.text('Play route preview'));
-    await tester.pump();
-    await tester.pump(const Duration(seconds: 2));
-    expect(find.text('Pause preview'), findsOneWidget);
-    await tester.tap(find.text('Pause preview'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Reset'));
-    await tester.pumpAndSettle();
-    expect(find.text('15.8 m remaining'), findsOneWidget);
+    expect(find.text('15.8 m · route with 0.20 m clearance'), findsOneWidget);
+    expect(find.text('Play route preview'), findsNothing);
+    expect(find.text('Pause preview'), findsNothing);
+    expect(find.text('Reset'), findsNothing);
   });
 
   testWidgets('clearance blocks native launch and can be explicitly reduced', (

@@ -35,7 +35,9 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
   private let splats: MTLBuffer
   private var sortBuffers: [MTLBuffer] = []
   private var nextBuffer = 0
-  private let inFlight = DispatchSemaphore(value: 3)
+  // Bound GPU queue age so sampled frames stay useful while turning.
+  private static let framesInFlight = 2
+  private let inFlight = DispatchSemaphore(value: SplatRenderer.framesInFlight)
   static let bytesPerSplat = 160
   private let count: Int
   private static let binCount = 2048
@@ -69,7 +71,7 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
             bytes.baseAddress.flatMap { device.makeBuffer(bytes: $0, length: bytes.count, options: .storageModeShared) }
           }) else { return nil }
     let count = data.count / Self.bytesPerSplat
-    for _ in 0..<3 {
+    for _ in 0..<Self.framesInFlight {
       guard let buffer = device.makeBuffer(length: count * 4, options: .storageModeShared) else { return nil }
       sortBuffers.append(buffer)
     }
