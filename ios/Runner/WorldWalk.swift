@@ -106,6 +106,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
   private var confirmedBlockedCells = Set<[Int]>()
   private var obstacleConfirmed = false
   private var replanPending = false
+  private var replanAfterRetreat = false
   private let moveCrate = UIButton(type: .system)
   private static let benchmarkDuration: CFTimeInterval = 15
   private var benchmarkStart: CFTimeInterval?
@@ -403,12 +404,14 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
   @objc private func placeDemoCrate() {
     guard let pose = currentPose, !replanPending else { return }
     let eye = SIMD2(pose.columns.3.x, pose.columns.3.z)
+    let start = model.center(model.start)
     let center = model.route.dropFirst().dropLast()
       .map { model.center($0) }
       .map { SIMD2($0.x, $0.z) }
       .filter { point in
         let distance = simd_distance(eye, point)
         return distance >= 0.85 && distance <= 2.0 &&
+          simd_distance(SIMD2(start.x, start.z), point) >= 0.85 &&
           (renderer.obstacleCenter.map { simd_distance($0, point) >= 0.35 } ?? true)
       }.min { abs(simd_distance(eye, $0) - 1.10) < abs(simd_distance(eye, $1) - 1.10) }
     guard let center else {
@@ -419,11 +422,12 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     obstaclePlacedAt = CACurrentMediaTime()
     previousObstacleCenter = nil
     obstacleConfirmed = false
+    replanAfterRetreat = false
     moveCrate.setTitle("Move demo crate", for: .normal)
   }
 
   private func observeObstacle(in prediction: RenderedVision.Prediction) {
-    guard (obstacleStart != nil || model.obstacleDemo == true), let replanRoute, !replanPending,
+    guard (obstacleStart != nil || model.obstacleDemo == true), !replanPending,
           let placed = obstaclePlacedAt, prediction.frame.timestamp >= placed else { return }
     guard let measured = prediction.obstacleCenter else {
       previousObstacleCenter = nil
@@ -433,13 +437,18 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     guard let previous = previousObstacleCenter, simd_distance(previous, measured) < 0.08 else { return }
     let center = (previous + measured) / 2
     if let plannedObstacleCenter, simd_distance(plannedObstacleCenter, center) < 0.14 { return }
+    guard let pose = currentPose else { return }
+    let from = cellAt(x: pose.columns.3.x, z: pose.columns.3.z)
+    replanAroundCrate(at: center, from: from, placed: placed)
+  }
+
+  private func replanAroundCrate(at center: SIMD2<Float>, from: SIMD2<Int>, placed: CFTimeInterval) {
+    guard let replanRoute, let end = serviceTarget?.service ?? model.route.last else { return }
     plannedObstacleCenter = center
     let halfSide = ObstacleTag.side / 2 + 0.02
     let minCell = cellAt(x: center.x - halfSide, z: center.y - halfSide)
     let maxCell = cellAt(x: center.x + halfSide, z: center.y + halfSide)
     let blocked = (minCell.x...maxCell.x).flatMap { x in (minCell.y...maxCell.y).map { [x, $0] } }
-    guard let end = serviceTarget?.service ?? model.route.last, let pose = currentPose else { return }
-    let from = cellAt(x: pose.columns.3.x, z: pose.columns.3.z)
     print("VALMET_OBSTACLE phase=confirmed x=\(center.x) z=\(center.y) cells=\(blocked.count)")
     fflush(stdout)
     replanPending = true
@@ -461,6 +470,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
       let reopened = self.confirmedBlockedCells.intersection(walkable).count
       self.confirmedBlockedCells = Set(blocked)
       self.floorCells = Set(floor.map { SIMD2($0[0], $0[1]) })
+      self.replanAfterRetreat = self.obstacleStart == nil && !self.isWalkable(from)
       let remaining = self.activeRoute.dropFirst(self.activeRoute.firstIndex(of: [from.x, from.y]) ?? 0)
       if self.obstacleStart != nil || !remaining.contains([from.x, from.y]) ||
          remaining.contains(where: { !walkable.contains($0) }) {
@@ -1028,10 +1038,17 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
 
   private func updateWalkStatus(at position: SIMD4<Float>) {
     let cell = cellAt(x: position.x, z: position.z)
+    if replanAfterRetreat, !replanPending, isWalkable(cell),
+       let center = plannedObstacleCenter, let placed = obstaclePlacedAt {
+      replanAfterRetreat = false
+      replanAroundCrate(at: center, from: cell, placed: placed)
+    }
     arrived = false
     if !isWalkable(cell) {
       if model.keyControls && cell == SIMD2(model.start[0], model.start[1]) {
         updateDisplay("Start position lacks the selected clearance. Close and reduce the camera radius.")
+      } else if model.keyControls && replanAfterRetreat {
+        updateDisplay("The crate blocks this position. Reset alignment to resume from the start.")
       } else {
         updateDisplay("Outside the model’s walkable area. Return to the route or show the camera.")
       }

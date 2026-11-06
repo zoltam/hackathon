@@ -57,6 +57,32 @@ void main() {
     },
   );
 
+  test('a crate blocks the current cell but allows a route after retreat', () {
+    const current = (4, 3);
+    const crate = {current};
+    final retreat = site.start;
+    final original = site.route(retreat, goal, clearanceMetres: clearance);
+    expect(original, contains(current));
+
+    final mask = site
+        .walkableCells(clearanceMetres: clearance, additionalBlocked: crate)
+        .toSet();
+    List<Cell> routeFrom(Cell from) => site.route(
+      from,
+      goal,
+      clearanceMetres: clearance,
+      additionalBlocked: crate,
+    );
+
+    expect(mask, isNot(contains(current)));
+    expect(routeFrom(current), isEmpty);
+    final detour = routeFrom(retreat);
+    expect(detour.length, greaterThan(original.length));
+    expect(detour.first, retreat);
+    expect(detour.last, goal);
+    expect(detour, everyElement(isIn(mask)));
+  });
+
   test('a blocked crossing reports no route with both ends walkable', () {
     final wall = <Cell>{for (var z = 0; z < site.depth; z++) (4, z)};
     final mask = site

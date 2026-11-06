@@ -151,6 +151,9 @@ To demonstrate a moving obstacle, enable **Movable demo crate** before opening
 the viewer. Align, tap **Place demo crate**, and aim down at its tag. After the
 tag is seen in two frames, the planner applies the observed footprint to the
 walkable map and redraws a blocked route. **Move demo crate** repeats the check.
+If the new footprint covers your position, step back onto a walkable cell to
+recalculate the route. With button controls, use **Reset alignment** to return
+to the start and replan.
 The demo uses a tagged simulated crate with a known size and height.
 
 To verify placement and mask replacement on iPhone:
