@@ -33,7 +33,7 @@ final class RenderedVision {
 
   private let readbacks = [Readback(), Readback()]
   private let inferenceAvailable = DispatchSemaphore(value: 1)
-  private static let sampleInterval: CFTimeInterval = 1.0 / 15
+  private static let sampleInterval: CFTimeInterval = 1.0 / 10
   private var nextSample: CFTimeInterval?
 
   func loadModel(at url: URL?, completion: @escaping (Bool) -> Void) {
@@ -81,7 +81,7 @@ final class RenderedVision {
       readback.available.signal()
       return
     }
-    // Keep the 15 Hz cadence across render jitter without catching up after a stall.
+    // Keep the sampling cadence across render jitter without catching up after a stall.
     nextSample = max(scheduled + Self.sampleInterval, frame.timestamp + Self.sampleInterval / 2)
     blit.copy(from: texture, sourceSlice: 0, sourceLevel: 0,
               sourceOrigin: MTLOrigin(x: 0, y: 0, z: 0),

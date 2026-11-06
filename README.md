@@ -32,7 +32,7 @@ swiftc -O tools/build_pump_references.swift -o /tmp/valmet-pump-references
 
 The importer requires the complete Equipment Room scan. It registers the scan against the reviewed equipment frame and renders all 1,676,481 splats with their anisotropic covariance, opacity, and degree-3 view-dependent color. The navigation grid comes from observed floor and obstacle geometry. A neutral backing surface fills missing floor pixels and leaves walkability unchanged. Distances assume the reviewed scene uses metres. Keep the organizer's scan and derived assets local unless public redistribution is authorized.
 
-The iPhone detector samples the full rendered image locally at up to 15 frames per second. It skips frames while inference is busy. It returns image-space boxes for the catalog objects, without reading coordinates or camera images as recognition input. Routing and arrival use the separately mapped walkable approach.
+The iPhone detector samples the full rendered image locally at up to 10 frames per second. It skips frames while inference is busy. It returns image-space boxes for the catalog objects, without reading coordinates or camera images as recognition input. Routing and arrival use the separately mapped walkable approach.
 
 To prepare and train the detector on macOS with Xcode and Pillow installed:
 

@@ -78,6 +78,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
   private var benchmarkLatencies: [Int] = []
   private var benchmarkOverlayAges: [Int] = []
   private var lastDetection: RenderedVision.Frame?
+  private var previousDetectionBoxes: [String: CGRect] = [:]
   private var visionIdleText = "Vision · Loading detector"
   private var currentPose: simd_float4x4?
   private let align = UIButton(type: .system)
@@ -499,13 +500,25 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
   private func drawDetections(_ detections: [RenderedVision.Detection]) {
     let bounds = virtual.bounds
     let path = UIBezierPath()
-    for detection in detections {
-      let box = detection.bounds
+    // Each catalog ID names one physical object. Keep its strongest observation.
+    let current = Dictionary(detections.map { ($0.objectID, $0) }, uniquingKeysWith: {
+      $0.confidence >= $1.confidence ? $0 : $1
+    }).mapValues { $0.bounds }
+    for (id, rawBox) in current {
+      var box = rawBox
+      if let previous = previousDetectionBoxes[id] {
+        box = CGRect(x: (previous.minX + rawBox.minX) / 2,
+                     y: (previous.minY + rawBox.minY) / 2,
+                     width: (previous.width + rawBox.width) / 2,
+                     height: (previous.height + rawBox.height) / 2)
+      }
       path.append(UIBezierPath(roundedRect: CGRect(
         x: box.minX * bounds.width, y: (1 - box.maxY) * bounds.height,
         width: box.width * bounds.width, height: box.height * bounds.height
       ), cornerRadius: 6))
     }
+    // Average adjacent raw observations, without feeding the result back.
+    previousDetectionBoxes = current
     CATransaction.begin()
     CATransaction.setDisableActions(true)
     detectionLayer.frame = bounds
