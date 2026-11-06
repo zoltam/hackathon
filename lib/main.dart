@@ -94,16 +94,13 @@ class SiteSimulation extends StatefulWidget {
   State<SiteSimulation> createState() => _SiteSimulationState();
 }
 
-class _SiteSimulationState extends State<SiteSimulation>
-    with SingleTickerProviderStateMixin {
-  late final _walk = AnimationController(vsync: this);
+class _SiteSimulationState extends State<SiteSimulation> {
   late final _devices = widget.site.objects
       .where((o) => o.service != null)
       .toList();
   late SiteObject? _target = _devices.firstOrNull;
   late List<Cell> _route = _findRoute();
   bool _moved = false;
-  bool _repaired = false;
 
   List<Cell> _findRoute() {
     final destination = _target?.service;
@@ -145,18 +142,6 @@ class _SiteSimulationState extends State<SiteSimulation>
     );
   }
 
-  void _replan() {
-    _walk.reset();
-    _repaired = false;
-    _route = _findRoute();
-  }
-
-  @override
-  void dispose() {
-    _walk.dispose();
-    super.dispose();
-  }
-
   @override
   Widget build(BuildContext context) {
     final site = widget.site;
@@ -176,7 +161,7 @@ class _SiteSimulationState extends State<SiteSimulation>
               ? null
               : (target) => setState(() {
                   _target = target;
-                  _replan();
+                  _route = _findRoute();
                 }),
         ),
         FilledButton.icon(
@@ -191,81 +176,22 @@ class _SiteSimulationState extends State<SiteSimulation>
             value: _moved,
             onChanged: (value) => setState(() {
               _moved = value;
-              _replan();
+              _route = _findRoute();
             }),
           ),
-        AnimatedBuilder(
-          animation: _walk,
-          builder: (context, _) {
-            final arrived =
-                _route.isNotEmpty && (_route.length == 1 || _walk.isCompleted);
-            final status = switch ((
-              _target,
-              _route.isEmpty,
-              arrived,
-              _repaired,
-            )) {
-              (null, _, _, _) => 'No service targets have been marked.',
-              (_, true, _, _) => 'No walkable route to this device.',
-              (_, _, _, true) => 'Service completed in simulation.',
-              (_, _, true, _) => 'Arrived at ${_target!.name}.',
-              _ =>
-                '${site.metres(_route).toStringAsFixed(1)} m · shortest walkable grid route',
-            };
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                ConstrainedBox(
-                  constraints: const BoxConstraints(maxHeight: 360),
-                  child: AspectRatio(
-                    aspectRatio: 1.28,
-                    child: CustomPaint(
-                      painter: SitePainter(
-                        site,
-                        _target,
-                        _route,
-                        _walk.value,
-                        _moved,
-                        _repaired,
-                      ),
-                    ),
-                  ),
-                ),
-                Text(status),
-                const SizedBox(height: 12),
-                Wrap(
-                  spacing: 8,
-                  children: [
-                    FilledButton(
-                      onPressed: _route.length < 2 || _walk.isAnimating
-                          ? null
-                          : () {
-                              setState(() => _repaired = false);
-                              _walk.duration = Duration(
-                                milliseconds: (site.metres(_route) * 500)
-                                    .round(),
-                              );
-                              _walk.forward(from: 0);
-                            },
-                      child: Text(arrived ? 'Replay walk' : 'Simulate walk'),
-                    ),
-                    OutlinedButton(
-                      onPressed: arrived && !_repaired
-                          ? () => setState(() => _repaired = true)
-                          : null,
-                      child: const Text('Complete service'),
-                    ),
-                  ],
-                ),
-              ],
-            );
-          },
+        ConstrainedBox(
+          constraints: const BoxConstraints(maxHeight: 360),
+          child: AspectRatio(
+            aspectRatio: 1.28,
+            child: CustomPaint(
+              painter: SitePainter(site, _target, _route, _moved),
+            ),
+          ),
         ),
-        const Divider(height: 32),
-        OutlinedButton.icon(
-          onPressed: () => widget.openNative('openAR'),
-          icon: const Icon(Icons.view_in_ar),
-          label: const Text('Record or replay a camera route'),
+        Text(
+          _route.isEmpty
+              ? 'No walkable route to this device.'
+              : '${site.metres(_route).toStringAsFixed(1)} m · shortest walkable grid route',
         ),
       ],
     );
@@ -273,20 +199,12 @@ class _SiteSimulationState extends State<SiteSimulation>
 }
 
 class SitePainter extends CustomPainter {
-  SitePainter(
-    this.site,
-    this.target,
-    this.route,
-    this.progress,
-    this.moved,
-    this.repaired,
-  );
+  SitePainter(this.site, this.target, this.route, this.moved);
 
   final Site site;
   final SiteObject? target;
   final List<Cell> route;
-  final double progress;
-  final bool moved, repaired;
+  final bool moved;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -358,7 +276,7 @@ class SitePainter extends CustomPainter {
     for (final (object, x, z, right, front) in blocks) {
       final h = object.height;
       final color = object == target
-          ? (repaired ? const Color(0xff16a277) : const Color(0xffdf7a20))
+          ? const Color(0xffdf7a20)
           : object.service != null
           ? const Color(0xff4c849d)
           : const Color(0xff758883);
@@ -397,22 +315,12 @@ class SitePainter extends CustomPainter {
       );
     }
 
-    final path = route.isEmpty ? [site.start] : route;
-    final step = progress * (path.length - 1);
-    final (x, z) = path[step.floor()];
-    final (nextX, nextZ) = path[min(step.floor() + 1, path.length - 1)];
-    final fraction = step - step.floor();
-    final avatarX = x + 0.5 + (nextX - x) * fraction;
-    final avatarZ = z + 0.5 + (nextZ - z) * fraction;
-    final feet = point(avatarX, avatarZ);
-    final head = point(avatarX, avatarZ, 1.45);
-    final avatar = Paint()
-      ..color = const Color(0xff173751)
-      ..strokeWidth = 5
-      ..strokeCap = StrokeCap.round;
-    canvas.drawCircle(feet, 5, Paint()..color = Colors.white);
-    canvas.drawLine(feet, head, avatar);
-    canvas.drawCircle(head, 5, avatar);
+    final (startX, startZ) = site.start;
+    canvas.drawCircle(
+      point(startX + 0.5, startZ + 0.5),
+      5,
+      Paint()..color = const Color(0xff173751),
+    );
   }
 
   @override
@@ -420,7 +328,5 @@ class SitePainter extends CustomPainter {
       site != oldDelegate.site ||
       target != oldDelegate.target ||
       route != oldDelegate.route ||
-      progress != oldDelegate.progress ||
-      moved != oldDelegate.moved ||
-      repaired != oldDelegate.repaired;
+      moved != oldDelegate.moved;
 }

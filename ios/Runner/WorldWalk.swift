@@ -1,6 +1,5 @@
 import ARKit
 import AVFoundation
-import SceneKit
 import UIKit
 import simd
 
@@ -49,10 +48,11 @@ struct WorldAlignment {
 
 final class WorldWalk: UIViewController, ARSessionDelegate {
   private let model: WalkSite
-  private let points: Data
+  private let renderer: SplatRenderer
   private let reality = ARSCNView()
-  private let virtual = SCNView()
-  private let eye = SCNNode()
+  private var virtual: UIView { renderer.view }
+  private let routeLayer = CAShapeLayer()
+  private let targetLayer = CAShapeLayer()
   private let message = UILabel()
   private let align = UIButton(type: .system)
   private let toggle = UIButton(type: .system)
@@ -63,9 +63,9 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
   private var lastMessage: String?
   private var floorCells: Set<SIMD2<Int>>?
 
-  init(model: WalkSite, points: Data) {
+  init(model: WalkSite, renderer: SplatRenderer) {
     self.model = model
-    self.points = points
+    self.renderer = renderer
     super.init(nibName: nil, bundle: nil)
   }
 
@@ -86,10 +86,18 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     }
     reality.session.delegate = self
     reality.session.delegateQueue = .main
-    virtual.scene = buildScene()
-    virtual.pointOfView = eye
-    virtual.antialiasingMode = .multisampling2X
-    virtual.isPlaying = true
+    floorCells = model.floor.map { Set($0.map { SIMD2($0[0], $0[1]) }) }
+    for (layer, color, width) in [
+      (routeLayer, UIColor.systemMint, CGFloat(4)),
+      (targetLayer, UIColor.systemYellow, CGFloat(3)),
+    ] {
+      layer.strokeColor = color.cgColor
+      layer.fillColor = UIColor.clear.cgColor
+      layer.lineWidth = width
+      layer.lineJoin = .round
+      layer.lineCap = .round
+      virtual.layer.addSublayer(layer)
+    }
 
     message.font = .preferredFont(forTextStyle: .callout)
     message.textColor = .white
@@ -143,75 +151,45 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     }
   }
 
-  private func buildScene() -> SCNScene {
-    let scene = SCNScene()
-    scene.background.contents = UIColor(red: 0.15, green: 0.19, blue: 0.20, alpha: 1)
-    let root = scene.rootNode
-    let size = CGFloat(model.cellSize)
+  private func drawGuide(_ transform: simd_float4x4) {
+    let bounds = virtual.bounds
+    func project(_ point: SIMD3<Float>) -> CGPoint? {
+      let clip = transform * SIMD4(point.x, point.y, point.z, 1)
+      guard clip.w > 0.04 else { return nil }
+      return CGPoint(x: (CGFloat(clip.x / clip.w) + 1) * bounds.width / 2,
+                     y: (1 - CGFloat(clip.y / clip.w)) * bounds.height / 2)
+    }
 
-    let stride = 7 * MemoryLayout<Float>.stride
-    let count = points.count / stride
-    let positions = SCNGeometrySource(data: points, semantic: .vertex, vectorCount: count,
-                                      usesFloatComponents: true, componentsPerVector: 3,
-                                      bytesPerComponent: 4, dataOffset: 0, dataStride: stride)
-    let colors = SCNGeometrySource(data: points, semantic: .color, vectorCount: count,
-                                   usesFloatComponents: true, componentsPerVector: 4,
-                                   bytesPerComponent: 4, dataOffset: 12, dataStride: stride)
-    let indices = (0..<count).map(UInt32.init)
-    let indexData = indices.withUnsafeBufferPointer { Data(buffer: $0) }
-    let element = SCNGeometryElement(data: indexData, primitiveType: .point,
-                                     primitiveCount: count, bytesPerIndex: 4)
-    element.pointSize = 0.025
-    element.minimumPointScreenSpaceRadius = 1
-    element.maximumPointScreenSpaceRadius = 9
-    let cloud = SCNGeometry(sources: [positions, colors], elements: [element])
-    cloud.firstMaterial?.lightingModel = .constant
-    root.addChildNode(SCNNode(geometry: cloud))
-    floorCells = model.floor.map { Set($0.map { SIMD2($0[0], $0[1]) }) }
+    let path = UIBezierPath()
+    var previous: CGPoint?
+    for cell in model.route {
+      guard let point = project(model.center(cell, height: 0.07)) else {
+        previous = nil
+        continue
+      }
+      if previous == nil { path.move(to: point) } else { path.addLine(to: point) }
+      previous = point
+    }
 
-    for (index, object) in model.objects.enumerated() {
-      let selected = model.target == index
-      if selected {
-        let ring = SCNTorus(ringRadius: 0.24, pipeRadius: 0.022)
-        ring.firstMaterial?.diffuse.contents = UIColor.systemYellow
-        ring.firstMaterial?.lightingModel = .constant
-        let beacon = SCNNode(geometry: ring)
-        beacon.eulerAngles.x = .pi / 2
-        let facingCamera = SCNNode()
-        facingCamera.position = SCNVector3(
-          (CGFloat(object.x) + CGFloat(object.width) / 2) * size, object.height + 0.32,
-          (CGFloat(object.z) + CGFloat(object.depth) / 2) * size
-        )
-        facingCamera.constraints = [SCNBillboardConstraint()]
-        facingCamera.addChildNode(beacon)
-        root.addChildNode(facingCamera)
+    let ring = UIBezierPath()
+    if let index = model.target, model.objects.indices.contains(index) {
+      let target = model.objects[index]
+      let position = SIMD3(
+        (Float(target.x) + Float(target.width) / 2) * model.cellSize,
+        Float(target.height),
+        (Float(target.z) + Float(target.depth) / 2) * model.cellSize
+      )
+      if let point = project(position) {
+        ring.addArc(withCenter: point, radius: 17, startAngle: 0, endAngle: 2 * .pi, clockwise: true)
       }
     }
-
-    for (from, to) in zip(model.route, model.route.dropFirst()) {
-      let a = model.center(from, height: 0.065), b = model.center(to, height: 0.065)
-      let segment = SCNBox(width: 0.085, height: 0.018, length: size, chamferRadius: 0.005)
-      segment.firstMaterial?.diffuse.contents = UIColor.systemMint
-      segment.firstMaterial?.lightingModel = .constant
-      let strip = SCNNode(geometry: segment)
-      strip.simdPosition = (a + b) / 2
-      strip.eulerAngles.y = atan2(b.x - a.x, b.z - a.z)
-      root.addChildNode(strip)
-    }
-    if let last = model.route.last {
-      let marker = SCNCylinder(radius: 0.11, height: 0.04)
-      marker.firstMaterial?.diffuse.contents = UIColor.systemMint
-      marker.firstMaterial?.lightingModel = .constant
-      let endpoint = SCNNode(geometry: marker)
-      endpoint.simdPosition = model.center(last, height: 0.045)
-      root.addChildNode(endpoint)
-    }
-
-    eye.camera = SCNCamera()
-    eye.camera?.zNear = 0.04
-    eye.camera?.zFar = 250
-    root.addChildNode(eye)
-    return scene
+    CATransaction.begin()
+    CATransaction.setDisableActions(true)
+    routeLayer.frame = bounds
+    routeLayer.path = path.cgPath
+    targetLayer.frame = bounds
+    targetLayer.path = ring.cgPath
+    CATransaction.commit()
   }
 
   @objc private func calibrate() {
@@ -264,7 +242,13 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     guard let alignment else { return }
     let orientation = view.window?.windowScene?.interfaceOrientation ?? .portrait
     let pose = alignment.modelPose(frame.camera.viewMatrix(for: orientation).inverse)
-    eye.simdTransform = pose
+    let size = virtual.bounds.size
+    if showModel, size.width > 0, size.height > 0 {
+      virtual.isHidden = false
+      let projection = frame.camera.projectionMatrix(for: orientation, viewportSize: size, zNear: 0.04, zFar: 40)
+      renderer.render(pose: pose, projection: projection)
+      drawGuide(projection * pose.inverse)
+    }
     let position = pose.columns.3
     let cell = SIMD2(Int(floor(position.x / model.cellSize)), Int(floor(position.z / model.cellSize)))
     let outOfBounds = cell.x < 0 || cell.y < 0 || cell.x >= model.width || cell.y >= model.depth
@@ -311,7 +295,6 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
 
   @objc private func closeWalk() {
     reality.session.pause()
-    virtual.isPlaying = false
     dismiss(animated: true)
   }
 }

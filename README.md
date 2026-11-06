@@ -24,4 +24,4 @@ The iPhone demo loads the organizer-provided Industrial Boiler Room scan. From t
 python3 tools/build_boiler_room.py "/path/to/Industrial Boiler Room.ply"
 ```
 
-The importer filters invalid EGS vertices and uses the remaining centers and colors for a point cloud preview. It estimates the walkable floor and chooses a demo inspection target from observed geometry. The scan's scale is assumed to be metres. Keep the original and generated assets local unless public redistribution is authorized. A manually aligned model does not detect differences between virtual and physical obstacles.
+The importer filters invalid EGS vertices and renders the remaining anisotropic Gaussians with Metal. It estimates the walkable floor and chooses a demo inspection target from observed geometry. The scan's scale is assumed to be metres. Keep the original and generated assets local unless public redistribution is authorized. A manually aligned model does not detect differences between virtual and physical obstacles.
