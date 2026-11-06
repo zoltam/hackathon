@@ -181,6 +181,7 @@ it with `--mapping /path/to/mapping.json`, whose JSON object maps scene
 `object_id` to workbook `asset_id`. Explicit `objectId` or `object_id` values are preferred;
 older objects use `grid:x:z:width:depth`. Regenerate/review the mapping when
 fallback geometry IDs change. Unknown or duplicate IDs are rejected.
+Explicit overrides must match the same equipment classes as automatic mappings.
 
 The iPhone **Inspection evidence** panel shows supplied current state, latest included telemetry, recent events/work orders, context documents,
 matching historical hypotheses and data-quality flags, all with source references.

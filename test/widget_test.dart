@@ -62,6 +62,79 @@ void main() {
     expect(find.text('Reset'), findsNothing);
   });
 
+  testWidgets('shows and sends workbook tags only for compatible equipment', (
+    tester,
+  ) async {
+    final site = Site.fromJson('''{
+      "name":"Workshop","width":6,"depth":4,"cellSize":1,"start":[0,0],
+      "objects":[
+        {"name":"Feed pump","object_id":"pump","equipmentType":"pump",
+         "x":4,"z":1,"width":2,"depth":1,"height":1.5,"service":[3,1]},
+        {"name":"Inlet valve","object_id":"valve","equipmentType":"valve",
+         "x":2,"z":3,"width":1,"depth":1,"height":1,"service":[2,2]}
+      ]
+    }''');
+    const workbook = '''{
+      "schemaVersion":1,"synthetic":true,
+      "mappings":{"pump":"asset-1","valve":"asset-2"},
+      "tables":{
+        "Asset_Master":[
+          {"asset_id":"asset-1","tag":"P-005","asset_class":"PROCESS_PUMP"},
+          {"asset_id":"asset-2","tag":"P-006","asset_class":"PROCESS_PUMP"}
+        ],
+        "Current_State":[],"Telemetry_Sample_3d":[],"Alarms_Events":[],
+        "Maintenance_History":[],"Historical_Service_Cases":[],
+        "Knowledge_Docs":[],"Data_Quality":[]
+      }
+    }''';
+    const asset = 'assets/valmet/asset-data.json';
+    const channel = MethodChannel('valmet/field');
+    final messenger = tester.binding.defaultBinaryMessenger;
+    rootBundle.evict(asset);
+    messenger.setMockMessageHandler('flutter/assets', (message) async {
+      if (const StringCodec().decodeMessage(message) != asset) return null;
+      return const StringCodec().encodeMessage(workbook);
+    });
+    Map<String, dynamic>? payload;
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      expect(call.method, 'openWorld');
+      payload = jsonDecode(call.arguments as String) as Map<String, dynamic>;
+      return null;
+    });
+    addTearDown(() {
+      rootBundle.evict(asset);
+      messenger.setMockMessageHandler('flutter/assets', null);
+      messenger.setMockMethodCallHandler(channel, null);
+    });
+
+    await tester.pumpWidget(ValmetApp(site: site));
+    await tester.pumpAndSettle();
+    expect(find.text('P-005 · Feed pump'), findsOneWidget);
+    await tester.tap(find.text('Walk inside the 3D model'));
+    await tester.pumpAndSettle();
+    expect(payload!['hasWorkbook'], isTrue);
+    final objects = (payload!['objects'] as List).cast<Map<String, dynamic>>();
+    expect(objects, hasLength(2));
+    for (final object in site.objects) {
+      final sent = objects.singleWhere(
+        (row) => row['object_id'] == object.objectId,
+      );
+      expect(sent['name'], object.name);
+      expect(sent['x'], object.x);
+      expect(sent['z'], object.z);
+      expect(sent['width'], object.width);
+      expect(sent['depth'], object.depth);
+      expect(sent['height'], object.height);
+      expect(sent['service'], [object.service!.$1, object.service!.$2]);
+      expect(sent['workbookTag'], object.objectId == 'pump' ? 'P-005' : null);
+    }
+
+    await tester.tap(find.text('P-005 · Feed pump'));
+    await tester.pumpAndSettle();
+    expect(find.text('Inlet valve'), findsOneWidget);
+    expect(find.textContaining('P-006'), findsNothing);
+  });
+
   testWidgets('blocked start stays explicit and clearance can be reduced', (
     tester,
   ) async {
@@ -119,7 +192,7 @@ void main() {
     await tester.pump();
     await tester.pumpAndSettle();
     expect(payload!['clearanceMetres'], .1);
-    expect(payload!['arrivalRadiusMetres'], .125);
+    expect(payload!['arrivalRadiusMetres'], .3);
     expect(payload!['route'], hasLength(5));
     expect(payload!['walkableFloor'], [
       [0, 0],

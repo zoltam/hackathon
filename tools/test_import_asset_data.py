@@ -51,6 +51,10 @@ class ImportTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.run_export({'unknown-object': 'A'})
 
+    def test_explicit_mapping_rejects_an_incompatible_workbook_class(self):
+        with self.assertRaisesRegex(ValueError, 'Incompatible workbook asset C'):
+            self.run_export({'grid:1:2:1:1': 'C'})
+
     def test_nearby_mapping_preserves_the_service_target_rank(self):
         self.site['objects'] += [
             dict(objectId='aaa-nearby', equipmentType='pump'),

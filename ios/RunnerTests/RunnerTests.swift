@@ -19,6 +19,15 @@ class RunnerTests: XCTestCase {
     ])
   }
 
+  func testArrivalAcceptsTheApproachButNotOtherNearbyCells() throws {
+    let json = #"{"name":"Test","keyControls":false,"width":4,"depth":6,"cellSize":0.1,"start":[1,0],"route":[[1,0],[1,1],[1,2],[1,3],[1,4]],"objects":[]}"#
+    let site = try JSONDecoder().decode(WalkSite.self, from: Data(json.utf8))
+    XCTAssertTrue(site.isAtServicePosition(SIMD2(0.15, 0.25), on: site.route))
+    XCTAssertFalse(site.isAtServicePosition(SIMD2(0.25, 0.45), on: site.route))
+    XCTAssertFalse(site.isAtServicePosition(SIMD2(0.15, 0.05), on: site.route))
+    XCTAssertFalse(site.isAtServicePosition(SIMD2(0.15, 0.45), on: []))
+  }
+
   func testDetectionMatchesTheMappedAssetAtCapturePose() {
     let bounds: [[Float]] = [[-0.4, 0.2, 0.2], [0.0, 0.6, 0.5]]
     let fragment = RenderedVision.Detection(

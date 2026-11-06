@@ -60,6 +60,19 @@ struct WalkSite: Decodable {
   func center(_ cell: [Int], height: Float = 0) -> SIMD3<Float> {
     SIMD3((Float(cell[0]) + 0.5) * cellSize, height, (Float(cell[1]) + 0.5) * cellSize)
   }
+
+  func cellAt(x: Float, z: Float) -> SIMD2<Int> {
+    SIMD2(Int((x / cellSize).rounded(.down)), Int((z / cellSize).rounded(.down)))
+  }
+
+  func isAtServicePosition(_ position: SIMD2<Float>, on route: [[Int]]) -> Bool {
+    guard let end = route.last, cellSize > 0 else { return false }
+    let radius = arrivalRadiusMetres ?? max(0.30, cellSize / 2)
+    let destination = center(end)
+    guard simd_distance(position, SIMD2(destination.x, destination.z)) <= radius else { return false }
+    let cell = cellAt(x: position.x, z: position.y)
+    return route.suffix(Int(ceil(radius / cellSize)) + 1).contains([cell.x, cell.y])
+  }
 }
 
 struct WorldAlignment {
@@ -793,7 +806,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
   }
 
   private func cellAt(x: Float, z: Float) -> SIMD2<Int> {
-    SIMD2(Int(floor(x / model.cellSize)), Int(floor(z / model.cellSize)))
+    model.cellAt(x: x, z: z)
   }
 
   private func isWalkable(_ cell: SIMD2<Int>) -> Bool {
@@ -934,9 +947,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
   }
 
   private func arrivalText(at position: SIMD4<Float>) -> String? {
-    guard let end = activeRoute.last,
-          simd_distance(SIMD2(position.x, position.z), SIMD2(model.center(end).x, model.center(end).z))
-            <= (model.arrivalRadiusMetres ?? model.cellSize / 2),
+    guard model.isAtServicePosition(SIMD2(position.x, position.z), on: activeRoute),
           let target = serviceTarget else { return nil }
     return "At service position · \(target.displayName)"
   }
@@ -1095,6 +1106,10 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     guard arrived else { return }
     let report = UIViewController()
     report.title = "Inspection evidence"
+    report.navigationItem.rightBarButtonItem = UIBarButtonItem(
+      systemItem: .close, primaryAction: UIAction { [weak report] _ in
+        report?.navigationController?.dismiss(animated: true)
+      })
     report.view.backgroundColor = .systemBackground
     let text = UITextView()
     text.isEditable = false
@@ -1108,7 +1123,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
       text.topAnchor.constraint(equalTo: report.view.safeAreaLayoutGuide.topAnchor, constant: 16),
       text.bottomAnchor.constraint(equalTo: report.view.safeAreaLayoutGuide.bottomAnchor, constant: -16),
     ])
-    present(report, animated: true)
+    present(UINavigationController(rootViewController: report), animated: true)
   }
 
   func sessionWasInterrupted(_ session: ARSession) {

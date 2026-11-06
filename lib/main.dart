@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -253,7 +254,7 @@ class _SiteSimulationState extends State<SiteSimulation> {
         'start': pair(site.start),
         'route': _route.map(pair).toList(),
         'clearanceMetres': _clearanceMetres,
-        'arrivalRadiusMetres': site.cellSize / 2,
+        'arrivalRadiusMetres': math.max(0.30, site.cellSize / 2),
         'floor': site.floor?.map(pair).toList(),
         'walkableFloor': site
             .walkableCells(moved: _moved, clearanceMetres: _clearanceMetres)

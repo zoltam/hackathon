@@ -88,6 +88,13 @@ def export(workbook, site, mappings=None, *, include_nearby=False):
         raise ValueError('Mapping contains unknown workbook assets')
     if len(set(mappings.values())) != len(mappings):
         raise ValueError('Mapping must be one-to-one')
+    for obj, scene_id in zip(objects, ids):
+        if scene_id not in mappings:
+            continue
+        asset_id = mappings[scene_id]
+        asset_class = ASSET_CLASS_BY_EQUIPMENT_TYPE.get(obj.get('equipmentType'))
+        if not asset_class or assets[asset_id].get('asset_class') != asset_class:
+            raise ValueError(f'Incompatible workbook asset {asset_id} for scene object {scene_id}')
     return {
         'schemaVersion': 1,
         'sourceFile': Path(workbook).name,

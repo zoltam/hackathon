@@ -51,7 +51,7 @@ Do not encode a video just to analyze it: pass sampled renderer frames directly 
 
 Physical movement is handheld VR-style simulation, not recognition/localization in the real boiler room. Keep the real walking area clear, preserve the real-camera switch, and provide a recenter/reposition or virtual-movement option where physical space is insufficient. Virtual obstacles cannot protect the user from real furniture.
 
-Scene preparation and model training run on a Mac. The deployed model runs locally on iPhone. Scripted device checks used iPhone 15 with iOS 26.5. Physical offline acceptance and the reported iPhone 13 issue need device tests.
+Scene preparation and model training run on a Mac. The deployed model runs locally on iPhone. Scripted and physical offline checks used iPhone 15 with iOS 26.5. The reported iPhone 13 issue still needs a device test.
 
 ## Four-person ownership
 
@@ -94,7 +94,7 @@ Statuses: **Ready → In progress → In review → Done**. The coordinator upda
 | Confirm target phone and baseline model/export | 1 + 3 | In review | `vision/iphone-baseline` | Model loads and predicts on the actual phone; input format, labels, size and latency are recorded |
 | Capture clean rendered frames and run live inference | 3 + 1 | In review | `vision/rendered-frame-loop` | Boiler-room frames, not real camera images, reach the local model; overlays are excluded; stale frames do not queue |
 | Recognize and highlight the single target | 1 + 3 | In review | `vision/single-target` | On-phone detection of the rendered target produces a stable highlight associated with its mapped 3D object |
-| Complete phase 1 guided walk | 2 + 3 + 4 | In review | `navigation/single-target-walk` | User aligns, sees and follows the route, recognizes the target and reaches its approach point on the actual phone |
+| Complete phase 1 guided walk | 2 + 3 + 4 | iPhone 15 offline pass | `navigation/single-target-walk` | User aligns, sees and follows the route, recognizes the target and reaches its approach point on the actual phone |
 | Expand extraction to multiple 3D assets | 1 + 2 + 3 | In review | `scene/extract-equipment` | After single-target integration, expand persistent boxes and labels for the scored extraction/proximity requirements |
 | Import workbook and map a faulty target | 2 | Ready | `ai/asset-data` | Target and surrounding assets show reproducibly mapped supplied records, clearly labelled synthetic |
 | Validate routes and add automatic inspection playback | 2 + 3 | Ready | `navigation/inspection-route` | Start-to-target movement follows the walkability model; unreachable cases are handled |
@@ -220,6 +220,21 @@ The current builder validates and renders all 1,676,481 Gaussians in Equipment R
 
 The generated `assets/valmet/site.json` has 17 reviewed objects. Eleven are the trained detector catalog, comprising five pumps, one inline valve, two control cabinets and three blue actuators. Six surrounding objects have 3D frames for proximity display: a floor fan, carton, platform trolley, rolling chair, jerrycan and storage bin. This is semi-automatic extraction using reviewed seed volumes and quantiles of the supporting Gaussians, not discovery of every object in the room. The bounds were inspected in multiple rendered views. Each record has stable `objectId`, `equipmentType`, metric `bounds` and `supportingSplats`. Keep `objectId` separate from the synthetic workbook's `asset_id`. Only the primary pump has a walkable `service` cell. The detector returns image-space boxes for the 11 catalog IDs. Other catalog boxes are available for proximity and workbook mapping.
 
+On the 69 held-out walking views, replaying the current workbook filter,
+capture-time geometry check and strongest box per ID gave 147 true positives,
+7 false positives and 22 misses for the six mapped IDs (95.45% precision,
+86.98% recall, 91.02% F1 at IoU ≥ 0.50). This is a Mac replay of independent
+rendered frames, before the iPhone's two-frame confirmation.
+
+| Synthetic workbook tag | Scene object | Found / labeled | False positives |
+| --- | --- | ---: | ---: |
+| P-001 | Far circulation pump | 13/14 | 0 |
+| P-002 | Black circulation pump | 4/6 | 0 |
+| P-003 | Wall circulation pump | 18/29 | 4 |
+| P-004 | Middle circulation pump | 38/44 | 3 |
+| P-005 | Red circulation pump | 67/69 | 0 |
+| CV-003 | Blue inline valve | 7/7 | 0 |
+
 ## Shared agreements before integration
 
 | Topic | Agreement needed |
@@ -251,7 +266,11 @@ The generated `assets/valmet/site.json` has 17 reviewed objects. Eleven are the 
   confirmed the pump as `P-005 · Red circulation pump` and displayed the
   workbook-based next check at arrival in 20.36 seconds. Up to four nearby
   frames were visible, including two with compatible workbook mappings.
-  A physical walkthrough with Wi-Fi and cellular disabled is pending.
+  The user confirmed that a physical offline walkthrough showed P-005 and
+  the arrival guidance. The test exposed a tight 5 cm arrival tolerance and
+  an inspection report without a visible close control. The revised UI accepts
+  positions within 30 cm on the final route cells and adds a close button to
+  the report. The iPhone scripted journey passed again with arrival at 18.69 s.
 - The iPhone crate test localized two positions from rendered QR corners. It
   blocked the original route, then blocked the active detour and reopened 27
   cells when moved. The test uses a tagged object and a stationary camera
