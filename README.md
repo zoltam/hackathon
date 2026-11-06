@@ -50,7 +50,7 @@ In another terminal, monitor without altering the worker:
 python3 tools/monitor_equipment_training.py --watch --log /tmp/valmet-detector-hq-training.log --trainer /tmp/valmet-train-equipment-monitored
 ```
 
-Train and select on validation, then evaluate the chosen export with `--evaluate-only --split=test`. For intermediate checkpoints, copy the training session directory before using `--checkpoint-dir=<copy> --checkpoint-iteration=<step> --model=<separate-output>` on validation. The monitor can verify the evaluated export with `--expected-sha256 <digest>`. The generated Core ML model is `assets/valmet/equipment-detector.mlmodel`. Build the iPhone app after it exists. Scan data, renders, checkpoints and trained weights stay local.
+Train and select on validation, then evaluate the chosen export with `--evaluate-only --split=test`. For intermediate checkpoints, copy the training session directory before using `--checkpoint-dir=<copy> --checkpoint-iteration=<step> --model=<separate-output>` on validation. The monitor can verify the evaluated export with `--expected-sha256 <digest>`. The repository includes the evaluated Core ML detector at `assets/valmet/equipment-detector.mlmodel`, which the iPhone app bundles automatically. The scan, renders and training checkpoints stay local.
 
 The generated scene JSON also contains reviewed equipment volumes and stable `objectId` values for the workbook and proximity features. See [the scene handoff](PLAN.md#scene-and-equipment-handoff) for coverage and coordinate assumptions.
 

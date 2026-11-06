@@ -47,5 +47,6 @@ app.*.map.json
 # Organizer-provided Valmet data and derived scan assets.
 /assets/valmet/*
 !/assets/valmet/.gitkeep
+!/assets/valmet/equipment-detector.mlmodel
 
 /sources/valmet/
