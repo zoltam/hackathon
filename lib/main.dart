@@ -101,6 +101,7 @@ class _SiteSimulationState extends State<SiteSimulation> {
   late SiteObject? _target = _devices.firstOrNull;
   late List<Cell> _route = _findRoute();
   bool _moved = false;
+  bool _keyControls = false;
 
   List<Cell> _findRoute() {
     final destination = _target?.service;
@@ -119,6 +120,7 @@ class _SiteSimulationState extends State<SiteSimulation> {
       'openWorld',
       jsonEncode({
         'name': site.name,
+        'keyControls': _keyControls,
         'width': site.width,
         'depth': site.depth,
         'cellSize': site.cellSize,
@@ -163,6 +165,15 @@ class _SiteSimulationState extends State<SiteSimulation> {
                   _target = target;
                   _route = _findRoute();
                 }),
+        ),
+        const SizedBox(height: 12),
+        Text('Settings', style: Theme.of(context).textTheme.titleMedium),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text('Keyboard and screen controls'),
+          subtitle: const Text('Use WASD, arrow keys or on-screen buttons'),
+          value: _keyControls,
+          onChanged: (value) => setState(() => _keyControls = value),
         ),
         FilledButton.icon(
           onPressed: _openWorld,
