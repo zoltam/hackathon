@@ -50,13 +50,24 @@ void main() {
     expect(messages, [false, true]);
   });
 
-  testWidgets('shows route distance without playback controls', (tester) async {
+  testWidgets('shows route map and distance without playback controls', (
+    tester,
+  ) async {
     final site = Site.fromJson(
       File('test/fixtures/site.json').readAsStringSync(),
     );
     await tester.pumpWidget(ValmetApp(site: site));
     await tester.pumpAndSettle();
     expect(find.text('15.8 m · route with 0.20 m clearance'), findsOneWidget);
+    final map = find.byKey(const ValueKey('site-minimap'));
+    await tester.ensureVisible(map);
+    await tester.pumpAndSettle();
+    final painter = tester.widget<CustomPaint>(map).painter! as SitePainter;
+    expect(painter.site, same(site));
+    expect(painter.target, site.objects.firstWhere((o) => o.service != null));
+    expect(painter.route.first, site.start);
+    expect(painter.route.last, painter.target!.service);
+    expect(tester.takeException(), isNull);
     expect(find.text('Play route preview'), findsNothing);
     expect(find.text('Pause preview'), findsNothing);
     expect(find.text('Reset'), findsNothing);
@@ -194,6 +205,13 @@ void main() {
     expect(payload!['clearanceMetres'], .1);
     expect(payload!['arrivalRadiusMetres'], .3);
     expect(payload!['route'], hasLength(5));
+    final map = find.byKey(const ValueKey('site-minimap'));
+    await tester.ensureVisible(map);
+    await tester.pumpAndSettle();
+    expect(
+      (tester.widget<CustomPaint>(map).painter! as SitePainter).route,
+      hasLength(5),
+    );
     expect(payload!['walkableFloor'], [
       [0, 0],
       [1, 0],

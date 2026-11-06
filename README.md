@@ -33,6 +33,10 @@ the physical iPhone. The repository already includes the Core ML detector.
 
 ## Walk inside the 3D model
 
+The main screen includes a route overview map: blue marks the start, green the
+planned route and orange the service target. It updates when the target or
+camera clearance changes.
+
 Enable **Forward and backward controls** under **Settings** to move with the two on-screen buttons or ↑/↓. Turn by rotating the phone. This mode still uses ARKit to track orientation.
 
 On an ARKit-capable iPhone, select a service target and tap **Walk inside the 3D model**. Stand at the physical spot that should correspond to the virtual start, hold the phone upright and face the direction of the first route segment. The app assumes an initial phone height of 1.50 metres and uses the phone’s angle for the view. Tap **Set start and direction**. ARKit drives the virtual camera with the phone's rotation and translation, with one physical metre equal to one model metre. **Show camera** switches back to the live view while tracking continues. Use **Reset alignment** to choose a new physical start.
