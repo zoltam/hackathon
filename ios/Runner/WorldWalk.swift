@@ -139,6 +139,10 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     visionStatus.textColor = .white
     visionStatus.numberOfLines = 2
     visionStatus.isHidden = true
+    renderer.onFrameReady = { [weak self] pose in
+      guard let self, self.view.window != nil, !self.virtual.isHidden else { return }
+      self.updateDetectionPose(pose)
+    }
     renderer.vision.onPrediction = { [weak self] prediction in
       guard let self else { return }
       if self.visionMode == .benchmark, self.inBenchmarkWindow(CACurrentMediaTime()) {
@@ -271,7 +275,6 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
         SIMD4(zoom / Float(size.width / size.height), 0, 0, 0), SIMD4(0, zoom, 0, 0),
         SIMD4(0, 0, f / (n - f), -1), SIMD4(0, 0, n * f / (n - f), 0)
       ))
-      updateDetectionPose(pose)
       renderer.render(pose: pose, projection: projection)
     }
   }
@@ -466,7 +469,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
 
   private func isCurrent(_ frame: RenderedVision.Frame, comparedWith pose: simd_float4x4) -> Bool {
     // Avoid drawing boxes from an older view after the camera moves.
-    CACurrentMediaTime() - frame.timestamp < 0.25 &&
+    CACurrentMediaTime() - frame.timestamp < 0.40 &&
       simd_distance(frame.pose.columns.3, pose.columns.3) <= 0.16 &&
       simd_dot(frame.pose.columns.2, pose.columns.2) >= 0.99 &&
       simd_dot(frame.pose.columns.0, pose.columns.0) >= 0.99
@@ -578,7 +581,6 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     }
     let size = virtual.bounds.size
     if showModel, size.width > 0, size.height > 0 {
-      updateDetectionPose(pose)
       virtual.isHidden = false
       let projection = frame.camera.projectionMatrix(for: orientation, viewportSize: size, zNear: 0.04, zFar: 40)
       renderer.render(pose: pose, projection: projection)

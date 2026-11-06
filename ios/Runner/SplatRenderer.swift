@@ -27,6 +27,9 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
   let view: MTKView
   let vision = RenderedVision()
   var frameCounter: FrameCounter?
+  var onFrameReady: ((simd_float4x4) -> Void)?
+  private var renderLimit: CGFloat = 1200
+  private var slowFrames = 0
   private let queue: MTLCommandQueue
   private let pipeline: MTLRenderPipelineState
   private let floorPipeline: MTLRenderPipelineState
@@ -133,7 +136,7 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
     let size = view.bounds.size
     guard size.width > 0, size.height > 0,
           inFlight.wait(timeout: .now()) == .success else { return }
-    let ratio = min(view.contentScaleFactor, 1200 / max(size.width, size.height))
+    let ratio = min(view.contentScaleFactor, renderLimit / max(size.width, size.height))
     let dimensions = CGSize(width: (size.width * ratio).rounded(), height: (size.height * ratio).rounded())
     if view.drawableSize != dimensions { view.drawableSize = dimensions }
     guard let pass = view.currentRenderPassDescriptor, let drawable = view.currentDrawable,
@@ -180,10 +183,18 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
       }
     }
     command.present(drawable)
-    command.addCompletedHandler { [inFlight, frameCounter] completed in
+    command.addCompletedHandler { [weak self, inFlight, frameCounter] completed in
       inFlight.signal()
-      if let frameCounter, completed.status == .completed {
-        frameCounter.recordCompletion(at: CACurrentMediaTime())
+      guard completed.status == .completed else { return }
+      let now = CACurrentMediaTime()
+      frameCounter?.recordCompletion(at: now)
+      DispatchQueue.main.async { [weak self] in
+        guard let self else { return }
+        if self.renderLimit > 900 {
+          self.slowFrames = now - frame.timestamp > 0.16 ? self.slowFrames + 1 : 0
+          if self.slowFrames >= 3 { self.renderLimit = 900 }
+        }
+        self.onFrameReady?(pose)
       }
     }
     command.commit()
