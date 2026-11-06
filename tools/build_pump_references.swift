@@ -46,7 +46,9 @@ let count = data.count / stride
 let rows = splats.contents()
 let legacyAugmentation = CommandLine.arguments.contains("--legacy-augmentation")
 let highQuality = legacyAugmentation || CommandLine.arguments.contains("--detection-dataset-hq")
-let routeDataset = CommandLine.arguments.contains("--route-dataset")
+let distantActuatorTraining = CommandLine.arguments.contains("--distant-actuator-training")
+let actuatorTraining = distantActuatorTraining || CommandLine.arguments.contains("--actuator-training")
+let routeDataset = actuatorTraining || CommandLine.arguments.contains("--route-dataset")
 let width = routeDataset ? 720 : (highQuality ? 1440 : 820)
 let height = routeDataset ? 1560 : (highQuality ? 960 : 550)
 let textureDescriptor = MTLTextureDescriptor.texture2DDescriptor(
@@ -351,7 +353,7 @@ if !routeDataset && (highQuality || CommandLine.arguments.contains("--detection-
   }
 }
 
-if routeDataset {
+if routeDataset && !actuatorTraining {
   let directory = CommandLine.arguments.first { $0.hasPrefix("--output=") }
     .map { URL(fileURLWithPath: String($0.dropFirst("--output=".count))) }
     ?? root.appendingPathComponent("build/valmet-route-detection")
@@ -388,4 +390,76 @@ if routeDataset {
     print("\(split): \(index.count) native portrait frames, \(pumpCount) with pump")
     fflush(stdout)
   }
+}
+
+if actuatorTraining {
+  let output = distantActuatorTraining ? "build/valmet-distant-actuator-training" : "build/valmet-actuator-training"
+  let directory = CommandLine.arguments.first { $0.hasPrefix("--output=") }
+    .map { URL(fileURLWithPath: String($0.dropFirst("--output=".count))) }
+    ?? root.appendingPathComponent(output)
+  guard let floor = site.floor else { fatalError("Actuator training needs the observed floor grid") }
+  let folder = directory.appendingPathComponent("train")
+  try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+  let buffers = annotationBuffers()
+  let targets = site.objects.filter {
+    $0.objectId.hasSuffix(":left-blue-actuator") || $0.objectId.hasSuffix(":middle-blue-actuator")
+  }
+  let pump = center(of: target)
+  let pumpID = target.objectId
+  var index: [[String: Any]] = []
+  for object in targets {
+    let target = center(of: object)
+    let distanceRange: ClosedRange<Float> = distantActuatorTraining ? 3.8...5.6 : 0.95...3.20
+    let positions = floor.compactMap { cell -> SIMD2<Float>? in
+      let position = (SIMD2(Float(cell.x), Float(cell.y)) + 0.5) * site.cellSize
+      // Keep the original 25 cm split even when the navigation grid changes.
+      let x = Int(position.x / 0.25), z = Int(position.y / 0.25)
+      guard (0...2).contains((x + 2 * z) % 5) else { return nil }
+      let delta = SIMD2(target.x, target.z) - position
+      guard distanceRange.contains(simd_length(delta)) else { return nil }
+      if distantActuatorTraining {
+        let pumpDelta = SIMD2(pump.x, pump.z) - position
+        let sweep = atan2(delta.x * pumpDelta.y - delta.y * pumpDelta.x, simd_dot(delta, pumpDelta))
+        guard (1.1...4.2).contains(simd_length(pumpDelta)), (0.08...0.51).contains(sweep) else { return nil }
+      }
+      return position
+    }
+    // Spread views across the training cells.
+    let sampleLimit = distantActuatorTraining ? (object.objectId.hasSuffix(":left-blue-actuator") ? 30 : 14) : 18
+    let samples = min(sampleLimit, positions.count)
+    var positives = 0
+    for sample in 0..<samples {
+      let position = positions[sample * positions.count / samples]
+      let delta = SIMD2(target.x, target.z) - position
+      let distance = simd_length(delta)
+      let heading = atan2(delta.y, delta.x)
+      let pumpDelta = SIMD2(pump.x, pump.z) - position
+      let sweep = atan2(delta.x * pumpDelta.y - delta.y * pumpDelta.x, simd_dot(delta, pumpDelta))
+      let offsets: [Float] = distantActuatorTraining
+        ? [max(0.14, sweep * 0.46), min(0.30, max(0.21, sweep * 0.63))]
+        : [0, sample.isMultiple(of: 2) ? -0.19 : 0.19]
+      for (variant, yaw) in offsets.enumerated() {
+        let eye = SIMD3(position.x, variant == 0 ? 1.50 : 1.62, position.y)
+        let look = SIMD3(eye.x + cos(heading + yaw) * distance,
+                         target.y + (distantActuatorTraining ? 0.43 : (variant == 0 ? 0.10 : 0.32)),
+                         eye.z + sin(heading + yaw) * distance)
+        var labels: [[String: Any]] = []
+        let frame = render(eye: eye - origin, aim: look, masks: buffers) { labels = $0 }
+        guard labels.contains(where: { $0["label"] as? String == object.objectId }) else { continue }
+        if distantActuatorTraining, !labels.contains(where: { $0["label"] as? String == pumpID }) {
+          continue
+        }
+        let slug = object.objectId.split(separator: ":").last!
+        let prefix = distantActuatorTraining ? "distant" : "focus"
+        let name = "\(prefix)-\(slug)-\(sample)-\(variant).png"
+        try frame.representation(using: .png, properties: [:])!.write(to: folder.appendingPathComponent(name))
+        index.append(["imagefilename": name, "annotation": labels])
+        positives += 1
+      }
+    }
+    print("\(object.objectId): \(positives) additional native portrait training frames")
+    fflush(stdout)
+  }
+  let json = try JSONSerialization.data(withJSONObject: index, options: [.prettyPrinted, .sortedKeys])
+  try json.write(to: folder.appendingPathComponent("annotations.json"), options: .atomic)
 }

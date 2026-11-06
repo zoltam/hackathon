@@ -191,6 +191,16 @@ actuator remained at 0/7. Pump false positives rose from one to four, above the
 validation limit, so the published R3 detector remains active. R4 was evaluated
 on validation; the held-out test sets were reserved.
 
+R5 added 81 distant portrait views with the actuator and pump visible. Its
+600-step checkpoint reached 83.15% walking validation F1, versus 78.70% for R3.
+It detected the left actuator in 1/7 views and the pump in 77/78, with seven
+false pump detections versus one for R3. The same release gate rejected R5.
+
+The iPhone scripted journey followed the actual 3.10 m Dart route, confirmed
+the red pump against its projected 3D bounds, and arrived after 20.38 seconds.
+The run finished after 24.70 seconds. A physical AR walk and offline check
+remain separate acceptance steps.
+
 ## Scene and equipment handoff
 
 The current builder validates and renders all 1,676,481 Gaussians in Equipment Room.ply. Similarity registration to the reviewed scene yielded a 2.32 cm median nearest-neighbor distance. The navigation grid now uses 126 × 129 cells at 0.10 m resolution in the unchanged registered frame. Measured floor centres and bounded Gaussian footprints provide 3,213 floor cells. At the default 0.10 m virtual-camera radius, 2,106 of 2,130 clearance-valid cells connect to the pump approach (21.06 m²). The 1.55 m obstacle ceiling matches the 1.50 m virtual camera plus margin, not standing-person clearance. The imported route from the entrance to the pump is 31 steps (3.10 m). Eleven rendered-region anchors, including the full reviewed upper aisle, remain connected; real low obstacles stay blocked. Distances assume one reviewed scene unit is one metre.

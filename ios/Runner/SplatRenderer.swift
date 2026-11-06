@@ -220,15 +220,6 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
     let markerSize = max(cellSize, 0.18)
     let minimumGap = markerSize * 1.12
     var path = [start]
-    var arrows: [SIMD4<Float>] = []
-    var occupied = [SIMD2(end.x, end.z)]
-
-    func addArrow(at point: SIMD2<Float>, toward direction: SIMD2<Float>) {
-      guard occupied.allSatisfy({ simd_distance($0, point) >= minimumGap }) else { return }
-      arrows.append(SIMD4(point.x, point.y, atan2(direction.y, direction.x), 0))
-      occupied.append(point)
-    }
-
     for index in corners.indices.dropFirst().dropLast() {
       let point = corners[index]
       let incoming = point - corners[index - 1]
@@ -243,28 +234,47 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
         let s = 1 - t
         path.append(entry * (s * s) + point * (2 * s * t) + exit * (t * t))
       }
-      addArrow(at: (entry + point * 2 + exit) / 4, toward: exit - entry)
     }
     path.append(SIMD2(end.x, end.z))
 
-    let spacing = max(0.24, minimumGap)
-    var distance: Float = 0
-    var nextArrow: Float = 0
-    var ribbon: [SIMD4<Float>] = []
-    for (start, end) in zip(path, path.dropFirst()) {
+    let segments = zip(path, path.dropFirst()).compactMap { start, end -> (start: SIMD2<Float>, delta: SIMD2<Float>, length: Float)? in
       let delta = end - start
       let length = simd_length(delta)
-      guard length > 0 else { continue }
-      let center = (start + end) / 2
-      ribbon.append(SIMD4(center.x, center.y, atan2(delta.y, delta.x), length / cellSize))
-      while nextArrow < distance + length {
-        addArrow(at: start + delta * ((nextArrow - distance) / length), toward: delta)
-        nextArrow += spacing
-      }
-      distance += length
+      return length > 0 ? (start, delta, length) : nil
     }
-    // Positive length draws the ribbon. Arrows and the ring draw on top.
-    return ribbon + arrows + [destination]
+    let ribbon = segments.map { segment in
+      let center = segment.start + segment.delta / 2
+      return SIMD4(center.x, center.y, atan2(segment.delta.y, segment.delta.x), segment.length / cellSize)
+    }
+    let totalLength = segments.reduce(Float(0)) { $0 + $1.length }
+    var count = Int(totalLength / max(0.24, minimumGap))
+    while count > 0 {
+      let spacing = totalLength / Float(count)
+      var arrows: [SIMD4<Float>] = []
+      var segmentIndex = 0
+      var traveled: Float = 0
+      for index in 0..<count {
+        let distance = Float(index) * spacing
+        while segmentIndex + 1 < segments.count, distance >= traveled + segments[segmentIndex].length {
+          traveled += segments[segmentIndex].length
+          segmentIndex += 1
+        }
+        let segment = segments[segmentIndex]
+        let center = segment.start + segment.delta * ((distance - traveled) / segment.length)
+        arrows.append(SIMD4(center.x, center.y, atan2(segment.delta.y, segment.delta.x), 0))
+      }
+      let symbols = arrows + [destination]
+      let overlaps = symbols.indices.contains { index in
+        let a = symbols[index]
+        return symbols.dropFirst(index + 1).contains { b in
+          simd_distance(SIMD2(a.x, a.y), SIMD2(b.x, b.y)) < minimumGap
+        }
+      }
+      if !overlaps { return ribbon + symbols }
+      // Give every arrow more space when any pair is too close.
+      count -= 1
+    }
+    return ribbon + [destination]
   }
 
   private func sort(viewProjection: simd_float4x4, screen: SIMD2<Float>, into buffer: MTLBuffer) -> Int {
