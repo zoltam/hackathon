@@ -33,4 +33,35 @@ class RunnerTests: XCTestCase {
       fragment, to: [[-0.4, 0.2, -0.5], [0.0, 0.6, -0.2]],
       viewProjection: matrix_identity_float4x4))
   }
+
+  func testObstacleTagLocalizesPerspectiveCornersOnTheCratePlane() throws {
+    let center = SIMD2<Float>(6.95, 6.55)
+    let eye = SIMD3<Float>(5.85, 1.50, 6.45)
+    let look = SIMD3(center.x, ObstacleTag.height, center.y)
+    let back = simd_normalize(eye - look)
+    let right = simd_normalize(simd_cross(SIMD3(0, 1, 0), back))
+    let up = simd_cross(back, right)
+    func vector(_ point: SIMD3<Float>, _ w: Float) -> SIMD4<Float> {
+      SIMD4(point.x, point.y, point.z, w)
+    }
+    let pose = simd_float4x4(columns: (vector(right, 0), vector(up, 0), vector(back, 0), vector(eye, 1)))
+    let projection = simd_float4x4(columns: (
+      SIMD4(2.8, 0, 0, 0), SIMD4(0, 1.4, 0, 0),
+      SIMD4(0, 0, -1.001, -1), SIMD4(0, 0, -0.04004, 0)
+    ))
+    let frame = RenderedVision.Frame(pose: pose, projection: projection, timestamp: 1)
+    let transform = projection * pose.inverse
+    func corners(halfSide: Float) -> [CGPoint] {
+      [SIMD2<Float>(-1, -1), SIMD2(1, -1), SIMD2(1, 1), SIMD2(-1, 1)].map { corner in
+        let point = center + corner * halfSide
+        let clip = transform * SIMD4(point.x, ObstacleTag.height, point.y, 1)
+        return CGPoint(x: CGFloat((clip.x / clip.w + 1) / 2), y: CGFloat((clip.y / clip.w + 1) / 2))
+      }
+    }
+
+    let observed = try XCTUnwrap(ObstacleTag.center(corners: corners(halfSide: 0.19), frame: frame))
+    XCTAssertEqual(observed.x, center.x, accuracy: 0.001)
+    XCTAssertEqual(observed.y, center.y, accuracy: 0.001)
+    XCTAssertNil(ObstacleTag.center(corners: corners(halfSide: 0.05), frame: frame))
+  }
 }

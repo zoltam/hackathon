@@ -14,6 +14,7 @@ struct WalkSite: Decodable {
     let cells: [[Int]]?
     let bounds: [[Float]]?
     let syntheticCondition: String?
+    let service: [Int]?
 
     func floorBounds(cellSize: Float) -> (min: SIMD2<Float>, max: SIMD2<Float>) {
       if let bounds, bounds.count == 2, bounds.allSatisfy({ $0.count == 3 }),
@@ -28,6 +29,8 @@ struct WalkSite: Decodable {
 
   let name: String
   let keyControls: Bool
+  let obstacleDemo: Bool?
+  let moved: Bool?
   let width, depth: Int
   let cellSize: Float
   let originShift: SIMD3<Float>?
@@ -44,6 +47,7 @@ struct WalkSite: Decodable {
   let target: Int?
   let objects: [Block]
   let arrivalRadiusMetres: Float?
+  let clearanceMetres: Float?
   let inspectionReport: String?
 
   func center(_ cell: [Int], height: Float = 0) -> SIMD3<Float> {
@@ -71,7 +75,7 @@ struct WorldAlignment {
 }
 
 final class WorldWalk: UIViewController, ARSessionDelegate {
-  enum VisionMode { case normal, verify, benchmark, journey }
+  enum VisionMode { case normal, verify, benchmark, journey, obstacle }
 
   private let model: WalkSite
   private let renderer: SplatRenderer
@@ -86,6 +90,18 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
   private var verificationFrames = 0
   private var journeyStart: CFTimeInterval?
   private var journeyConfirmedTarget = false
+  var replanRoute: (([String: Any], @escaping (Any?) -> Void) -> Void)?
+  private lazy var activeRoute = model.route
+  private var obstacleStart: CFTimeInterval?
+  private var obstaclePlacedAt: CFTimeInterval?
+  private var previousObstacleCenter: SIMD2<Float>?
+  private var plannedObstacleCenter: SIMD2<Float>?
+  private var obstacleStage = 0
+  private var obstacleTestCenter: SIMD2<Float>?
+  private var confirmedBlockedCells = Set<[Int]>()
+  private var obstacleConfirmed = false
+  private var replanPending = false
+  private let moveCrate = UIButton(type: .system)
   private static let benchmarkDuration: CFTimeInterval = 15
   private var benchmarkStart: CFTimeInterval?
   private var benchmarkLink: CADisplayLink?
@@ -167,6 +183,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
         self.benchmarkLatencies.append(prediction.inferenceMilliseconds)
       }
       guard self.view.window != nil, !self.virtual.isHidden, let pose = self.currentPose else { return }
+      self.observeObstacle(in: prediction)
       guard self.isCurrent(prediction.frame, comparedWith: pose) else {
         self.clearDetections()
         return
@@ -218,11 +235,14 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     inspect.configuration = .tinted()
     inspect.setTitle("Inspection evidence", for: .normal)
     inspect.addTarget(self, action: #selector(showInspection), for: .touchUpInside)
+    moveCrate.configuration = .tinted()
+    moveCrate.setTitle("Place demo crate", for: .normal)
+    moveCrate.addTarget(self, action: #selector(placeDemoCrate), for: .touchUpInside)
     let row = UIStackView(arrangedSubviews: [toggle, close])
     row.distribution = .fillEqually
     row.spacing = 8
     movementControls = model.keyControls ? makeControls() : nil
-    let panel = UIStackView(arrangedSubviews: [message, visionStatus, nearbyStatus, movementControls, align, inspect, row].compactMap { $0 })
+    let panel = UIStackView(arrangedSubviews: [message, visionStatus, nearbyStatus, movementControls, align, inspect, moveCrate, row].compactMap { $0 })
     panel.axis = .vertical
     panel.spacing = 8
     panel.isLayoutMarginsRelativeArrangement = true
@@ -244,6 +264,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     guard !started else { return }
     started = true
     if model.keyControls { becomeFirstResponder() }
+    renderer.vision.detectsObstacleTag = visionMode == .obstacle || model.obstacleDemo == true
     renderer.vision.loadModel(at: detectorURL) { [weak self] loaded in
       guard let self, self.view.window != nil else { return }
       self.visionIdleText = loaded ? "Vision · No equipment detected" : "Vision · Detector unavailable"
@@ -251,7 +272,8 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
       guard self.visionMode != .normal else { return }
       if !loaded {
         self.visionStatus.isHidden = false
-        let log = self.visionMode == .journey ? "VALMET_JOURNEY error=detector_unavailable" :
+        let log = self.visionMode == .obstacle ? "VALMET_OBSTACLE error=detector_unavailable" :
+          self.visionMode == .journey ? "VALMET_JOURNEY error=detector_unavailable" :
           self.visionMode == .benchmark ? "VALMET_BENCH error=detector_unavailable" : "VALMET_VISION detector unavailable"
         print(log)
         fflush(stdout)
@@ -259,6 +281,8 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
         self.verifyRenderedFrame(index: 0)
       } else if self.visionMode == .benchmark {
         self.startBenchmark()
+      } else if self.visionMode == .obstacle {
+        self.startObstacleCheck()
       } else {
         self.startJourney()
       }
@@ -318,6 +342,144 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
   private var serviceTarget: WalkSite.Block? {
     guard let target = model.target, model.objects.indices.contains(target) else { return nil }
     return model.objects[target]
+  }
+
+  private func startObstacleCheck() {
+    guard model.route.count >= 6, model.cellSize > 0, replanRoute != nil else {
+      print("VALMET_OBSTACLE result=failed error=missing_route")
+      fflush(stdout)
+      return
+    }
+    showModel = true
+    let index = min(Int((1.10 / model.cellSize).rounded()), model.route.count - 2)
+    let center = model.center(model.route[index])
+    obstacleTestCenter = SIMD2(center.x, center.z)
+    obstacleStart = CACurrentMediaTime()
+    print("VALMET_OBSTACLE phase=initial_route cells=\(model.route.count)")
+    fflush(stdout)
+    obstacleFrame()
+  }
+
+  private func obstacleFrame() {
+    guard let start = obstacleStart, let center = obstacleTestCenter else { return }
+    let now = CACurrentMediaTime()
+    if now - start > 25 || view.window?.windowScene?.activationState != .foregroundActive {
+      finishObstacleCheck(error: "timeout_or_inactive")
+      return
+    }
+    if now - start >= 2, renderer.obstacleCenter != center {
+      renderer.obstacleCenter = center
+      obstaclePlacedAt = now
+      previousObstacleCenter = nil
+      print("VALMET_OBSTACLE phase=placed stage=\(obstacleStage + 1)")
+      fflush(stdout)
+    }
+    let eye = model.center(model.start, height: assumedPhoneHeight)
+    updateWalkStatus(at: SIMD4(eye.x, eye.y, eye.z, 1))
+    renderScriptedView(eye: eye, look: SIMD3(center.x, ObstacleTag.height, center.y))
+    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0 / 30.0) { [weak self] in
+      self?.obstacleFrame()
+    }
+  }
+
+  @objc private func placeDemoCrate() {
+    guard let pose = currentPose, !replanPending else { return }
+    let eye = SIMD2(pose.columns.3.x, pose.columns.3.z)
+    let center = model.route.dropFirst().dropLast()
+      .map { model.center($0) }
+      .map { SIMD2($0.x, $0.z) }
+      .filter { point in
+        let distance = simd_distance(eye, point)
+        return distance >= 0.85 && distance <= 2.0 &&
+          (renderer.obstacleCenter.map { simd_distance($0, point) >= 0.35 } ?? true)
+      }.min { abs(simd_distance(eye, $0) - 1.10) < abs(simd_distance(eye, $1) - 1.10) }
+    guard let center else {
+      updateDisplay("Move to a clear view of the planned route before placing the demo crate.")
+      return
+    }
+    renderer.obstacleCenter = center
+    obstaclePlacedAt = CACurrentMediaTime()
+    previousObstacleCenter = nil
+    obstacleConfirmed = false
+    moveCrate.setTitle("Move demo crate", for: .normal)
+  }
+
+  private func observeObstacle(in prediction: RenderedVision.Prediction) {
+    guard (obstacleStart != nil || model.obstacleDemo == true), let replanRoute, !replanPending,
+          let placed = obstaclePlacedAt, prediction.frame.timestamp >= placed else { return }
+    guard let measured = prediction.obstacleCenter else {
+      previousObstacleCenter = nil
+      return
+    }
+    defer { previousObstacleCenter = measured }
+    guard let previous = previousObstacleCenter, simd_distance(previous, measured) < 0.08 else { return }
+    let center = (previous + measured) / 2
+    if let plannedObstacleCenter, simd_distance(plannedObstacleCenter, center) < 0.14 { return }
+    plannedObstacleCenter = center
+    let halfSide = ObstacleTag.side / 2 + 0.02
+    let minCell = cellAt(x: center.x - halfSide, z: center.y - halfSide)
+    let maxCell = cellAt(x: center.x + halfSide, z: center.y + halfSide)
+    let blocked = (minCell.x...maxCell.x).flatMap { x in (minCell.y...maxCell.y).map { [x, $0] } }
+    guard let end = serviceTarget?.service ?? model.route.last, let pose = currentPose else { return }
+    let from = cellAt(x: pose.columns.3.x, z: pose.columns.3.z)
+    print("VALMET_OBSTACLE phase=confirmed x=\(center.x) z=\(center.y) cells=\(blocked.count)")
+    fflush(stdout)
+    replanPending = true
+    replanRoute(["from": [from.x, from.y], "to": end, "blocked": blocked,
+                 "clearanceMetres": model.clearanceMetres ?? 0.1,
+                 "moved": model.moved == true]) { [weak self] response in
+      guard let self else { return }
+      self.replanPending = false
+      guard self.view.window != nil, self.obstaclePlacedAt == placed else { return }
+      guard let result = response as? [String: Any], let route = result["route"] as? [[Int]],
+            let floor = result["walkableFloor"] as? [[Int]] else {
+        self.plannedObstacleCenter = nil
+        if self.obstacleStart != nil { self.finishObstacleCheck(error: "planner_unavailable") }
+        return
+      }
+      let walkable = Set(floor)
+      let previousRouteBlocked = self.activeRoute.contains { !walkable.contains($0) }
+      let originalRouteBlocked = self.model.route.contains { !walkable.contains($0) }
+      let reopened = self.confirmedBlockedCells.intersection(walkable).count
+      self.confirmedBlockedCells = Set(blocked)
+      self.floorCells = Set(floor.map { SIMD2($0[0], $0[1]) })
+      let remaining = self.activeRoute.dropFirst(self.activeRoute.firstIndex(of: [from.x, from.y]) ?? 0)
+      if self.obstacleStart != nil || !remaining.contains([from.x, from.y]) ||
+         remaining.contains(where: { !walkable.contains($0) }) {
+        self.activeRoute = route
+        self.renderer.setRoute(route.map { self.model.center($0) })
+      }
+      self.obstacleConfirmed = true
+      guard self.obstacleStart != nil, let expected = self.obstacleTestCenter else { return }
+      let error = simd_distance(center, expected)
+      print("VALMET_OBSTACLE phase=replanned cells=\(route.count) previous_route_blocked=\(previousRouteBlocked) original_route_blocked=\(originalRouteBlocked) reopened=\(reopened) error_m=\(error)")
+      fflush(stdout)
+      guard error < 0.12, previousRouteBlocked, !route.isEmpty,
+            self.obstacleStage == 0 || reopened > 0,
+            route.first == [from.x, from.y], route.last == end,
+            route.allSatisfy(walkable.contains), blocked.allSatisfy({ !walkable.contains($0) }) else {
+        self.finishObstacleCheck(error: "unexpected_replan")
+        return
+      }
+      if self.obstacleStage == 0 {
+        self.obstacleStage = 1
+        let index = min(Int((1.50 / self.model.cellSize).rounded()), route.count - 2)
+        let next = self.model.center(route[index])
+        self.obstacleTestCenter = SIMD2(next.x, next.z)
+      } else {
+        self.finishObstacleCheck(error: nil)
+      }
+    }
+  }
+
+  private func finishObstacleCheck(error: String?) {
+    obstacleStart = nil
+    if let error {
+      print("VALMET_OBSTACLE result=failed error=\(error)")
+    } else {
+      print("VALMET_OBSTACLE result=passed observations=2")
+    }
+    fflush(stdout)
   }
 
   private func startJourney() {
@@ -589,7 +751,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
   }
 
   private func arrivalText(at position: SIMD4<Float>) -> String? {
-    guard let end = model.route.last,
+    guard let end = activeRoute.last,
           simd_distance(SIMD2(position.x, position.z), SIMD2(model.center(end).x, model.center(end).z))
             <= (model.arrivalRadiusMetres ?? model.cellSize / 2),
           let target = serviceTarget else { return nil }
@@ -731,7 +893,11 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
       arrived = true
       updateDisplay(arrival)
     } else {
-      updateDisplay(model.name + (model.route.isEmpty ? " · No route to target · Explore the model" : " · Follow the green route"))
+      let guidance = activeRoute.isEmpty ? "No route to target" : "Follow the green route"
+      let obstacleStatus = model.obstacleDemo == true && renderer.obstacleCenter != nil
+        ? (obstacleConfirmed ? " · Crate detected" : " · Aim at the tag on the crate")
+        : ""
+      updateDisplay(model.name + " · " + guidance + obstacleStatus)
     }
   }
 
@@ -769,12 +935,15 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
   }
 
   private func updateDisplay(_ text: String) {
-    let visible = showModel && (visionMode == .journey || (ready && alignment != nil))
+    let visible = showModel && (visionMode == .journey || visionMode == .obstacle || (ready && alignment != nil))
     virtual.isHidden = !visible
     movementControls?.isHidden = !visible
     inspect.isHidden = !visible || !arrived
     visionStatus.isHidden = !visible
     nearbyStatus.isHidden = !visible || nearbyStatus.text == nil
+    moveCrate.isHidden = !visible || model.obstacleDemo != true
+    moveCrate.isEnabled = !replanPending
+
     if !visible {
       buttons.removeAll()
       clearDetections()

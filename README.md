@@ -121,6 +121,20 @@ The viewer lists up to three nearby catalog objects and their condition. A yello
 box marks a visual detection after two consecutive frames agree with its mapped
 3D bounds. At the service point, open **Inspection evidence** for the target.
 
+To demonstrate a moving obstacle, enable **Movable demo crate** before opening
+the viewer. Align, tap **Place demo crate**, and aim down at its tag. After the
+tag is seen in two frames, the planner applies the observed footprint to the
+walkable map and redraws a blocked route. **Move demo crate** repeats the check.
+The demo uses a tagged simulated crate with a known size and height.
+
+To verify placement and mask replacement on iPhone:
+
+```sh
+xcrun devicectl device process launch --device <device> --terminate-existing --console <bundle-id> -- \
+  --verify-obstacle-reroute "$(dart tools/verify_service_route.dart)"
+```
+
+
 Import the supplied workbook after generating `assets/valmet/site.json`:
 
 ```sh

@@ -6,6 +6,41 @@ import Metal
 import Vision
 import simd
 
+enum ObstacleTag {
+  static let payload = "VALMET-CRATE"
+  static let height: Float = 0.52
+  static let side: Float = 0.50
+
+  static func center(corners: [CGPoint], frame: RenderedVision.Frame) -> SIMD2<Float>? {
+    guard corners.count == 4 else { return nil }
+    let camera = frame.pose.columns.3
+    guard camera.y > height else { return nil }
+    let clipToWorld = (frame.projection * frame.pose.inverse).inverse
+    var footprint: [SIMD2<Float>] = []
+    for point in corners {
+      guard (0...1).contains(point.x), (0...1).contains(point.y) else { return nil }
+      // Vision reports normalized corners with the same bottom-left origin as Metal NDC.
+      let far = clipToWorld * SIMD4(Float(point.x) * 2 - 1, Float(point.y) * 2 - 1, 1, 1)
+      guard abs(far.w) > 0.000001 else { return nil }
+      let ray = far / far.w - camera
+      guard ray.y < -0.0001 else { return nil }
+      let fraction = (height - camera.y) / ray.y
+      guard (0...1).contains(fraction) else { return nil }
+      let hit = camera + ray * fraction
+      guard hit.x.isFinite, hit.z.isFinite else { return nil }
+      footprint.append(SIMD2(hit.x, hit.z))
+    }
+
+    // Barcode corners describe the printed code inside the white border, not the crate edges.
+    let edges = footprint.indices.map { index in
+      simd_distance(footprint[index], footprint[(index + 1) % footprint.count])
+    }
+    guard let shortest = edges.min(), let longest = edges.max(),
+          shortest >= side * 0.55, longest <= side * 1.2, longest <= shortest * 1.35 else { return nil }
+    return footprint.reduce(.zero, +) / 4
+  }
+}
+
 final class RenderedVision {
   struct Frame {
     let pose: simd_float4x4
@@ -22,6 +57,7 @@ final class RenderedVision {
   struct Prediction {
     let frame: Frame
     let detections: [Detection]
+    let obstacleCenter: SIMD2<Float>?
     let inferenceMilliseconds: Int
   }
 
@@ -72,8 +108,14 @@ final class RenderedVision {
   }
 
   var onPrediction: ((Prediction) -> Void)?
+  var detectsObstacleTag = false
   private var detector: (request: VNCoreMLRequest, directory: URL)?
   private let queue = DispatchQueue(label: "valmet.rendered-vision", qos: .userInitiated)
+  private lazy var barcodeRequest: VNDetectBarcodesRequest = {
+    let request = VNDetectBarcodesRequest()
+    request.symbologies = [.qr]
+    return request
+  }()
   private final class Readback {
     let available = DispatchSemaphore(value: 1)
     var buffer: MTLBuffer?
@@ -120,6 +162,7 @@ final class RenderedVision {
     guard let request = detector?.request, frame.timestamp >= scheduled,
           let readback = readbacks.first(where: { $0.available.wait(timeout: .now()) == .success }) else { return }
     let width = texture.width, height = texture.height
+    let readsObstacleTag = detectsObstacleTag
     let stride = ((width * 4 + 255) / 256) * 256
     let length = stride * height
     if readback.buffer?.length != length {
@@ -157,9 +200,10 @@ final class RenderedVision {
           guard status == kCVReturnSuccess, let pixelBuffer else { return }
           let started = CACurrentMediaTime()
           do {
-            try withExtendedLifetime(staging) {
-              try VNImageRequestHandler(cvPixelBuffer: pixelBuffer, orientation: .up)
-                .perform([request])
+            let handler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer, orientation: .up)
+            let obstacleCenter = try withExtendedLifetime(staging) {
+              try handler.perform([request])
+              return readsObstacleTag ? self.locateObstacle(using: handler, frame: frame) : nil
             }
             guard let observations = request.results as? [VNRecognizedObjectObservation] else {
               NSLog("Rendered vision model did not return object observations")
@@ -170,7 +214,7 @@ final class RenderedVision {
               return Detection(objectID: label.identifier, confidence: label.confidence,
                                bounds: observation.boundingBox)
             }
-            let result = Prediction(frame: frame, detections: detections,
+            let result = Prediction(frame: frame, detections: detections, obstacleCenter: obstacleCenter,
                                     inferenceMilliseconds: Int((CACurrentMediaTime() - started) * 1000))
             DispatchQueue.main.async { self.onPrediction?(result) }
           } catch {
@@ -178,6 +222,18 @@ final class RenderedVision {
           }
         }
       }
+    }
+  }
+
+  private func locateObstacle(using handler: VNImageRequestHandler, frame: Frame) -> SIMD2<Float>? {
+    do {
+      try handler.perform([barcodeRequest])
+      guard let tag = barcodeRequest.results?.first(where: { $0.payloadStringValue == ObstacleTag.payload })
+      else { return nil }
+      return ObstacleTag.center(corners: [tag.topLeft, tag.topRight, tag.bottomRight, tag.bottomLeft], frame: frame)
+    } catch {
+      NSLog("Rendered obstacle tag detection failed: %@", error.localizedDescription)
+      return nil
     }
   }
 }

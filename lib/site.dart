@@ -99,6 +99,25 @@ class Site {
     return _walkable(cell, blocked, clearanceMetres);
   }
 
+  Iterable<Cell> walkableCells({
+    bool moved = false,
+    double clearanceMetres = 0,
+    Set<Cell> additionalBlocked = const {},
+  }) sync* {
+    if (!clearanceMetres.isFinite || clearanceMetres < 0) {
+      throw ArgumentError.value(clearanceMetres, 'clearanceMetres');
+    }
+    final blocked = <Cell>{
+      ...additionalBlocked,
+      for (final object in visibleObjects(moved)) ...object.footprint,
+    };
+    for (var x = 0; x < width; x++) {
+      for (var z = 0; z < depth; z++) {
+        if (_walkable((x, z), blocked, clearanceMetres)) yield (x, z);
+      }
+    }
+  }
+
   bool _walkable(Cell cell, Set<Cell> blocked, double radius) {
     bool allowed(Cell p) =>
         p.$1 >= 0 &&

@@ -31,12 +31,15 @@ import UIKit
                                          roomSize: SIMD2(Float(model.width), Float(model.depth)) * model.cellSize,
                                          sourceRotation: model.sourceRotation,
                                          route: model.route.map { model.center($0) },
-                                         cellSize: model.cellSize) else {
+                                         cellSize: model.cellSize, obstacleEnabled: visionMode == .obstacle || model.obstacleDemo == true) else {
         return result(FlutterError(code: "metal", message: "Could not start the 3D renderer.", details: nil))
       }
       let detectorKey = registrar.lookupKey(forAsset: "assets/valmet/equipment-detector.mlmodel")
       let detectorURL = Bundle.main.url(forResource: detectorKey, withExtension: nil)
       let camera = WorldWalk(model: model, renderer: renderer, detectorURL: detectorURL, visionMode: visionMode)
+      camera.replanRoute = { request, completion in
+        channel.invokeMethod("replanServiceRoute", arguments: request, result: completion)
+      }
       camera.modalPresentationStyle = .fullScreen
       host.present(camera, animated: visionMode == .normal) { result(nil) }
     }
@@ -48,12 +51,13 @@ import UIKit
       open(payload, .normal, result)
     }
     let arguments = ProcessInfo.processInfo.arguments
-    let journeyArgument = arguments.firstIndex(of: "--verify-service-journey")
-    let visionMode: WorldWalk.VisionMode = journeyArgument != nil ? .journey :
+    let obstacleArgument = arguments.firstIndex(of: "--verify-obstacle-reroute")
+    let journeyArgument = obstacleArgument ?? arguments.firstIndex(of: "--verify-service-journey")
+    let visionMode: WorldWalk.VisionMode = obstacleArgument != nil ? .obstacle : journeyArgument != nil ? .journey :
       arguments.contains("--benchmark-rendered-vision") ? .benchmark :
       arguments.contains("--verify-rendered-vision") ? .verify : .normal
     if visionMode != .normal {
-      let logPrefix = visionMode == .journey ? "VALMET_JOURNEY" :
+      let logPrefix = visionMode == .obstacle ? "VALMET_OBSTACLE" : visionMode == .journey ? "VALMET_JOURNEY" :
         visionMode == .benchmark ? "VALMET_BENCH" : "VALMET_VISION"
       DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
         let key = registrar.lookupKey(forAsset: "assets/valmet/site.json")
@@ -76,7 +80,7 @@ import UIKit
                 let target = objects.firstIndex(where: { $0["objectId"] as? String == id }),
                 let service = objects[target]["service"] as? [Int], route.last == service,
                 let floor = site["floor"] as? [[Int]] else {
-            print("VALMET_JOURNEY error=invalid_route")
+            print("\(logPrefix) error=invalid_route")
             fflush(stdout)
             return
           }
@@ -85,7 +89,7 @@ import UIKit
                 zip(route, route.dropFirst()).allSatisfy({ a, b in
                   abs(a[0] - b[0]) + abs(a[1] - b[1]) == 1
                 }) else {
-            print("VALMET_JOURNEY error=invalid_route")
+            print("\(logPrefix) error=invalid_route")
             fflush(stdout)
             return
           }

@@ -1,3 +1,5 @@
+import CoreImage
+import CoreImage.CIFilterBuiltins
 import MetalKit
 import simd
 
@@ -16,6 +18,12 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
     var count: Int { lock.withLock { frames } }
   }
 
+  private struct ObstacleRendering {
+    let pipeline: MTLRenderPipelineState
+    let tag: MTLTexture
+    let depthWrite, depthTest: MTLDepthStencilState
+  }
+
   struct Uniforms {
     var viewProjection: simd_float4x4
     var screen: SIMD2<Float>
@@ -28,14 +36,16 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
   let vision = RenderedVision()
   var frameCounter: FrameCounter?
   var onFrameReady: ((simd_float4x4) -> Void)?
+  var obstacleCenter: SIMD2<Float>?
   private var renderLimit: CGFloat = 1200
   private var slowFrames = 0
   private let queue: MTLCommandQueue
   private let pipeline: MTLRenderPipelineState
   private let floorPipeline: MTLRenderPipelineState
   private let routePipeline: MTLRenderPipelineState
-  private let routeBuffer: MTLBuffer?
-  private let routeCount: Int
+  private let obstacleRendering: ObstacleRendering?
+  private var routeBuffer: MTLBuffer?
+  private var routeCount = 0
   private let routeCellSize: Float
   private let roomSize: SIMD2<Float>
   private let sourceRotation: simd_float3x3
@@ -55,7 +65,7 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
   private var lastDraw: CFTimeInterval = 0
 
   init?(data: Data, roomSize: SIMD2<Float>, sourceRotation: simd_float3x3,
-        route: [SIMD3<Float>], cellSize: Float) {
+        route: [SIMD3<Float>], cellSize: Float, obstacleEnabled: Bool = false) {
     guard let device = MTLCreateSystemDefaultDevice(), let queue = device.makeCommandQueue(),
           let library = try? device.makeLibrary(source: Self.shader, options: nil) else { return nil }
     let format = MTLPixelFormat.bgra8Unorm
@@ -77,6 +87,16 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
     let guideDescriptor = descriptor.copy() as! MTLRenderPipelineDescriptor
     guideDescriptor.vertexFunction = library.makeFunction(name: "guideVertex")
     guideDescriptor.fragmentFunction = library.makeFunction(name: "guideFragment")
+    if obstacleEnabled {
+      descriptor.depthAttachmentPixelFormat = .depth32Float
+      floorDescriptor.depthAttachmentPixelFormat = .depth32Float
+      guard let obstacle = Self.makeObstacleRendering(device: device, library: library, colorFormat: format) else {
+        return nil
+      }
+      self.obstacleRendering = obstacle
+    } else {
+      self.obstacleRendering = nil
+    }
     guard let routePipeline = try? device.makeRenderPipelineState(descriptor: guideDescriptor),
           let pipeline = try? device.makeRenderPipelineState(descriptor: descriptor),
           let floorPipeline = try? device.makeRenderPipelineState(descriptor: floorDescriptor),
@@ -99,12 +119,6 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
     self.pipeline = pipeline
     self.floorPipeline = floorPipeline
     self.routePipeline = routePipeline
-    let markers = Self.guideMarkers(for: route, cellSize: cellSize)
-    self.routeBuffer = markers.withUnsafeBytes { bytes in
-      guard !bytes.isEmpty, let base = bytes.baseAddress else { return nil }
-      return device.makeBuffer(bytes: base, length: bytes.count, options: .storageModeShared)
-    }
-    self.routeCount = markers.count
     self.routeCellSize = cellSize
     self.roomSize = roomSize
     self.sourceRotation = sourceRotation
@@ -113,10 +127,47 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
     super.init()
     view.delegate = self
     view.colorPixelFormat = format
+    if obstacleEnabled { view.depthStencilPixelFormat = .depth32Float }
     view.clearColor = MTLClearColor(red: 0.10, green: 0.11, blue: 0.12, alpha: 1)
     view.framebufferOnly = false
     view.isPaused = true
     view.autoResizeDrawable = false
+    setRoute(route)
+  }
+
+  func setRoute(_ route: [SIMD3<Float>]) {
+    let markers = Self.guideMarkers(for: route, cellSize: routeCellSize)
+    routeBuffer = markers.withUnsafeBytes { bytes in
+      guard !bytes.isEmpty, let base = bytes.baseAddress else { return nil }
+      return view.device?.makeBuffer(bytes: base, length: bytes.count, options: .storageModeShared)
+    }
+    routeCount = markers.count
+  }
+
+  private static func makeObstacleRendering(device: MTLDevice, library: MTLLibrary,
+                                            colorFormat: MTLPixelFormat) -> ObstacleRendering? {
+    let descriptor = MTLRenderPipelineDescriptor()
+    descriptor.vertexFunction = library.makeFunction(name: "crateVertex")
+    descriptor.fragmentFunction = library.makeFunction(name: "crateFragment")
+    descriptor.colorAttachments[0].pixelFormat = colorFormat
+    descriptor.depthAttachmentPixelFormat = .depth32Float
+    let depth = MTLDepthStencilDescriptor()
+    depth.depthCompareFunction = .lessEqual
+    depth.isDepthWriteEnabled = true
+    let depthWrite = device.makeDepthStencilState(descriptor: depth)
+    depth.isDepthWriteEnabled = false
+    let depthTest = device.makeDepthStencilState(descriptor: depth)
+
+    let code = CIFilter.qrCodeGenerator()
+    code.message = Data(ObstacleTag.payload.utf8)
+    guard let image = code.outputImage,
+          let bitmap = CIContext().createCGImage(image, from: image.extent),
+          let texture = try? MTKTextureLoader(device: device).newTexture(cgImage: bitmap, options: [
+            .SRGB: false, .origin: MTKTextureLoader.Origin.topLeft
+          ]),
+          let pipeline = try? device.makeRenderPipelineState(descriptor: descriptor),
+          let depthWrite, let depthTest else { return nil }
+    return ObstacleRendering(pipeline: pipeline, tag: texture, depthWrite: depthWrite, depthTest: depthTest)
   }
 
   func render(pose: simd_float4x4, projection: simd_float4x4) {
@@ -155,6 +206,16 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
     encoder.setRenderPipelineState(floorPipeline)
     encoder.setVertexBytes(&uniforms, length: MemoryLayout<Uniforms>.stride, index: 2)
     encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
+    if let obstacle = obstacleRendering, let center = obstacleCenter {
+      var placement = SIMD4(center.x, center.y, ObstacleTag.side, ObstacleTag.height)
+      encoder.setRenderPipelineState(obstacle.pipeline)
+      encoder.setDepthStencilState(obstacle.depthWrite)
+      encoder.setVertexBytes(&placement, length: MemoryLayout<SIMD4<Float>>.stride, index: 0)
+      encoder.setFragmentTexture(obstacle.tag, index: 0)
+      encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 30)
+      // Keep Gaussian splats back-to-front. Only the solid crate writes depth.
+      encoder.setDepthStencilState(obstacle.depthTest)
+    }
     encoder.setRenderPipelineState(pipeline)
     encoder.setVertexBuffer(splats, offset: 0, index: 0)
     encoder.setVertexBuffer(buffer, offset: 0, index: 1)
@@ -345,6 +406,50 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
     float tone = .80 + .16 * floorNoise(p * 1.3) + .10 * floorNoise(p * 12) + .04 * floorNoise(p * 43);
     return float4(float3(.56, .49, .39) * tone, 1);
   }
+  struct CratePixel {
+    float4 position [[position]];
+    float2 uv;
+    uint face [[flat]];
+  };
+
+  vertex CratePixel crateVertex(uint index [[vertex_id]],
+                                constant float4 &placement [[buffer(0)]],
+                                constant Uniforms &u [[buffer(2)]]) {
+    const float2 corners[] = {
+      float2(0, 0), float2(0, 1), float2(1, 0),
+      float2(1, 0), float2(0, 1), float2(1, 1)
+    };
+    const float2 right[] = { float2(1, 0), float2(0, -1), float2(-1, 0), float2(0, 1) };
+    float2 uv = corners[index % 6];
+    uint face = index / 6;
+    float2 p = uv * 2.0 - 1.0;
+    float y = placement.w;
+    if (face < 4) {
+      float2 side = right[face];
+      p = float2(-side.y, side.x) + side * p.x;
+      y *= 1.0 - uv.y;
+    }
+    p = placement.xy + p * placement.z * .5;
+    return { u.viewProjection * float4(p.x, y, p.y, 1), uv, face };
+  }
+
+  fragment float4 crateFragment(CratePixel in [[stage_in]],
+                                texture2d<float> tag [[texture(0)]]) {
+    if (in.face == 4) {
+      constexpr sampler modules(coord::normalized, filter::nearest, address::clamp_to_edge);
+      // The white inset provides a quiet zone around the QR modules.
+      const float2 qr = (in.uv - .12) / .76;
+      float value = all(qr >= 0.0) && all(qr <= 1.0) ? tag.sample(modules, qr).r : 1.0;
+      return float4(float3(value), 1);
+    }
+    float2 edge = min(in.uv, 1.0 - in.uv);
+    float shade = in.face % 2 == 0 ? .90 : .73;
+    float seam = 1.0 - smoothstep(.009, .014, abs(in.uv.y - .52));
+    float frame = 1.0 - smoothstep(.035, .043, min(edge.x, edge.y));
+    float3 oak = float3(.66, .45, .25) * shade;
+    return float4(mix(oak, float3(.26, .16, .09), max(frame, seam * .45)), 1);
+  }
+
   struct GuidePixel {
     float4 position [[position]];
     float2 local;

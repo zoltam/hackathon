@@ -195,11 +195,24 @@ R5 added 81 distant portrait views with the actuator and pump visible. Its
 600-step checkpoint reached 83.15% walking validation F1, versus 78.70% for R3.
 It detected the left actuator in 1/7 views and the pump in 77/78, with seven
 false pump detections versus one for R3. The same release gate rejected R5.
+In a separate comparison of the app's 3D filter and per-ID deduplication, R5
+passed validation. On the walking test both models detected the pump in 67/69
+images, but R5 introduced one false pump detection. Its F1 was 85.02% versus
+85.21% for R3. The published model remains R3.
+
 
 The iPhone scripted journey followed the actual 3.10 m Dart route, confirmed
 the red pump against its projected 3D bounds, and arrived after 20.38 seconds.
 The run finished after 24.70 seconds. A physical AR walk and offline check
 remain separate acceptance steps.
+
+Phase 2 supports an opt-in movable crate. The renderer places it in the scan
+and the on-device Vision request reads its tag from the same clean frame used
+for equipment recognition. The captured projection and known tag height
+locate it in the scene. Two consistent observations replace the blocked
+footprint, then the Dart planner checks clearance and updates the guide. The
+crate's scripted position is used only by the renderer and smoke-test error
+check.
 
 ## Scene and equipment handoff
 

@@ -40,6 +40,57 @@ class _FieldScreenState extends State<FieldScreen> {
       .then(Site.fromJson);
   static const _ar = MethodChannel('valmet/field');
 
+  @override
+  void initState() {
+    super.initState();
+    _ar.setMethodCallHandler(_handleNativeCall);
+  }
+
+  @override
+  void dispose() {
+    _ar.setMethodCallHandler(null);
+    super.dispose();
+  }
+
+  Future<Object?> _handleNativeCall(MethodCall call) async {
+    if (call.method != 'replanServiceRoute') {
+      throw MissingPluginException();
+    }
+    final request = call.arguments as Map<Object?, Object?>;
+    Cell readCell(Object? raw) {
+      final values = raw as List;
+      return (values[0] as int, values[1] as int);
+    }
+
+    List<int> pair(Cell cell) => [cell.$1, cell.$2];
+    final site = widget.site ?? await _site;
+    final from = readCell(request['from']);
+    final to = readCell(request['to']);
+    final blocked = (request['blocked'] as List).map(readCell).toSet();
+    final clearance = (request['clearanceMetres'] as num).toDouble();
+    final moved = request['moved'] == true;
+    return {
+      'route': site
+          .route(
+            from,
+            to,
+            moved: moved,
+            clearanceMetres: clearance,
+            additionalBlocked: blocked,
+          )
+          .map(pair)
+          .toList(),
+      'walkableFloor': site
+          .walkableCells(
+            moved: moved,
+            clearanceMetres: clearance,
+            additionalBlocked: blocked,
+          )
+          .map(pair)
+          .toList(),
+    };
+  }
+
   Future<void> _openNative(String method, [String? data]) async {
     try {
       await _ar.invokeMethod<void>(method, data);
@@ -107,6 +158,7 @@ class _SiteSimulationState extends State<SiteSimulation> {
   List<Cell> get _route => _journey?.route ?? [];
   bool _moved = false;
   bool _keyControls = false;
+  bool _obstacleDemo = false;
   late double _clearanceMetres = widget.site.originShift == null ? 0.2 : 0.1;
 
   NavigationJourney? _createJourney() {
@@ -149,6 +201,8 @@ class _SiteSimulationState extends State<SiteSimulation> {
         'inspectionReport': report,
         'name': site.name,
         'keyControls': _keyControls,
+        'obstacleDemo': _obstacleDemo && _route.isNotEmpty,
+        'moved': _moved,
         'width': site.width,
         'depth': site.depth,
         'cellSize': site.cellSize,
@@ -159,16 +213,10 @@ class _SiteSimulationState extends State<SiteSimulation> {
         'clearanceMetres': _clearanceMetres,
         'arrivalRadiusMetres': site.cellSize / 2,
         'floor': site.floor?.map(pair).toList(),
-        'walkableFloor': [
-          for (var x = 0; x < site.width; x++)
-            for (var z = 0; z < site.depth; z++)
-              if (site.isWalkable(
-                (x, z),
-                moved: _moved,
-                clearanceMetres: _clearanceMetres,
-              ))
-                [x, z],
-        ],
+        'walkableFloor': site
+            .walkableCells(moved: _moved, clearanceMetres: _clearanceMetres)
+            .map(pair)
+            .toList(),
         'target': target < 0 ? null : target,
         'objects': [
           for (final object in visible)
@@ -183,6 +231,7 @@ class _SiteSimulationState extends State<SiteSimulation> {
               'height': object.height,
               'cells': object.cells?.map(pair).toList(),
               'bounds': object.bounds,
+              'service': object.service == null ? null : pair(object.service!),
               'syntheticCondition': data?.conditionForObject(object.objectId),
             },
         ],
@@ -221,6 +270,16 @@ class _SiteSimulationState extends State<SiteSimulation> {
           value: _keyControls,
           onChanged: (value) => setState(() => _keyControls = value),
         ),
+        if (_target != null && _route.isNotEmpty)
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('Movable demo crate'),
+            subtitle: const Text(
+              'Try obstacle detection and rerouting in the model.',
+            ),
+            value: _obstacleDemo,
+            onChanged: (value) => setState(() => _obstacleDemo = value),
+          ),
         DropdownButtonFormField<double>(
           initialValue: _clearanceMetres,
           decoration: const InputDecoration(labelText: 'Virtual camera radius'),
