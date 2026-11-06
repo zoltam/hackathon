@@ -2,19 +2,36 @@ import MetalKit
 import simd
 
 final class SplatRenderer: NSObject, MTKViewDelegate {
+  final class FrameCounter: @unchecked Sendable {
+    private let window: Range<CFTimeInterval>
+    private let lock = NSLock()
+    private var frames = 0
+
+    init(window: Range<CFTimeInterval>) { self.window = window }
+
+    func recordCompletion(at time: CFTimeInterval) {
+      if window.contains(time) { lock.withLock { frames += 1 } }
+    }
+
+    var count: Int { lock.withLock { frames } }
+  }
+
   struct Uniforms {
     var viewProjection: simd_float4x4
     var screen: SIMD2<Float>
     var roomSize: SIMD2<Float>
     var camera: SIMD4<Float>
+    var sourceRotation: simd_float3x3
   }
 
   let view: MTKView
   let vision = RenderedVision()
+  var frameCounter: FrameCounter?
   private let queue: MTLCommandQueue
   private let pipeline: MTLRenderPipelineState
   private let floorPipeline: MTLRenderPipelineState
   private let roomSize: SIMD2<Float>
+  private let sourceRotation: simd_float3x3
   private let splats: MTLBuffer
   private var sortBuffers: [MTLBuffer] = []
   private var nextBuffer = 0
@@ -25,10 +42,10 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
   private var bins: [Int]
   private var bucket: [Int16]
   private var positions: [SIMD4<Float>]
-  private var pendingFrame: RenderedVision.Frame?
+  private var pendingFrame: (pose: simd_float4x4, projection: simd_float4x4, timestamp: CFTimeInterval)?
   private var lastDraw: CFTimeInterval = 0
 
-  init?(data: Data, roomSize: SIMD2<Float>) {
+  init?(data: Data, roomSize: SIMD2<Float>, sourceRotation: simd_float3x3) {
     guard let device = MTLCreateSystemDefaultDevice(), let queue = device.makeCommandQueue(),
           let library = try? device.makeLibrary(source: Self.shader, options: nil) else { return nil }
     let format = MTLPixelFormat.bgra8Unorm
@@ -67,6 +84,7 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
     self.pipeline = pipeline
     self.floorPipeline = floorPipeline
     self.roomSize = roomSize
+    self.sourceRotation = sourceRotation
     self.splats = splats
     view = MTKView(frame: .zero, device: device)
     super.init()
@@ -82,7 +100,7 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
     let now = CACurrentMediaTime()
     guard now - lastDraw >= 1.0 / 35 else { return }
     lastDraw = now
-    pendingFrame = RenderedVision.Frame(pose: pose, projection: projection, timestamp: now)
+    pendingFrame = (pose, projection, now)
     view.draw()
   }
 
@@ -108,7 +126,7 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
     let sorted = sort(pose: pose, into: buffer)
     var uniforms = Uniforms(viewProjection: projection * pose.inverse,
                             screen: SIMD2(Float(dimensions.width), Float(dimensions.height)),
-                            roomSize: roomSize, camera: pose.columns.3)
+                            roomSize: roomSize, camera: pose.columns.3, sourceRotation: sourceRotation)
     // Put an approximate floor behind the captured detail. This pass has no
     // effect on the walkability grid.
     encoder.setRenderPipelineState(floorPipeline)
@@ -122,9 +140,15 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
       encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4, instanceCount: sorted)
     }
     encoder.endEncoding()
-    vision.capture(drawable.texture, command: command, frame: frame)
+    vision.capture(drawable.texture, command: command,
+                   frame: RenderedVision.Frame(pose: pose, timestamp: frame.timestamp))
     command.present(drawable)
-    command.addCompletedHandler { [inFlight] _ in inFlight.signal() }
+    command.addCompletedHandler { [inFlight, frameCounter] completed in
+      inFlight.signal()
+      if let frameCounter, completed.status == .completed {
+        frameCounter.recordCompletion(at: CACurrentMediaTime())
+      }
+    }
     command.commit()
   }
 
@@ -166,7 +190,7 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
 
   struct Splat { float4 centerAlpha, color, covA, covB; half sh[48]; };
   static_assert(sizeof(Splat) == 160, "Unexpected splat layout");
-  struct Uniforms { float4x4 viewProjection; float2 screen, roomSize; float4 camera; };
+  struct Uniforms { float4x4 viewProjection; float2 screen, roomSize; float4 camera; float3x3 sourceRotation; };
   struct FloorPixel { float4 position [[position]]; float2 world; };
 
   vertex FloorPixel floorVertex(uint corner [[vertex_id]], constant Uniforms &u [[buffer(2)]]) {
@@ -238,7 +262,7 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
 
     // EGS coefficients are in the original PLY frame (x, -y, -z).
     // Real spherical harmonics in the standard 3DGS degree-3 order.
-    float3 dir = normalize((s.centerAlpha.xyz - u.camera.xyz) * float3(1, -1, -1));
+    float3 dir = normalize(u.sourceRotation * ((s.centerAlpha.xyz - u.camera.xyz) * float3(1, -1, -1)));
     float x = dir.x, y = dir.y, z = dir.z;
     float xx = x*x, yy = y*y, zz = z*z;
     float shBasis[15] = {

@@ -54,6 +54,8 @@ class Site {
       width = json['width'] as int,
       depth = json['depth'] as int,
       cellSize = (json['cellSize'] as num).toDouble(),
+      originShift = json['originShift'] as List?,
+      shRotation = json['shRotation'] as List?,
       start = _cell(json['start']),
       floor = (json['floor'] as List?)?.map(_cell).toSet(),
       objects = (json['objects'] as List)
@@ -63,6 +65,7 @@ class Site {
   final String name;
   final int width, depth;
   final double cellSize;
+  final List<dynamic>? originShift, shRotation;
   final Cell start;
   final Set<Cell>? floor;
   final List<SiteObject> objects;

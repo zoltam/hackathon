@@ -12,13 +12,19 @@ struct WalkSite: Decodable {
     let x, z, width, depth: Int
     let height: CGFloat
     let cells: [[Int]]?
-    let bounds: [[Float]]?
   }
 
   let name: String
   let keyControls: Bool
   let width, depth: Int
   let cellSize: Float
+  let originShift: SIMD3<Float>?
+  let shRotation: [SIMD3<Float>]?
+
+  var sourceRotation: simd_float3x3 {
+    guard let rows = shRotation, rows.count == 3 else { return matrix_identity_float3x3 }
+    return simd_float3x3(rows: rows)
+  }
   let start: [Int]
   let route: [[Int]]
   let floor: [[Int]]?
@@ -50,25 +56,31 @@ struct WorldAlignment {
 }
 
 final class WorldWalk: UIViewController, ARSessionDelegate {
+  enum VisionMode { case normal, verify, benchmark }
+
   private let model: WalkSite
   private let renderer: SplatRenderer
   private let reality = ARSCNView()
   private var virtual: UIView { renderer.view }
   private let routeLayer = CAShapeLayer()
-  private let targetLayer = CAShapeLayer()
+  private let detectionLayer = CAShapeLayer()
   private let message = UILabel()
   private let visionStatus = UILabel()
-  private let verifyVision: Bool
+  private let visionMode: VisionMode
+  private let detectorURL: URL?
   private var verificationFrames = 0
-  private var lastTargetMatch: RenderedVision.Frame?
+  private static let benchmarkDuration: CFTimeInterval = 15
+  private var benchmarkStart: CFTimeInterval?
+  private var benchmarkLink: CADisplayLink?
+  private var benchmarkLatencies: [Int] = []
+  private var lastDetection: RenderedVision.Frame?
+  private var visionIdleText = "Vision · Loading detector"
   private var currentPose: simd_float4x4?
-  private var targetBounds: PumpBounds?
-  private var targetName: String?
   private let align = UIButton(type: .system)
   private let toggle = UIButton(type: .system)
   private var alignment: WorldAlignment?
   private var showModel = false
-  private var requestedCamera = false
+  private var started = false
   private var ready = false
   private var lastMessage: String?
   private var floorCells: Set<SIMD2<Int>>?
@@ -81,15 +93,11 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
 
   override var canBecomeFirstResponder: Bool { model.keyControls }
 
-  init(model: WalkSite, renderer: SplatRenderer, verifyVision: Bool = false) {
+  init(model: WalkSite, renderer: SplatRenderer, detectorURL: URL?, visionMode: VisionMode = .normal) {
     self.model = model
     self.renderer = renderer
-    self.verifyVision = verifyVision
-    if let index = model.target, model.objects.indices.contains(index) {
-      let target = model.objects[index]
-      targetBounds = target.bounds.flatMap(PumpBounds.init)
-      targetName = target.name
-    }
+    self.detectorURL = detectorURL
+    self.visionMode = visionMode
     super.init(nibName: nil, bundle: nil)
   }
 
@@ -113,7 +121,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     floorCells = model.floor.map { Set($0.map { SIMD2($0[0], $0[1]) }) }
     for (layer, color, width) in [
       (routeLayer, UIColor.systemMint, CGFloat(4)),
-      (targetLayer, UIColor.systemYellow, CGFloat(3)),
+      (detectionLayer, UIColor.systemYellow, CGFloat(3)),
     ] {
       layer.strokeColor = color.cgColor
       layer.fillColor = UIColor.clear.cgColor
@@ -131,16 +139,30 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     visionStatus.numberOfLines = 2
     visionStatus.isHidden = true
     renderer.vision.onPrediction = { [weak self] prediction in
-      guard let self, self.view.window != nil, !self.virtual.isHidden else { return }
-      guard let pose = self.currentPose, self.isCurrent(prediction.frame, comparedWith: pose) else { return }
-      self.lastTargetMatch = prediction.matched ? prediction.frame : nil
-      if self.verifyVision {
-        print("VALMET_VISION sample=\(self.verificationFrames) object=\(prediction.objectID ?? "none") ts=\(prediction.frame.timestamp) x=\(prediction.frame.pose.columns.3.x) matched=\(prediction.matched) distance=\(prediction.distance) red=\(prediction.redFraction) ms=\(prediction.inferenceMilliseconds)")
+      guard let self else { return }
+      if self.visionMode == .benchmark, self.inBenchmarkWindow(CACurrentMediaTime()) {
+        self.benchmarkLatencies.append(prediction.inferenceMilliseconds)
+      }
+      guard self.view.window != nil, !self.virtual.isHidden,
+            let pose = self.currentPose, self.isCurrent(prediction.frame, comparedWith: pose) else { return }
+      let detections = prediction.detections
+      self.lastDetection = detections.isEmpty ? nil : prediction.frame
+      self.drawDetections(detections)
+      if self.visionMode == .verify {
+        let labels = detections.map { detection in
+          let box = detection.bounds
+          let details = String(format: "%.3f[%.3f,%.3f,%.3f,%.3f]", detection.confidence,
+                               box.minX, box.minY, box.width, box.height)
+          return "\(detection.objectID)@\(details)"
+        }
+        print("VALMET_VISION sample=\(self.verificationFrames) detections=\(labels.isEmpty ? "none" : labels.joined(separator: ",")) ms=\(prediction.inferenceMilliseconds)")
         fflush(stdout)
         self.verificationFrames += 1
       }
-      self.visionStatus.text = prediction.matched ? "Vision matched · \(self.targetName ?? "Target")" : "Vision · Searching for the target"
-      self.visionStatus.isHidden = false
+      let names = detections.map { detection in
+        self.model.objects.first { $0.objectId == detection.objectID }?.name ?? detection.objectID
+      }
+      self.visionStatus.text = names.isEmpty ? self.visionIdleText : "Vision · " + names.joined(separator: ", ")
     }
     align.configuration = .filled()
     align.setTitle("Set start and direction", for: .normal)
@@ -176,13 +198,25 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
 
   override func viewDidAppear(_ animated: Bool) {
     super.viewDidAppear(animated)
-    if verifyVision {
-      verifyRenderedFrame(index: 0)
-      return
-    }
+    guard !started else { return }
+    started = true
     if model.keyControls { becomeFirstResponder() }
-    guard !requestedCamera else { return }
-    requestedCamera = true
+    renderer.vision.loadModel(at: detectorURL) { [weak self] loaded in
+      guard let self, self.view.window != nil else { return }
+      self.visionIdleText = loaded ? "Vision · No equipment detected" : "Vision · Detector unavailable"
+      self.visionStatus.text = self.visionIdleText
+      guard self.visionMode != .normal else { return }
+      if !loaded {
+        self.visionStatus.isHidden = false
+        print(self.visionMode == .benchmark ? "VALMET_BENCH error=detector_unavailable" : "VALMET_VISION detector unavailable")
+        fflush(stdout)
+      } else if self.visionMode == .verify {
+        self.verifyRenderedFrame(index: 0)
+      } else {
+        self.startBenchmark()
+      }
+    }
+    if visionMode != .normal { return }
     AVCaptureDevice.requestAccess(for: .video) { [weak self] allowed in
       DispatchQueue.main.async {
         guard let self, self.view.window != nil else { return }
@@ -202,12 +236,21 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
   private func verifyRenderedFrame(index: Int) {
     guard view.window != nil, verificationFrames < 7, index < 12 else { return }
     virtual.isHidden = false
+    visionStatus.isHidden = false
+    renderVerificationPose(index: index)
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.72) { [weak self] in
+      self?.verifyRenderedFrame(index: index + 1)
+    }
+  }
+
+  private func renderVerificationPose(index: Int) {
     let size = virtual.bounds.size
     if size.width > 0, size.height > 0 {
-      let eye = index == 5 ? SIMD3<Float>(4.625, 1.50, 1.625) :
-        SIMD3<Float>(5.385 - Float(index % 3) * 0.08, 1.50, 1.88 + Float(index % 2) * 0.06)
-      let look: SIMD3<Float> = index == 2 ? SIMD3(6.90, 1.15, 2.43) :
-        index == 3 ? SIMD3(3.0, 1.15, 1.875) : SIMD3(5.943, 1.164, 2.447)
+      let origin = model.originShift ?? .zero
+      let eye = origin + (index == 5 ? SIMD3<Float>(4.625, 1.50, 1.625) :
+        SIMD3<Float>(5.385 - Float(index % 3) * 0.08, 1.50, 1.88 + Float(index % 2) * 0.06))
+      let look = origin + (index == 2 ? SIMD3<Float>(6.90, 1.15, 2.43) :
+        index == 3 ? SIMD3(3.0, 1.15, 1.875) : SIMD3(5.943, 1.164, 2.447))
       let back = simd_normalize(eye - look)
       let right = simd_normalize(simd_cross(SIMD3(0, 1, 0), back))
       let up = simd_cross(back, right)
@@ -218,17 +261,84 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
         SIMD4(zoom / Float(size.width / size.height), 0, 0, 0), SIMD4(0, zoom, 0, 0),
         SIMD4(0, 0, f / (n - f), -1), SIMD4(0, 0, n * f / (n - f), 0)
       ))
-      currentPose = pose
+      updateDetectionPose(pose)
       renderer.render(pose: pose, projection: projection)
       drawGuide(projection * pose.inverse)
     }
-    DispatchQueue.main.asyncAfter(deadline: .now() + 0.72) { [weak self] in
-      self?.verifyRenderedFrame(index: index + 1)
+  }
+
+  private func startBenchmark() {
+    guard let scene = view.window?.windowScene, scene.activationState == .foregroundActive else {
+      print("VALMET_BENCH error=scene_inactive")
+      fflush(stdout)
+      return
     }
+    virtual.isHidden = false
+    visionStatus.isHidden = false
+    let start = CACurrentMediaTime()
+    benchmarkStart = start
+    renderer.frameCounter = SplatRenderer.FrameCounter(window: start..<(start + Self.benchmarkDuration))
+    let link = CADisplayLink(target: self, selector: #selector(benchmarkFrame(_:)))
+    benchmarkLink = link
+    NotificationCenter.default.addObserver(self, selector: #selector(benchmarkSceneDeactivated(_:)),
+                                           name: UIScene.willDeactivateNotification, object: scene)
+    link.add(to: .main, forMode: .common)
+  }
+
+  @objc private func benchmarkSceneDeactivated(_ notification: Notification) {
+    abortBenchmark(reason: "scene_inactive")
+  }
+
+  private func inBenchmarkWindow(_ time: CFTimeInterval) -> Bool {
+    guard let benchmarkStart else { return false }
+    return time >= benchmarkStart && time - benchmarkStart < Self.benchmarkDuration
+  }
+
+  @objc private func benchmarkFrame(_ link: CADisplayLink) {
+    guard let benchmarkStart else { return }
+    let elapsed = CACurrentMediaTime() - benchmarkStart
+    if elapsed < Self.benchmarkDuration {
+      renderVerificationPose(index: Int(elapsed / 0.72) % 12)
+      return
+    }
+    reportBenchmark(frames: stopBenchmarkRendering())
+  }
+
+  @discardableResult private func stopBenchmarkRendering() -> Int {
+    NotificationCenter.default.removeObserver(self, name: UIScene.willDeactivateNotification, object: nil)
+    benchmarkLink?.invalidate()
+    benchmarkLink = nil
+    let frames = renderer.frameCounter?.count ?? 0
+    renderer.frameCounter = nil
+    return frames
+  }
+
+  private func reportBenchmark(frames: Int) {
+    guard benchmarkStart != nil else { return }
+    benchmarkStart = nil
+    let samples = benchmarkLatencies.sorted()
+    func percentile(_ fraction: Double) -> String {
+      guard !samples.isEmpty else { return "na" }
+      return String(samples[Int(ceil(Double(samples.count) * fraction)) - 1])
+    }
+    let elapsed = String(format: "%.3f", Self.benchmarkDuration)
+    let fps = String(format: "%.2f", Double(frames) / Self.benchmarkDuration)
+    let thermal = ProcessInfo.processInfo.thermalState.rawValue
+    print("VALMET_BENCH elapsed_s=\(elapsed) gpu_frames=\(frames) fps=\(fps) inference_samples=\(samples.count) p50_ms=\(percentile(0.50)) p95_ms=\(percentile(0.95)) thermal_state=\(thermal)")
+    fflush(stdout)
+  }
+
+  private func abortBenchmark(reason: String) {
+    guard benchmarkStart != nil else { return }
+    benchmarkStart = nil
+    stopBenchmarkRendering()
+    print("VALMET_BENCH error=interrupted reason=\(reason)")
+    fflush(stdout)
   }
 
   override func viewWillDisappear(_ animated: Bool) {
     super.viewWillDisappear(animated)
+    abortBenchmark(reason: "view_disappeared")
     lastFrame = nil
     keys.removeAll()
     buttons.removeAll()
@@ -337,10 +447,11 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
   }
 
   private func isCurrent(_ frame: RenderedVision.Frame, comparedWith pose: simd_float4x4) -> Bool {
-    // Don't attach an old appearance match to a newly aligned or turned view.
+    // Avoid drawing boxes from an older view after the camera moves.
     CACurrentMediaTime() - frame.timestamp < 1.2 &&
-      simd_distance(frame.pose.columns.3, pose.columns.3) <= 0.45 &&
-      simd_dot(frame.pose.columns.2, pose.columns.2) >= 0.90
+      simd_distance(frame.pose.columns.3, pose.columns.3) <= 0.16 &&
+      simd_dot(frame.pose.columns.2, pose.columns.2) >= 0.99 &&
+      simd_dot(frame.pose.columns.0, pose.columns.0) >= 0.99
   }
 
   private func drawGuide(_ transform: simd_float4x4) {
@@ -363,21 +474,37 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
       previous = point
     }
 
-    let ring = UIBezierPath()
-    if let match = lastTargetMatch, let pose = currentPose, isCurrent(match, comparedWith: pose),
-       let region = targetBounds?.region(transform: transform) {
-      ring.append(UIBezierPath(roundedRect: CGRect(
-        x: region.minX * bounds.width, y: (1 - region.maxY) * bounds.height,
-        width: region.width * bounds.width, height: region.height * bounds.height
-      ), cornerRadius: 6))
-    }
     CATransaction.begin()
     CATransaction.setDisableActions(true)
     routeLayer.frame = bounds
     routeLayer.path = path.cgPath
-    targetLayer.frame = bounds
-    targetLayer.path = ring.cgPath
     CATransaction.commit()
+  }
+
+  private func drawDetections(_ detections: [RenderedVision.Detection]) {
+    let bounds = virtual.bounds
+    let path = UIBezierPath()
+    for detection in detections {
+      let box = detection.bounds
+      path.append(UIBezierPath(roundedRect: CGRect(
+        x: box.minX * bounds.width, y: (1 - box.maxY) * bounds.height,
+        width: box.width * bounds.width, height: box.height * bounds.height
+      ), cornerRadius: 6))
+    }
+    CATransaction.begin()
+    CATransaction.setDisableActions(true)
+    detectionLayer.frame = bounds
+    detectionLayer.path = path.cgPath
+    CATransaction.commit()
+  }
+
+  private func updateDetectionPose(_ pose: simd_float4x4) {
+    currentPose = pose
+    if let lastDetection, !isCurrent(lastDetection, comparedWith: pose) {
+      self.lastDetection = nil
+      visionStatus.text = visionIdleText
+      drawDetections([])
+    }
   }
 
   @objc private func calibrate() {
@@ -442,11 +569,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     }
     let size = virtual.bounds.size
     if showModel, size.width > 0, size.height > 0 {
-      currentPose = pose
-      if let match = lastTargetMatch, !isCurrent(match, comparedWith: pose) {
-        lastTargetMatch = nil
-        visionStatus.text = "Vision · Searching for the target"
-      }
+      updateDetectionPose(pose)
       virtual.isHidden = false
       let projection = frame.camera.projectionMatrix(for: orientation, viewportSize: size, zNear: 0.04, zFar: 40)
       renderer.render(pose: pose, projection: projection)
@@ -480,11 +603,13 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     let visible = ready && showModel && alignment != nil
     virtual.isHidden = !visible
     movementControls?.isHidden = !visible
+    visionStatus.isHidden = !visible
     if !visible {
       buttons.removeAll()
-      visionStatus.isHidden = true
-      lastTargetMatch = nil
+      if lastDetection != nil { drawDetections([]) }
+      lastDetection = nil
       currentPose = nil
+      visionStatus.text = visionIdleText
     }
     align.isEnabled = ready || alignment != nil
     toggle.isEnabled = alignment != nil && ready

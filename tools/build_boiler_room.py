@@ -11,7 +11,18 @@ import numpy as np
 from scene_equipment import extract_equipment
 
 
-def prepare(source, destination, require_complete=False):
+# Similarity registration from the reviewed scan into Equipment Room.ply.
+SOURCE_ROTATION = np.array([
+    [.9998943, -.0008709, -.0145134],
+    [.0009207, .9999937, .0034282],
+    [.0145103, -.0034413, .9998888],
+])
+SOURCE_SCALE = 1.0362638
+SOURCE_TRANSLATION = np.array([.170918, .066481, -.148239])
+WORLD_AXES = np.array([1, -1, -1])
+
+
+def prepare(source, destination):
     with source.open('rb') as stream:
         header = []
         for line in stream:
@@ -49,20 +60,19 @@ def prepare(source, destination, require_complete=False):
     values = np.concatenate(accepted)
     rejected = count - len(values)
     print(f'{len(values):,}/{count:,} structurally valid vertices. Invalid: {rejected:,}.')
-    if require_complete and rejected:
+    if rejected:
         raise ValueError('Full scan requested, but some PLY records failed validation')
 
-    # Keep every valid splat for rendering. Navigation is intentionally
-    # restricted to the observed floor in the calibrated region.
-    x, y, z = values[:, :3].T
-    xyz = np.stack((x + 5, 1.07 - y, -.7 - z), axis=1)
-    crop = np.array([[-5.0, -1.55, -4.0], [4.0, 1.24, -.7]])
-    navigation = ((values[:, :3] >= crop[0]) & (values[:, :3] <= crop[1])).all(axis=1)
-    navigation &= values[:, 10] >= -2.2
+    registered = (values[:, :3] - SOURCE_TRANSLATION) @ SOURCE_ROTATION / SOURCE_SCALE
+    xyz = registered * WORLD_AXES + [5, 1.07, -.7]
+    navigation = values[:, 10] >= -2.2
     cell = .25
-    width, depth = 36, 14
     grid = np.floor(xyz[:, [0, 2]] / cell).astype(int)
-    grid = np.clip(grid, [0, 0], [width - 1, depth - 1])
+    shift = -grid.min(axis=0)
+    grid += shift
+    width, depth = (grid.max(axis=0) + 1).tolist()
+    origin = np.array([shift[0] * cell, 0, shift[1] * cell])
+    xyz += origin
 
     def counts(mask):
         return Counter(map(tuple, grid[mask & navigation].tolist()))
@@ -92,28 +102,22 @@ def prepare(source, destination, require_complete=False):
                     queue.append(q)
         return distance
 
-    unseen = set(buffered)
-    best = set()
-    while unseen:
-        region = set(distances(min(unseen), unseen))
-        if len(region) > len(best):
-            best = region
-        unseen -= region
-    if len(best) < 8:
-        raise ValueError('No sufficiently large walkable floor in this scan')
-    start = min(best, key=lambda p: (p[1], abs(p[0] - 12), p[0]))
-    dist = distances(start, best)
-    # Manually registered from three views of the red circulation pump.
-    # The Excel mapping is independent of this physical scene identity.
-    service = (21, 7)
-    if service not in best:
+    # Preserve the reviewed approach and pick the nearest valid starting cell.
+    service = tuple((shift + [21, 7]).tolist())
+    if service not in buffered:
         raise ValueError('The mapped pump approach is not on the observed walkable floor')
+    dist = distances(service, buffered)
+    if len(dist) < 8:
+        raise ValueError('No sufficiently large walkable floor at the pump approach')
+    entrance = shift + [15, 0]
+    start = min(dist, key=lambda p: ((p[0] - entrance[0]) ** 2 + (p[1] - entrance[1]) ** 2, p))
     opacity = 1 / (1 + np.exp(-values[:, 10]))
     model = {
         'name': 'Industrial Boiler Room',
         'width': width, 'depth': depth, 'cellSize': cell,
-        'start': start, 'floor': sorted(best),
-        'objects': extract_equipment(xyz, opacity, cell, service),
+        'start': start, 'floor': sorted(dist),
+        'originShift': origin.tolist(), 'shRotation': SOURCE_ROTATION.tolist(),
+        'objects': extract_equipment(xyz, opacity, cell, service, origin),
     }
 
     # Keep anisotropic Gaussian shape, opacity, and DC color for Metal.
@@ -126,6 +130,8 @@ def prepare(source, destination, require_complete=False):
         2*(qx*qz - qy*w), 2*(qy*qz + qx*w), 1 - 2*(qx*qx + qy*qy),
     )).reshape(-1, 3, 3)
     axes = rotation * np.exp(np.clip(values[:, 11:14], -16, 4))[..., None, :]
+    source_to_world = SOURCE_ROTATION.T * WORLD_AXES[:, None] * WORLD_AXES / SOURCE_SCALE
+    axes = source_to_world @ axes
     covariance = axes @ np.swapaxes(axes, 1, 2)
     rgb = .5 + .28209479 * values[:, 7:10]
     zero = np.zeros(len(values))
@@ -144,17 +150,15 @@ def prepare(source, destination, require_complete=False):
     destination.mkdir(parents=True, exist_ok=True)
     (destination / 'site.json').write_text(json.dumps(model) + '\n', encoding='utf-8')
     points.tofile(destination / 'boiler-room-sh.splats')
-    print(f'{len(model["objects"])} mapped assets, {len(points):,} Gaussian splats, {len(best)} walkable cells, {dist[service]} route steps')
+    print(f'{len(model["objects"])} mapped assets, {len(points):,} Gaussian splats, {len(dist)} walkable cells, {dist[start]} route steps')
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('source', type=Path)
     parser.add_argument('--output', type=Path, default=Path('assets/valmet'))
-    parser.add_argument('--require-complete', action='store_true',
-                        help='Reject the source unless every declared vertex validates')
     args = parser.parse_args()
     try:
-        prepare(args.source, args.output, require_complete=args.require_complete)
+        prepare(args.source, args.output)
     except ValueError as error:
         parser.exit(1, f'{error}\n')

@@ -124,6 +124,8 @@ class _SiteSimulationState extends State<SiteSimulation> {
         'width': site.width,
         'depth': site.depth,
         'cellSize': site.cellSize,
+        'originShift': site.originShift,
+        'shRotation': site.shRotation,
         'start': pair(site.start),
         'route': _route.map(pair).toList(),
         'floor': site.floor?.map(pair).toList(),

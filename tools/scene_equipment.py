@@ -20,10 +20,10 @@ SEEDS = [
 ]
 
 
-def extract_equipment(xyz, opacity, cell, approach):
+def extract_equipment(xyz, opacity, cell, approach, origin):
     objects = []
     for index, (slug, label, equipment_type, minimum, maximum) in enumerate(SEEDS):
-        lo, hi = np.array(minimum), np.array(maximum)
+        lo, hi = np.array(minimum) + origin, np.array(maximum) + origin
         inside = ((xyz >= lo) & (xyz <= hi)).all(axis=1) & (opacity >= .12)
         points = xyz[inside]
         if len(points) < 50:
