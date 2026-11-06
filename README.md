@@ -18,43 +18,75 @@ For a physical iPhone, open `ios/Runner.xcworkspace` in Xcode and select your te
 
 ## Walk inside the 3D model
 
-On an ARKit-capable iPhone, select a service target and tap **Walk inside the 3D model**. Stand at the physical spot that should correspond to the virtual start, hold the phone upright and face the direction of the first route segment. The app assumes an initial phone height of 1.75 metres and uses the phone’s angle for the view. Tap **Set start and direction**. ARKit drives the virtual camera with the phone's rotation and translation, with one physical metre equal to one model metre. **Show camera** switches back to the live view while tracking continues. Use **Reset alignment** to choose a new physical start.
+Enable **Forward and backward controls** under **Settings** to move with the two on-screen buttons or ↑/↓. Turn by rotating the phone. This mode still uses ARKit to track orientation.
 
-The iPhone demo now loads the updated **Equipment Room** scan. From the repository root, install NumPy and prepare the local assets before building:
+On an ARKit-capable iPhone, select a service target and tap **Walk inside the 3D model**. Stand at the physical spot that should correspond to the virtual start, hold the phone upright and face the direction of the first route segment. The app assumes an initial phone height of 1.50 metres and uses the phone’s angle for the view. Tap **Set start and direction**. ARKit drives the virtual camera with the phone's rotation and translation, with one physical metre equal to one model metre. **Show camera** switches back to the live view while tracking continues. Use **Reset alignment** to choose a new physical start.
+
+The iPhone demo loads the updated Equipment Room scan. From the repository root, install NumPy and prepare the local assets before building:
 
 ```sh
-python3 tools/build_boiler_room.py "sources/valmet/Equipment Room.ply" \
-  --full-scene --floor-y 1.17 --name "Equipment Room"
+python3 tools/build_boiler_room.py "/path/to/Equipment Room.ply"
+swiftc -O tools/build_pump_references.swift -o /tmp/valmet-pump-references
+/tmp/valmet-pump-references
 ```
 
-The updated scan uses a source floor estimate of y=1.17 (y down). `--full-scene` fits the navigation extent to this scan instead of reusing the old room crop. Recheck the floor and scale on the device. Regenerate workbook mapping after each scene replacement using the command below.
+The importer requires the complete Equipment Room scan. It registers the scan against the reviewed equipment frame and renders all 1,676,481 splats with their anisotropic covariance, opacity, and degree-3 view-dependent color. The navigation grid comes from observed floor and obstacle geometry. A neutral backing surface fills missing floor pixels and leaves walkability unchanged. Distances assume the reviewed scene uses metres. Keep the organizer's scan and derived assets local unless public redistribution is authorized.
 
-The importer filters invalid EGS vertices and renders the remaining anisotropic Gaussians with Metal. It estimates the walkable floor and chooses a demo inspection target from observed geometry. The scan's scale is assumed to be metres. Keep the original and generated assets local unless public redistribution is authorized. A manually aligned model does not detect differences between virtual and physical obstacles.
+The iPhone detector analyzes the full rendered image locally. It returns image-space boxes for the catalog objects, without reading coordinates or camera images as recognition input. Routing and arrival use the separately mapped walkable approach.
+
+To prepare and train the detector on macOS with Xcode and Pillow installed:
+
+```sh
+swiftc -O tools/build_pump_references.swift -o /tmp/valmet-pump-references
+/tmp/valmet-pump-references --detection-dataset-hq
+python3 tools/prepare_detection_views.py build/valmet-detection-hq
+swiftc -O tools/train_equipment_detector.swift -o /tmp/valmet-train-equipment-monitored
+/tmp/valmet-train-equipment-monitored 600 > /tmp/valmet-detector-hq-training.log 2>&1
+```
+
+In another terminal, monitor without altering the worker:
+
+```sh
+python3 tools/monitor_equipment_training.py --watch --log /tmp/valmet-detector-hq-training.log --trainer /tmp/valmet-train-equipment-monitored
+```
+
+Train and select on validation, then evaluate the chosen export with `--evaluate-only --split=test`. For intermediate checkpoints, copy the training session directory before using `--checkpoint-dir=<copy> --checkpoint-iteration=<step> --model=<separate-output>` on validation. The monitor can verify the evaluated export with `--expected-sha256 <digest>`. The generated Core ML model is `assets/valmet/equipment-detector.mlmodel`. Build the iPhone app after it exists. Scan data, renders, checkpoints and trained weights stay local.
+
+The generated scene JSON also contains reviewed equipment volumes and stable `objectId` values for the workbook and proximity features. See [the scene handoff](PLAN.md#scene-and-equipment-handoff) for coverage and coordinate assumptions.
+
+For an installed development build on a connected and unlocked iPhone, repeat the renderer-to-model checks:
+
+```sh
+xcrun devicectl device process launch --device <device> --terminate-existing --console <bundle-id> -- --verify-rendered-vision
+xcrun devicectl device process launch --device <device> --terminate-existing --console <bundle-id> -- --benchmark-rendered-vision
+```
+
+The verification prints image-space boxes for several rendered views. The benchmark prints the number of GPU-completed frames, frame rate and inference latency for a 15-second scripted view sequence. The benchmark is invalidated if the app loses foreground focus.
 
 ## Navigation and inspection evidence (member 2)
 
-The Flutter screen plans four-neighbour routes over the observed floor. The
-importer now retains all observed obstacle-free floor patches: **400 cells**, of
-which **390 connect to the starting region**. The earlier extra 0.25 m importer
-margin reduced this to 164 cells. Clearance now runs once, in the route planner;
-unknown gaps remain excluded and disconnected patches remain visible. Floor
-support uses measured Gaussians down to 1% opacity, while rendered/body-obstacle
-evidence retains the existing approximately 10% threshold. This recovers faint
-floor in the narrow strip behind the red vessels without filling unknown holes
-or removing the obstacle checks.
+The Flutter screen plans four-neighbour routes over measured floor support.
+The importer retains faint floor observations down to 1% opacity, keeps the
+existing body-obstacle threshold, and applies no extra obstacle margin. Radius
+clearance runs in the planner. Unknown gaps remain excluded; disconnected
+observed floor remains in the map. The current registered Equipment Room build
+contains 272 detected floor cells, with 179 connected to the pump approach.
 
-**Virtual avatar radius** selector checks clearance against obstacles, unknown
-floor and map boundaries. No route disables walkthrough/playback. The updated
-Equipment Room grid currently supports the **0.10 m virtual camera** preview, but
-not the default 0.20 m avatar along the complete journey. This is a simulation
-radius, not evidence of clearance for a person. Validate the scan floor and scale
-before making larger-avatar claims.
+![Equipment Room walking connections](docs/images/equipment-room-walking-paths.png)
+
+Solid teal lines connect cells valid for a 0.20 m radius; dashed amber lines
+show additional 0.10 m virtual-camera connections. This is a scan-derived
+simulation map, not verified human walking clearance. The picture uses the same
+registered coordinates, equipment catalogue and full-scan asset as the app.
+The overhead illustration cuts geometry above 1.35 m to reveal the floor.
+
+The **Virtual avatar radius** selector checks clearance against obstacles, unknown
+floor and map boundaries. No route disables walkthrough/playback. The Equipment Room grid opens with a 0.10 m virtual camera radius and supports a 3.00 m route to the pump. The route becomes unavailable at 0.20 m. This radius describes the simulation; clearance for a person requires a calibrated floor and scale.
 
 **Play route preview** animates the map marker at 0.7 m/s, with pause and reset.
 On the iPhone, align first, then use **Play route preview** in the 3D viewer for
 an automatic camera journey. Pause holds the virtual pose. **Show camera** pauses
-playback; **Reset alignment** leaves preview mode and lets you align physical
-movement again. Arrival uses horizontal distance to the service point, separately
+playback and returns control to physical tracking. **Reset alignment** lets you align again. Arrival uses horizontal distance to the service point, separately
 from target recognition. The yellow mapped marker is not a vision detection.
 
 Import the supplied workbook after generating `assets/valmet/site.json`:
@@ -74,7 +106,7 @@ By default it sorts service-object IDs and associates them with workbook assets
 by increasing health score, breaking ties by asset ID. This is a **synthetic
 association**, not semantic recognition or verified physical identity. Override
 it with `--mapping /path/to/mapping.json`, whose JSON object maps scene
-`object_id` to workbook `asset_id`. Explicit `object_id` values are preferred;
+`object_id` to workbook `asset_id`. Explicit `objectId` or `object_id` values are preferred;
 older objects use `grid:x:z:width:depth`. Regenerate/review the mapping when
 fallback geometry IDs change. Unknown or duplicate IDs are rejected.
 
@@ -94,25 +126,20 @@ flutter test
 python3 -m unittest discover -s tools -p 'test_*.py'
 ```
 
-The iOS playback/evidence integration needs a Mac/Xcode build and physical iPhone
-check. On Linux the Dart planner, playback, evidence retrieval, importer and
-Flutter controls can be tested independently. No new Flutter packages are needed.
 
+## Desktop render checks
 
-## Render inspection pictures on desktop
-
-Optional inspection tool (requires desktop OpenGL/EGL, not used by the iPhone):
+For optional desktop inspection with OpenGL/EGL:
 
 ```sh
 python3 -m pip install -r tools/requirements-render.txt
 python3 tools/render_scene.py --top-down --cut-height 1.35 \
-  --width 2400 --height 2000 --output /path/to/floor-cutaway.png
-python3 tools/render_scene.py --camera 6.125 1.5 4.15 \
-  --target 6.125 0.05 5.125 --output /path/to/floor-check.png
+  --plan-bounds 1.7163 1.6062 11.2871 9.5537 \
+  --width 2400 --height 2000 --output /path/to/equipment-room-plan.png
 ```
 
-This rasterizes Gaussian ellipses with covariance, alpha and depth sorting. It
-uses the source DC colour stored in the app assets, not a point-density scatter
-plot. The overhead illustration cuts geometry above 1.35 m to reveal the floor;
-perspective checks retain overhead geometry. Desktop pictures do not replace
-an iPhone runtime check. Scanned geometry is not a complete collision model.
+The helper reads the current `boiler-room-sh.splats` format, including degree-3
+view-dependent colour, covariance and opacity. It renders depth-sorted Gaussian
+ellipses rather than plotting point centres. Use `--camera X Y Z --target X Y Z`
+for perspective inspection. Bounds only crop the illustration; they do not alter
+the scan or navigation map. Desktop captures do not replace iPhone checks.

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Render anisotropic Gaussian ellipses with depth sorting and source DC colour.
+"""Render anisotropic Gaussian ellipses with depth sorting and source view-dependent colour.
 
 Desktop inspection helper; not a substitute for iPhone runtime validation.
-Higher spherical-harmonic colour terms are not present in the app asset format.
+Supports the current 160-byte degree-3 spherical-harmonic app asset format.
 """
 from pathlib import Path
 import argparse,json
@@ -49,7 +49,41 @@ def view_matrix(eye,target,up):
  v=np.eye(4);v[:3,:3]=np.stack([right,vertical,-forward]);v[:3,3]=-v[:3,:3]@eye
  return v
 
-def render(data,eye,target,out,width=1600,height=1200,ortho=None,cut=None):
+def load_scene(assets):
+    path = assets / 'boiler-room-sh.splats'
+    if path.exists():
+        packed = np.memmap(path, dtype=np.uint8, mode='r').reshape(-1, 160)
+        data = np.ascontiguousarray(packed[:, :64]).view('<f4').reshape(-1, 16)
+        sh = np.ascontiguousarray(packed[:, 64:]).view('<f2').reshape(-1, 48)
+        return data, sh
+    return np.fromfile(assets / 'boiler-room.splats', '<f4').reshape(-1, 16), None
+
+
+def scene_colours(data, sh, eye, source_rotation):
+    if sh is None:
+        return data
+    direction = ((data[:, :3] - eye) * [1, -1, -1]) @ np.array(source_rotation).T
+    direction /= np.maximum(np.linalg.norm(direction, axis=1, keepdims=True), 1e-8)
+    x, y, z = direction.T
+    xx, yy, zz = x*x, y*y, z*z
+    basis = [
+        -.488602512*y, .488602512*z, -.488602512*x,
+        1.092548431*x*y, -1.092548431*y*z, .315391565*(3*zz-1),
+        -1.092548431*x*z, .546274215*(xx-yy),
+        -.590043590*y*(3*xx-yy), 2.890611443*x*y*z, -.457045799*y*(5*zz-1),
+        .373176333*z*(5*zz-3), -.457045799*x*(5*zz-1),
+        1.445305721*z*(xx-yy), -.590043590*x*(xx-3*yy),
+    ]
+    result = data.copy()
+    colour = result[:, 4:7]
+    for i, b in enumerate(basis):
+        colour += sh[:, [i, 15+i, 30+i]].astype('f4') * b[:, None]
+    result[:, 4:7] = np.clip(colour, 0, 1)
+    return result
+
+
+def render(data,eye,target,out,width=1600,height=1200,ortho=None,cut=None,sh=None,source_rotation=None):
+ data=scene_colours(data,sh,eye,np.eye(3) if source_rotation is None else source_rotation)
  ctx=moderngl.create_standalone_context(backend='egl')
  prog=ctx.program(vertex_shader=VS,fragment_shader=FS)
  v=view_matrix(eye,target,[0,0,-1] if ortho else [0,1,0])
@@ -80,20 +114,27 @@ if __name__ == '__main__':
     parser.add_argument('--target', type=float, nargs=3)
     parser.add_argument('--top-down', action='store_true')
     parser.add_argument('--cut-height', type=float)
+    parser.add_argument('--plan-bounds', type=float, nargs=4, metavar=('LEFT', 'BACK', 'RIGHT', 'FRONT'),
+                        help='Model-coordinate crop for the overhead illustration only')
     parser.add_argument('--width', type=int, default=1800)
     parser.add_argument('--height', type=int, default=1500)
     args = parser.parse_args()
     if args.width < 16 or args.height < 16:
         parser.error('Image dimensions must be at least 16 pixels')
     site = json.loads((args.assets / 'site.json').read_text())
-    data = np.fromfile(args.assets / 'boiler-room.splats', '<f4').reshape(-1, 16)
+    data, sh = load_scene(args.assets)
     ortho = None
     if args.top_down:
-        centre = [site['width'] * site['cellSize'] / 2, 0,
-                  site['depth'] * site['cellSize'] / 2]
+        if args.plan_bounds:
+            left, back, right, front = args.plan_bounds
+            if left >= right or back >= front:
+                parser.error('Invalid plan bounds')
+        else:
+            left, back = 0, 0
+            right, front = site['width'] * site['cellSize'], site['depth'] * site['cellSize']
+        centre = [(left + right) / 2, 0, (back + front) / 2]
         eye = [centre[0], 12, centre[2]]
-        span = max(site['width'] * site['cellSize'] + .75,
-                   (site['depth'] * site['cellSize'] + .75) * args.width / args.height)
+        span = max(right - left, (front - back) * args.width / args.height)
         ortho = (span, span * args.height / args.width)
         target = centre
     else:
@@ -102,4 +143,5 @@ if __name__ == '__main__':
         eye, target = args.camera, args.target
     args.output.parent.mkdir(parents=True, exist_ok=True)
     render(data, eye, target, args.output, args.width, args.height,
-           ortho=ortho, cut=args.cut_height)
+           ortho=ortho, cut=args.cut_height, sh=sh,
+           source_rotation=site.get('shRotation'))

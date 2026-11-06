@@ -9,8 +9,30 @@ import hashlib
 
 import numpy as np
 
+from scene_equipment import extract_equipment
 
-def prepare(source, destination, *, full_scene=False, floor_y=1.07, name=None):
+
+# Similarity registration from the reviewed scan into Equipment Room.ply.
+SOURCE_ROTATION = np.array([
+    [.9998943, -.0008709, -.0145134],
+    [.0009207, .9999937, .0034282],
+    [.0145103, -.0034413, .9998888],
+])
+SOURCE_SCALE = 1.0362638
+SOURCE_TRANSLATION = np.array([.170918, .066481, -.148239])
+WORLD_AXES = np.array([1, -1, -1])
+
+
+def observed_floor(xyz, opacity_logits, grid):
+    """Keep measured floor support; let the runtime planner apply radius clearance."""
+    body = (xyz[:, 1] >= .17) & (xyz[:, 1] <= 1.8) & (opacity_logits >= -2.2)
+    floor = (np.abs(xyz[:, 1]) <= .12) & (opacity_logits >= np.log(.01 / .99))
+    occupied = {p for p, n in Counter(map(tuple, grid[body].tolist())).items() if n >= 20}
+    candidates = {p for p, n in Counter(map(tuple, grid[floor].tolist())).items() if n >= 14}
+    return candidates - occupied, occupied
+
+
+def prepare(source, destination):
     with source.open('rb') as stream:
         header = []
         for line in stream:
@@ -24,55 +46,44 @@ def prepare(source, destination, *, full_scene=False, floor_y=1.07, name=None):
         raise ValueError('Expected a little-endian EGS PLY')
     count = int(next(line.split()[-1] for line in header if line.startswith('element vertex ')))
     columns = [line.split()[-1] for line in header if line.startswith('property float ')]
+    keys = ('x', 'y', 'z', 'rot_0', 'rot_1', 'rot_2', 'rot_3', 'f_dc_0', 'f_dc_1', 'f_dc_2',
+            'opacity', 'scale_0', 'scale_1', 'scale_2')
+    if source.stat().st_size != offset + count * len(columns) * 4:
+        raise ValueError('PLY payload size does not match the header')
     raw = np.memmap(source, dtype='<f4', mode='r', offset=offset, shape=(count, len(columns)))
-    keys = ('x', 'y', 'z', 'rot_0', 'rot_1', 'rot_2', 'rot_3', 'f_dc_0', 'f_dc_1', 'f_dc_2', 'opacity', 'scale_0', 'scale_1', 'scale_2')
-    values = raw[:, [columns.index(key) for key in keys]]
-    valid = np.isfinite(values).all(axis=1) & (np.abs(values) < 40).all(axis=1)
-    values = values[valid]
-    values = values[np.abs(np.linalg.norm(values[:, 3:7], axis=1) - 1) < .01]
-    if not len(values):
+    attributes = [columns.index(key) for key in keys]
+    harmonics = [columns.index(f'f_rest_{i}') for i in range(45)]
+    accepted = []
+    for start in range(0, count, 32768):
+        batch = raw[start:start + 32768]
+        with np.errstate(invalid='ignore', over='ignore'):
+            values = batch[:, attributes]
+            valid = np.isfinite(batch).all(axis=1)
+            valid &= (np.abs(values[:, :3]) < 1000).all(axis=1)
+            valid &= (np.abs(np.linalg.norm(values[:, 3:7], axis=1) - 1) < .01)
+            valid &= (np.abs(batch[:, harmonics]) < 10).all(axis=1)
+            valid &= (np.abs(values[:, 7:]) < 40).all(axis=1)
+        if valid.any():
+            accepted.append(batch[valid][:, attributes + harmonics])
+    if not accepted:
         raise ValueError('No valid EGS vertices')
-    # The original scan uses a reviewed crop. Updated scans can fit their own
-    # navigation extent while keeping the full visible scene for rendering.
+    values = np.concatenate(accepted)
+    rejected = count - len(values)
+    print(f'{len(values):,}/{count:,} structurally valid vertices. Invalid: {rejected:,}.')
+    if rejected:
+        raise ValueError('Full scan requested, but some PLY records failed validation')
+
+    registered = (values[:, :3] - SOURCE_TRANSLATION) @ SOURCE_ROTATION / SOURCE_SCALE
+    xyz = registered * WORLD_AXES + [5, 1.07, -.7]
     cell = .25
-    if not full_scene:
-        crop = np.array([[-5.0, -1.55, -4.0], [4.0, 1.24, -.7]])
-        values = values[((values[:, :3] >= crop[0]) & (values[:, :3] <= crop[1])).all(axis=1)]
-    # Floor surfaces can have faint Gaussians even where the rendered passage
-    # is continuous. Keep those observations for support, not as new free space.
-    floor_points = values[(np.abs(floor_y - values[:, 1]) <= .12) &
-                          (values[:, 10] >= np.log(.01 / .99)), :3]
-    values = values[values[:, 10] >= -2.2]
-    if not len(values):
-        raise ValueError('No visible vertices in the selected scene extent')
-    if full_scene:
-        low, high = np.quantile(values[:, [0, 2]], [.005, .995], axis=0)
-        origin_x = float(np.floor(low[0] / cell) * cell)
-        origin_z = float(np.ceil(high[1] / cell) * cell)
-        width = int(np.ceil((high[0] - origin_x) / cell))
-        depth = int(np.ceil((origin_z - low[1]) / cell))
-    else:
-        origin_x, origin_z = -5.0, -.7
-        width, depth = 36, 14
-    if width * depth > 60000:
-        raise ValueError('Navigation grid too large; review scene scale')
-    x, y, z = values[:, :3].T
-    xyz = np.stack((x - origin_x, floor_y - y, origin_z - z), axis=1)
     grid = np.floor(xyz[:, [0, 2]] / cell).astype(int)
-    inside_grid = ((grid >= [0, 0]) & (grid < [width, depth])).all(axis=1)
+    shift = -grid.min(axis=0)
+    grid += shift
+    width, depth = (grid.max(axis=0) + 1).tolist()
+    origin = np.array([shift[0] * cell, 0, shift[1] * cell])
+    xyz += origin
 
-    def counts(mask):
-        return Counter(map(tuple, grid[mask & inside_grid].tolist()))
-
-    occupied = {p for p, n in counts((xyz[:, 1] >= .17) & (xyz[:, 1] <= 1.8)).items() if n >= 20}
-    floor_grid = np.floor(np.column_stack((floor_points[:, 0] - origin_x,
-                                          origin_z - floor_points[:, 2])) / cell).astype(int)
-    floor_inside = ((floor_grid >= [0, 0]) &
-                    (floor_grid < [width, depth])).all(axis=1)
-    floor_counts = Counter(map(tuple, floor_grid[floor_inside].tolist()))
-    candidates = {p for p, n in floor_counts.items() if n >= 14}
-    # Radius clearance belongs to the planner. Dilation here would apply it twice.
-    walkable = candidates - occupied
+    walkable, _ = observed_floor(xyz, values[:, 10], grid)
 
     def adjacent(p):
         x, z = p
@@ -89,28 +100,20 @@ def prepare(source, destination, *, full_scene=False, floor_y=1.07, name=None):
                     queue.append(q)
         return distance
 
-    unseen = set(walkable)
-    best = set()
-    while unseen:
-        region = set(distances(min(unseen), unseen))
-        if len(region) > len(best):
-            best = region
-        unseen -= region
-    if len(best) < 8:
-        raise ValueError('No sufficiently large walkable floor in this scan')
-    start = min(best, key=lambda p: (p[1], abs(p[0] - 12), p[0]))
-    dist = distances(start, best)
-    # Place the demo target at an observed structure near the route end.
-    service, target = max(
-        ((p, q) for p in best for q in occupied
-         if abs(p[0]-q[0]) + abs(p[1]-q[1]) == 2),
-        key=lambda pair: (dist[pair[0]], pair),
-    )
+    # Preserve the reviewed approach and pick the nearest valid starting cell.
+    service = tuple((shift + [21, 7]).tolist())
+    if service not in walkable:
+        raise ValueError('The mapped pump approach is not on the observed walkable floor')
+    dist = distances(service, walkable)
+    if len(dist) < 8:
+        raise ValueError('No sufficiently large walkable floor at the pump approach')
+    entrance = shift + [15, 0]
+    start = min(dist, key=lambda p: ((p[0] - entrance[0]) ** 2 + (p[1] - entrance[1]) ** 2, p))
+    opacity = 1 / (1 + np.exp(-values[:, 10]))
     model = {
-        'name': name or ('Industrial Boiler Room' if not full_scene else source.stem),
+        'name': 'Equipment Room',
         'sourceFile': source.name,
         'sourceSha256': hashlib.sha256(source.read_bytes()).hexdigest(),
-        'sourceOrigin': [origin_x, floor_y, origin_z],
         'width': width, 'depth': depth, 'cellSize': cell,
         'start': start, 'floor': sorted(walkable),
         'floorMapping': {
@@ -118,15 +121,14 @@ def prepare(source, destination, *, full_scene=False, floor_y=1.07, name=None):
             'floorBandMetres': .12, 'obstacleHeightMetres': [.17, 1.8],
             'minimumFloorPoints': 14, 'minimumObstaclePoints': 20,
             'minimumFloorOpacity': .01,
-            'minimumRenderedOpacity': float(1 / (1 + np.exp(2.2))),
+            'allValidSplatsRetained': True,
+            'minimumObstacleOpacity': float(1 / (1 + np.exp(2.2))),
             'importerMarginMetres': 0,
-            'connectedCellsFromStart': len(best),
-            'disconnectedFloorCells': len(walkable - best),
+            'connectedCellsFromStart': len(dist),
+            'disconnectedFloorCells': len(walkable - dist.keys()),
         },
-        'objects': [{
-            'name': 'Inspection target', 'x': target[0], 'z': target[1],
-            'width': 1, 'depth': 1, 'height': 1.2, 'service': service,
-        }],
+        'originShift': origin.tolist(), 'shRotation': SOURCE_ROTATION.tolist(),
+        'objects': extract_equipment(xyz, opacity, cell, service, origin),
     }
 
     # Keep anisotropic Gaussian shape, opacity, and DC color for Metal.
@@ -138,34 +140,36 @@ def prepare(source, destination, *, full_scene=False, floor_y=1.07, name=None):
         2*(qx*qy + qz*w), 1 - 2*(qx*qx + qz*qz), 2*(qy*qz - qx*w),
         2*(qx*qz - qy*w), 2*(qy*qz + qx*w), 1 - 2*(qx*qx + qy*qy),
     )).reshape(-1, 3, 3)
-    axes = rotation * np.exp(np.clip(values[:, 11:14], -11, -1))[..., None, :]
+    axes = rotation * np.exp(np.clip(values[:, 11:14], -16, 4))[..., None, :]
+    source_to_world = SOURCE_ROTATION.T * WORLD_AXES[:, None] * WORLD_AXES / SOURCE_SCALE
+    axes = source_to_world @ axes
     covariance = axes @ np.swapaxes(axes, 1, 2)
-    rgb = np.clip(.5 + .28209479 * values[:, 7:10], 0, 1)
-    opacity = 1 / (1 + np.exp(-values[:, 10]))
+    rgb = .5 + .28209479 * values[:, 7:10]
     zero = np.zeros(len(values))
-    points = np.column_stack((
+    fields = np.column_stack((
         xyz, opacity, rgb, zero,
         covariance[:, 0, 0], covariance[:, 0, 1], covariance[:, 0, 2], covariance[:, 1, 1],
         covariance[:, 1, 2], covariance[:, 2, 2], zero, zero,
     )).astype('<f4')
+    # Four aligned float4 fields, followed by 45 channel-major SH
+    # coefficients and 3 padding values stored as half floats.
+    points = np.empty((len(values), 160), dtype=np.uint8)
+    points[:, :64] = fields.view(np.uint8).reshape(len(values), 64)
+    sh = np.zeros((len(values), 48), dtype='<f2')
+    sh[:, :45] = values[:, 14:]
+    points[:, 64:] = sh.view(np.uint8).reshape(len(values), 96)
     destination.mkdir(parents=True, exist_ok=True)
     (destination / 'site.json').write_text(json.dumps(model) + '\n', encoding='utf-8')
-    points.tofile(destination / 'boiler-room.splats')
-    print(f'{len(points):,} Gaussian splats, {len(walkable)} mapped floor cells '
-          f'({len(best)} connected), {dist[service]} route steps')
+    points.tofile(destination / 'boiler-room-sh.splats')
+    print(f'{len(model["objects"])} mapped assets, {len(points):,} Gaussian splats, {len(walkable)} mapped floor cells ({len(dist)} connected), {dist[start]} route steps')
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('source', type=Path)
     parser.add_argument('--output', type=Path, default=Path('assets/valmet'))
-    parser.add_argument('--full-scene', action='store_true',
-                        help='Fit navigation bounds to this scan; do not use the old crop')
-    parser.add_argument('--floor-y', type=float, default=1.07,
-                        help='Source y-down floor elevation; review for each new scan')
-    parser.add_argument('--name', help='Display name for the scene')
     args = parser.parse_args()
-    if not np.isfinite(args.floor_y):
-        parser.error('--floor-y must be finite')
-    prepare(args.source, args.output, full_scene=args.full_scene,
-            floor_y=args.floor_y, name=args.name)
+    try:
+        prepare(args.source, args.output)
+    except ValueError as error:
+        parser.exit(1, f'{error}\n')

@@ -1,6 +1,8 @@
-import 'dart:io';
 import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/material.dart';
+
+import 'package:flutter/services.dart';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:valmet_field_app/main.dart';
@@ -13,12 +15,41 @@ void main() {
     final site = Site.fromJson(
       File('test/fixtures/site.json').readAsStringSync(),
     );
-    await tester.pumpWidget(ValmetApp(site: site));
+    const channel = MethodChannel('valmet/field');
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SiteSimulation(
+            site: site,
+            loadAssetData: () async => null,
+            openNative: (method, [data]) =>
+                channel.invokeMethod<void>(method, data),
+          ),
+        ),
+      ),
+    );
     await tester.pumpAndSettle();
 
     expect(find.text('Walk inside the 3D model'), findsOneWidget);
-    expect(find.text('Simulate walk'), findsNothing);
-    expect(find.text('Record or replay a camera route'), findsNothing);
+    final messages = <bool>[];
+    final messenger = tester.binding.defaultBinaryMessenger;
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      expect(call.method, 'openWorld');
+      final request =
+          jsonDecode(call.arguments as String) as Map<String, dynamic>;
+      messages.add(request['keyControls'] as bool);
+      return null;
+    });
+    addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+    final open = find.text('Walk inside the 3D model');
+    await tester.tap(open);
+    await tester.pumpAndSettle();
+    expect(messages, [false]);
+    await tester.tap(find.text('Forward and backward controls'));
+    await tester.pumpAndSettle();
+    await tester.tap(open);
+    await tester.pumpAndSettle();
+    expect(messages, [false, true]);
   });
 
   testWidgets('preview pauses and resets without skipping the journey', (

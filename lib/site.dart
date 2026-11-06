@@ -11,10 +11,10 @@ Cell _cell(Object? value) {
 
 class SiteObject {
   SiteObject(Map<String, dynamic> json)
-    : objectId =
-          json['object_id'] as String? ??
+    : name = json['name'] as String,
+      objectId =
+          (json['objectId'] ?? json['object_id']) as String? ??
           'grid:${json['x']}:${json['z']}:${json['width']}:${json['depth']}',
-      name = json['name'] as String,
       x = json['x'] as int,
       z = json['z'] as int,
       width = json['width'] as int,
@@ -22,6 +22,7 @@ class SiteObject {
       height = (json['height'] as num).toDouble(),
       movable = json['movable'] == true,
       cells = (json['cells'] as List?)?.map(_cell).toList(),
+      bounds = json['bounds'] as List?,
       service = json['service'] == null ? null : _cell(json['service']);
 
   final String objectId;
@@ -31,6 +32,7 @@ class SiteObject {
   final bool movable;
   final Cell? service;
   final List<Cell>? cells;
+  final List<dynamic>? bounds;
 
   Iterable<Cell> get footprint sync* {
     if (cells case final cells?) {
@@ -54,6 +56,8 @@ class Site {
       width = json['width'] as int,
       depth = json['depth'] as int,
       cellSize = (json['cellSize'] as num).toDouble(),
+      originShift = json['originShift'] as List?,
+      shRotation = json['shRotation'] as List?,
       start = _cell(json['start']),
       floor = (json['floor'] as List?)?.map(_cell).toSet(),
       objects = (json['objects'] as List)
@@ -69,6 +73,7 @@ class Site {
   final String name;
   final int width, depth;
   final double cellSize;
+  final List<dynamic>? originShift, shRotation;
   final Cell start;
   final Set<Cell>? floor;
   final List<SiteObject> objects;

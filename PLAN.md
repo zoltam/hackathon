@@ -89,19 +89,19 @@ Statuses: **Ready → In progress → In review → Done**. The coordinator upda
 
 | Task | Owner | Status | Suggested branch | Done when |
 | --- | --- | --- | --- | --- |
-| Validate scene preparation and coordinate system | 1 + 3 | Ready | `scene/validate-room` | Actual scan renders; axes, scale, floor, filtering and device behaviour are recorded |
+| Validate scene preparation and coordinate system | 1 + 3 | In review | `scene/validate-room` | Actual scan renders; axes, scale, floor, filtering and device behaviour are recorded |
 | Agree shared object/data interface | 1 + 2 + 3 | Ready | `integration/asset-contract` | Sample object, bounds, asset mapping and viewer result are understood by all three |
-| Confirm target phone and baseline model/export | 1 + 3 | Ready | `vision/iphone-baseline` | Model loads and predicts on the actual phone; input format, labels, size and latency are recorded |
-| Capture clean rendered frames and run live inference | 3 + 1 | Ready | `vision/rendered-frame-loop` | Boiler-room frames, not real camera images, reach the local model; overlays are excluded; stale frames do not queue |
-| Recognize and highlight the single target | 1 + 3 | Ready | `vision/single-target` | On-phone detection of the rendered target produces a stable highlight associated with its mapped 3D object |
+| Confirm target phone and baseline model/export | 1 + 3 | In review | `vision/iphone-baseline` | Model loads and predicts on the actual phone; input format, labels, size and latency are recorded |
+| Capture clean rendered frames and run live inference | 3 + 1 | In review | `vision/rendered-frame-loop` | Boiler-room frames, not real camera images, reach the local model; overlays are excluded; stale frames do not queue |
+| Recognize and highlight the single target | 1 + 3 | In review | `vision/single-target` | On-phone detection of the rendered target produces a stable highlight associated with its mapped 3D object |
 | Complete phase 1 guided walk | 2 + 3 + 4 | Ready | `navigation/single-target-walk` | User aligns, sees and follows the route, recognizes the target and reaches its approach point on the actual phone |
-| Expand extraction to multiple 3D assets | 1 + 2 + 3 | Ready | `scene/extract-equipment` | After single-target integration, expand persistent boxes and labels for the scored extraction/proximity requirements |
+| Expand extraction to multiple 3D assets | 1 + 2 + 3 | In review | `scene/extract-equipment` | After single-target integration, expand persistent boxes and labels for the scored extraction/proximity requirements |
 | Import workbook and map a faulty target | 2 | Ready | `ai/asset-data` | Target and surrounding assets show reproducibly mapped supplied records, clearly labelled synthetic |
 | Validate routes and add automatic inspection playback | 2 + 3 | Ready | `navigation/inspection-route` | Start-to-target movement follows the walkability model; unreachable cases are handled |
 | Show nearby assets and their condition | 3 | Ready | `ui/proximity-overlays` | Boxes and information change with simulated position without showing every asset at once |
 | Add grounded arrival diagnostics | 2 + 3 | Ready | `ai/asset-diagnostics` | Arrival shows observations, hypotheses, evidence references and a supported next check |
 | Write demo story and collect company feedback | 4 | Ready | `demo/story-and-plan` | One user, problem, journey and value are clear; feedback is recorded |
-| Label rendered data and improve/fine-tune model if needed | 1 | Ready | `vision/model-adaptation` | Train/evaluation viewpoints are separate; adapted export is compared with baseline on the phone; classes and limits are disclosed |
+| Label rendered data and improve/fine-tune model if needed | 1 | In review | `vision/model-adaptation` | Train/evaluation viewpoints are separate; adapted export is compared with baseline on the phone; classes and limits are disclosed |
 | Later: detect a moved simulated obstacle | 1 + 3 | Ready (phase 2) | `vision/changed-obstacles` | Changed scene object is detected from rendered frames and localized; planner is not fed scripted ground truth as detection |
 | Later: update obstacle map and reroute | 2 + 3 | Ready (phase 2) | `navigation/dynamic-reroute` | Confirmed obstacle blocks the old route; guidance updates from current position or reports no route |
 | Benchmark combined rendering and vision | 1 + 3 + 4 | Ready | `vision/device-evaluation` | Record actual phone/iOS, scene coverage, render FPS, inference latency/rate, sustained behaviour and recognition errors; verify inference without connectivity |
@@ -114,6 +114,65 @@ Statuses: **Ready → In progress → In review → Done**. The coordinator upda
 - Use one branch per small milestone, push progress, open a PR, and merge working improvements frequently. Bring updated main into ongoing work when shared interfaces change.
 - Separate AI coding sessions on one machine need separate worktrees, or carefully separated file ownership in a shared workspace. One coordinator handles Git operations for agents sharing a workspace.
 - Mac build/device checks are required for iOS changes. Other members can contribute from Linux. Keep a stable demo version before attempting risky model or rendering improvements.
+
+## Rendered-frame inference device check
+
+6 November 2026, iPhone 15 with iOS 26.5. The release build classified three distinct Metal-rendered views with Apple's local Vision image classifier in 107, 59, and 61 ms. These are one initial and two subsequent inference times, not an end-to-end FPS benchmark. Each readback carries the originating camera pose, projection, and timestamp. The render target excludes the UIKit guidance overlay, and readback is capped at two samples per second with at most one sample in flight. This was the generic scene-classifier baseline before the pump verifier. Verification used the currently readable scan and simulated camera poses rather than a physical walk.
+
+The current detector has a separate device check described below. The match/no-match verifier was the earlier, pose-dependent experiment.
+
+The first mapped asset is `boiler-room:red-circulation-pump`. Its manually registered 3D bounds are `[5.77, 1.045, 2.27]` to `[6.10, 1.32, 2.63]` in model metres. The observed-floor route to its separate service cell `[21, 7]` is 3.25 m. The iPhone projects the mapped volume with the sampled frame pose and compares its rendered pixels with three local reference crops via Apple Vision feature prints. This is a verifier for a known 3D location. It does not search the whole image for arbitrary equipment or infer identity from workbook data. On iPhone 15, five target views matched, including one partially occluded view. A view aimed at a different pump and a view aimed away produced no match. Feature distances for the five accepted views were 0.397–0.474, and inference took 12–88 ms including first-use setup. In a separate reproducible macOS evaluation, two held-out target crops scored 0.380 and 0.650 and three other equipment crops scored 0.950–1.075 (lower is closer; threshold 0.72). Run the reference tool with `--evaluate` to repeat. These small pose-driven tests do not establish generalization or physical walk acceptance. The scan and its derived reference images are local.
+
+## Full-frame equipment detector
+
+The on-device detector is an Apple Create ML ObjectPrint transfer-learning model. It receives only the pixels of a clean rendered Metal frame and returns 2D boxes, confidence scores and catalog IDs. It does not use scene coordinates, camera pose, AR camera images or the projected service target as detector input. Camera pose is carried with the sample so old boxes can be hidden after movement. Rendering and routing still use the 3D scene independently.
+
+The following baseline and fine-tuning results used the earlier partial scan. The first trained export was 7.4 MiB. It found 342 of 379 objects on 44 held-out rendered views, with 41 false positives at IoU 0.50 and score 0.25. The route target was found in 7 of 11 labeled views. On iPhone 15 the model returned IDs and boxes from the app's rendered frames. The initial device call took 458 ms; the observed subsequent calls took 15–17 ms. This is inference time, not FPS. Some device views produced false duplicate target labels.
+
+The higher-quality run uses 1440 × 960 lossless renders and native portrait crops derived within the same split. It has 396 training images, 88 validation images and a separate 88-image test split. Camera groups are distinct but represent the same boiler room. On the same higher-quality validation split, the baseline scored 391 TP, 166 FP, 178 FN, while checkpoint 150 scored 449 TP, 70 FP, 120 FN. Target recall rose from 10/16 to 13/16. Validation F1 was 69.45% for the baseline and 82.54%, 88.45%, 88.71%, and 89.09% at iterations 150, 300, 450, and 600 respectively. Checkpoint 600 was selected on validation.
+
+On the same 88-image held-out test, the baseline produced 423 TP, 189 FP, 147 FN (F1 71.57%). Checkpoint 600 produced 522 TP, 65 FP, 48 FN (precision 88.93%, recall 91.58%, F1 90.23%). The red pump improved from 11/18 to 12/18. A true positive requires the correct object ID and IoU ≥ 0.50. The evaluator filters emitted predictions below 0.25; the exported NMS stage may already suppress low confidence boxes. These are rendered views of the same scene, including cropped views derived within each split, not 88 independent physical captures.
+
+Model SHA-256: `43bd9f6551bfdb11ee2d9871c3de122e6ec099e4166525d3d5c6d80cc1ccbe91`. Model selection and benchmark commands are in [README](README.md). Synthetic results do not establish generalization to other boiler rooms.
+
+## Equipment Room detector handoff
+
+The complete scan supplies 396 training images, 88 validation images and 88 separate test images. Rendering uses 1440 × 960 lossless frames and derived portrait views within each split. Scene masks yield 2D reference boxes for visible splats within the 11 registered equipment volumes. The detector receives RGB pixels. Its output ID links to the stored 3D volume.
+
+| Export | Validation F1 | Validation pump | Test F1 | Test pump |
+| --- | ---: | ---: | ---: | ---: |
+| First detector, unchanged | 50.08% | 8/16 | 53.18% | 9/18 |
+| Step 150 | 82.17% | 13/16 | | |
+| Step 300, selected | 89.25% | 15/16 | 90.67% | 11/18 |
+| Step 450 | 89.19% | 14/16 | | |
+| Step 600 | 88.91% | 14/16 | | |
+
+At IoU ≥ 0.50 and score ≥ 0.25, test counts changed from 343 TP, 378 FP and 226 FN to 520 TP, 58 FP and 49 FN. The test views are from the same simulated room. The catalog covers 11 mapped equipment instances. Their stored positions are separate from synthetic workbook IDs and from recognition.
+
+The selected local export is `build/valmet-equipment-room/candidate/equipment-detector.mlmodel` (SHA-256 `7e0d9d80c6948ec6f20a9ea0f3513e79cbe091adc0074bd8331ff3775fc4ad68`). The installed app bundles the same bytes. Source PLY SHA-256 is `83d8c7d99316c08c9719cfc2c5a6b9d1903b89847780e2458adc662c79f32955`. Use the local equipment-room dataset and the checkpoint session at `build/valmet-equipment-room/checkpoints-600` to reproduce model selection.
+
+On iPhone 15 (iOS 26.5), the scripted 15-second complete-scan benchmark processed 449 GPU frames (29.93 FPS) and 29 predictions (5 ms median, 8 ms p95). The first detector on the same scan delivered 29.47 FPS and 6/7 ms median/p95. The selected model returned one red-pump box in each of six scripted samples that showed the pump and no detection in the remaining sample. This checks the renderer-to-model path; a person walking the full route is a separate acceptance check.
+
+## Follow-up training on walkable viewpoints
+
+`/tmp/valmet-pump-references --route-dataset` renders 720 × 1560 native portrait images at walkable cell centers. Each cell belongs to one split. The images vary pitch, yaw and phone height around the pump, with all visible catalog assets labeled from scene masks. We added 192 images to the previous 396 training images and 78 images to the previous 88 validation images by combining the image files and annotation indices within each split. The 69 new test images stayed separate. All views represent the same simulated room.
+
+We trained a new ObjectPrint detector head for 400 steps. Step 200 was selected by target F1 on the new validation views, subject to the original validation guard of at most 3.5 percentage points of aggregate F1 loss and one fewer correct pump detection. Its new validation result was 76/78 pump detections and seven false pump detections.
+
+| Test split | Previous aggregate F1 | New aggregate F1 | Previous pump | New pump |
+| --- | ---: | ---: | ---: | ---: |
+| New walkable viewpoints, 69 images | 36.92% | 77.02% | 14/69 | 66/69 |
+| Original viewpoints, 88 images | 90.67% | 88.08% | 11/18 | 10/18 |
+
+False pump detections rose from 8 to 10 on the new split and from 2 to 4 on the original split. The new model is optimized for walkable portrait viewpoints. On iPhone 15, it returned a single pump box in each of the six scripted pump views and no detections in the remaining view. The 15-second benchmark measured 29.87 FPS with 29 predictions, 6 ms median inference and 7 ms p95.
+
+Local export `build/valmet-equipment-room-r2/candidate/equipment-detector.mlmodel` SHA-256 `3893f04a516ad88cbf24a309cfa6f7e9c5e4c896f8930faed43f26ce73b05194`. The installed app bundles the same bytes. The training log is `/tmp/valmet-equipment-room-r2-training.log`. Pass `--report-label=boiler-room:red-circulation-pump` to the evaluation tool to report pump false positives.
+
+## Scene and equipment handoff
+
+The current builder validates and renders all 1,676,481 Gaussians in Equipment Room.ply. Similarity registration to the reviewed scene yielded a 2.32 cm median nearest-neighbor distance. The 51 × 52 grid uses 0.25 model units per cell and has 114 walkable cells connected to the pump approach. The imported route from the entrance to the pump is 11 steps. Distances assume one reviewed scene unit is one metre.
+
+The generated `assets/valmet/site.json` now has 11 reviewed objects: five pumps, one inline valve, two control cabinets and three blue actuators. This is semi-automatic extraction using reviewed seed volumes and quantiles of the supporting Gaussians, not discovery of every object in the room. The bounds were inspected in multiple rendered views. Each record has stable `objectId`, `equipmentType`, metric `bounds` and `supportingSplats`. Keep `objectId` separate from the synthetic workbook's `asset_id`. Only the primary pump has a walkable `service` cell. The detector returns image-space boxes for the 11 catalog IDs. Other catalog boxes are available for proximity and workbook mapping.
 
 ## Shared agreements before integration
 
@@ -133,8 +192,8 @@ Statuses: **Ready → In progress → In review → Done**. The coordinator upda
 ## Known gaps and decisions
 
 - The full brief favours lightweight UI and backend intelligence. iOS with live on-phone recognition is our chosen product requirement; keep it focused so the scored spatial/data/diagnostic work is delivered.
-- The main scene builder currently selects a generic geometric inspection target; this is not semantic recognition or fine-tuning.
-- The source PLY produced suspicious values in a basic binary inspection. Current code filters invalid records; validate retained scene coverage rather than treating filtering as proof that the source issue is resolved.
+- The scene builder uses 11 visually reviewed seed volumes. The fine-tuned detector is limited to these 11 object identities in rendered views.
+- The replacement PLY passed structural validation. Recheck registered equipment bounds in the complete scene before publishing detection metrics.
 - Workbook scene coordinates are placeholders. Remap them to extracted objects; the brief explicitly allows procedural/random metadata association.
 - The local workbook contains 4,320 telemetry samples. Its referenced `telemetry_full_14d_30min.csv` is not in the supplied ZIP. Use the included sample unless more data is provided.
 - Knowledge_Docs contains eight context documents; the 38-entry RAG index also references asset cards. Do not assume 38 separate document files are supplied.

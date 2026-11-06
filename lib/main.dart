@@ -7,8 +7,8 @@ import 'package:flutter/scheduler.dart';
 
 import 'site.dart';
 import 'asset_data.dart';
-import 'navigation.dart';
 import 'inspection_details.dart';
+import 'navigation.dart';
 
 void main() => runApp(const ValmetApp());
 
@@ -111,7 +111,8 @@ class _SiteSimulationState extends State<SiteSimulation>
   late final Ticker _ticker;
   Duration _lastTick = Duration.zero;
   bool _moved = false;
-  double _clearanceMetres = 0.2;
+  bool _keyControls = false;
+  late double _clearanceMetres = widget.site.originShift == null ? 0.2 : 0.1;
 
   NavigationJourney? _createJourney() {
     final target = _target;
@@ -193,9 +194,12 @@ class _SiteSimulationState extends State<SiteSimulation>
       jsonEncode({
         'inspectionReport': report,
         'name': site.name,
+        'keyControls': _keyControls,
         'width': site.width,
         'depth': site.depth,
         'cellSize': site.cellSize,
+        'originShift': site.originShift,
+        'shRotation': site.shRotation,
         'start': pair(site.start),
         'route': _route.map(pair).toList(),
         'clearanceMetres': _journey?.clearanceMetres,
@@ -207,12 +211,14 @@ class _SiteSimulationState extends State<SiteSimulation>
             {
               'object_id': object.objectId,
               'name': object.name,
+              'objectId': object.objectId,
               'x': object.x,
               'z': object.z,
               'width': object.width,
               'depth': object.depth,
               'height': object.height,
               'cells': object.cells?.map(pair).toList(),
+              'bounds': object.bounds,
             },
         ],
       }),
@@ -240,6 +246,15 @@ class _SiteSimulationState extends State<SiteSimulation>
                   _target = target;
                   _resetJourney();
                 }),
+        ),
+        const SizedBox(height: 12),
+        Text('Settings', style: Theme.of(context).textTheme.titleMedium),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text('Forward and backward controls'),
+          subtitle: const Text('Use ↑/↓ to move. Turn by rotating the phone.'),
+          value: _keyControls,
+          onChanged: (value) => setState(() => _keyControls = value),
         ),
         DropdownButtonFormField<double>(
           initialValue: _clearanceMetres,
