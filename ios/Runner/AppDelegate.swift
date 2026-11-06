@@ -30,12 +30,15 @@ import UIKit
       guard let renderer = SplatRenderer(data: points, roomSize: SIMD2(Float(model.width), Float(model.depth)) * model.cellSize) else {
         return result(FlutterError(code: "metal", message: "Could not start the 3D renderer.", details: nil))
       }
-      renderer.vision.referenceURLs = ["a", "b", "e"].compactMap {
-        let key = registrar.lookupKey(forAsset: "assets/valmet/pump-reference-\($0).png")
+      let references = ["a", "b", "e"].compactMap { name -> URL? in
+        let key = registrar.lookupKey(forAsset: "assets/valmet/pump-reference-\(name).png")
         return Bundle.main.url(forResource: key, withExtension: nil)
       }
       if let index = model.target, model.objects.indices.contains(index) {
-        renderer.vision.bounds = model.objects[index].bounds.flatMap(PumpBounds.init)
+        let object = model.objects[index]
+        if let objectID = object.objectId, let bounds = object.bounds.flatMap(PumpBounds.init) {
+          renderer.vision.target = RenderedVision.Target(objectID: objectID, bounds: bounds, referenceURLs: references)
+        }
       }
       let camera = WorldWalk(model: model, renderer: renderer, verifyVision: verify)
       camera.modalPresentationStyle = .fullScreen

@@ -8,6 +8,8 @@ import json
 
 import numpy as np
 
+from scene_equipment import extract_equipment
+
 
 def prepare(source, destination, require_complete=False):
     with source.open('rb') as stream:
@@ -104,19 +106,14 @@ def prepare(source, destination, require_complete=False):
     # Manually registered from three views of the red circulation pump.
     # The Excel mapping is independent of this physical scene identity.
     service = (21, 7)
-    target = (23, 9)
     if service not in best:
         raise ValueError('The mapped pump approach is not on the observed walkable floor')
+    opacity = 1 / (1 + np.exp(-values[:, 10]))
     model = {
         'name': 'Industrial Boiler Room',
         'width': width, 'depth': depth, 'cellSize': cell,
         'start': start, 'floor': sorted(best),
-        'objects': [{
-            'objectId': 'boiler-room:red-circulation-pump',
-            'name': 'Red circulation pump', 'x': target[0], 'z': target[1],
-            'width': 1, 'depth': 1, 'height': 1.32, 'service': service,
-            'bounds': [[5.77, 1.045, 2.27], [6.10, 1.32, 2.63]],
-        }],
+        'objects': extract_equipment(xyz, opacity, cell, service),
     }
 
     # Keep anisotropic Gaussian shape, opacity, and DC color for Metal.
@@ -131,7 +128,6 @@ def prepare(source, destination, require_complete=False):
     axes = rotation * np.exp(np.clip(values[:, 11:14], -16, 4))[..., None, :]
     covariance = axes @ np.swapaxes(axes, 1, 2)
     rgb = .5 + .28209479 * values[:, 7:10]
-    opacity = 1 / (1 + np.exp(-values[:, 10]))
     zero = np.zeros(len(values))
     fields = np.column_stack((
         xyz, opacity, rgb, zero,
@@ -148,7 +144,7 @@ def prepare(source, destination, require_complete=False):
     destination.mkdir(parents=True, exist_ok=True)
     (destination / 'site.json').write_text(json.dumps(model) + '\n', encoding='utf-8')
     points.tofile(destination / 'boiler-room-sh.splats')
-    print(f'{len(points):,} Gaussian splats, {len(best)} walkable cells, {dist[service]} route steps')
+    print(f'{len(model["objects"])} mapped assets, {len(points):,} Gaussian splats, {len(best)} walkable cells, {dist[service]} route steps')
 
 
 if __name__ == '__main__':
