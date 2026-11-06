@@ -5,11 +5,14 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
   struct Uniforms {
     var viewProjection: simd_float4x4
     var screen: SIMD2<Float>
+    var roomSize: SIMD2<Float>
   }
 
   let view: MTKView
   private let queue: MTLCommandQueue
   private let pipeline: MTLRenderPipelineState
+  private let floorPipeline: MTLRenderPipelineState
+  private let roomSize: SIMD2<Float>
   private let splats: MTLBuffer
   private var sortBuffers: [MTLBuffer] = []
   private var nextBuffer = 0
@@ -22,7 +25,7 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
   private var pendingFrame: (pose: simd_float4x4, projection: simd_float4x4)?
   private var lastDraw: CFTimeInterval = 0
 
-  init?(data: Data) {
+  init?(data: Data, roomSize: SIMD2<Float>) {
     guard let device = MTLCreateSystemDefaultDevice(), let queue = device.makeCommandQueue(),
           let library = try? device.makeLibrary(source: Self.shader, options: nil) else { return nil }
     let format = MTLPixelFormat.bgra8Unorm
@@ -36,7 +39,12 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
     attachment.sourceAlphaBlendFactor = .one
     attachment.destinationRGBBlendFactor = .oneMinusSourceAlpha
     attachment.destinationAlphaBlendFactor = .oneMinusSourceAlpha
+    let floorDescriptor = MTLRenderPipelineDescriptor()
+    floorDescriptor.vertexFunction = library.makeFunction(name: "floorVertex")
+    floorDescriptor.fragmentFunction = library.makeFunction(name: "floorFragment")
+    floorDescriptor.colorAttachments[0].pixelFormat = format
     guard let pipeline = try? device.makeRenderPipelineState(descriptor: descriptor),
+          let floorPipeline = try? device.makeRenderPipelineState(descriptor: floorDescriptor),
           let splats = data.withUnsafeBytes({ bytes in
             bytes.baseAddress.flatMap { device.makeBuffer(bytes: $0, length: bytes.count, options: .storageModeShared) }
           }) else { return nil }
@@ -52,6 +60,8 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
     self.count = count
     self.queue = queue
     self.pipeline = pipeline
+    self.floorPipeline = floorPipeline
+    self.roomSize = roomSize
     self.splats = splats
     view = MTKView(frame: .zero, device: device)
     super.init()
@@ -90,7 +100,13 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
     nextBuffer = (nextBuffer + 1) % sortBuffers.count
     let sorted = sort(pose: pose, into: buffer)
     var uniforms = Uniforms(viewProjection: projection * pose.inverse,
-                            screen: SIMD2(Float(dimensions.width), Float(dimensions.height)))
+                            screen: SIMD2(Float(dimensions.width), Float(dimensions.height)),
+                            roomSize: roomSize)
+    // Put an approximate floor behind the captured detail. This pass has no
+    // effect on the walkability grid.
+    encoder.setRenderPipelineState(floorPipeline)
+    encoder.setVertexBytes(&uniforms, length: MemoryLayout<Uniforms>.stride, index: 2)
+    encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
     encoder.setRenderPipelineState(pipeline)
     encoder.setVertexBuffer(splats, offset: 0, index: 0)
     encoder.setVertexBuffer(buffer, offset: 0, index: 1)
@@ -141,7 +157,33 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
   using namespace metal;
 
   struct Splat { float4 centerAlpha, color, covA, covB; };
-  struct Uniforms { float4x4 viewProjection; float2 screen; };
+  struct Uniforms { float4x4 viewProjection; float2 screen, roomSize; };
+  struct FloorPixel { float4 position [[position]]; float2 world; };
+
+  vertex FloorPixel floorVertex(uint corner [[vertex_id]], constant Uniforms &u [[buffer(2)]]) {
+    // Carry the backing surface slightly under the walls to avoid a seam.
+    float2 ground = float2(corner & 1, (corner >> 1) & 1) * (u.roomSize + 4.0) - 2.0;
+    FloorPixel out;
+    out.position = u.viewProjection * float4(ground.x, -.16, ground.y, 1);
+    out.world = ground;
+    return out;
+  }
+
+  float floorHash(float2 p) {
+    return fract(sin(dot(p, float2(127.1, 311.7))) * 43758.5453);
+  }
+
+  float floorNoise(float2 p) {
+    float2 i = floor(p), f = smoothstep(0.0, 1.0, fract(p));
+    return mix(mix(floorHash(i), floorHash(i + float2(1,0)), f.x),
+               mix(floorHash(i + float2(0,1)), floorHash(i + 1), f.x), f.y);
+  }
+
+  fragment float4 floorFragment(FloorPixel in [[stage_in]]) {
+    float2 p = in.world;
+    float tone = .80 + .16 * floorNoise(p * 1.3) + .10 * floorNoise(p * 12) + .04 * floorNoise(p * 43);
+    return float4(float3(.56, .49, .39) * tone, 1);
+  }
   struct Pixel {
     float4 position [[position]];
     float2 local;

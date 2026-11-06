@@ -31,7 +31,7 @@ void main() {
     addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
     final open = find.text('Walk inside the 3D model');
     await tester.tap(open);
-    await tester.tap(find.text('Keyboard and screen controls'));
+    await tester.tap(find.text('Forward and backward controls'));
     await tester.pumpAndSettle();
     await tester.tap(open);
     expect(messages, [false, true]);
