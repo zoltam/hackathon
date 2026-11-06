@@ -12,6 +12,7 @@ struct WalkSite: Decodable {
     let x, z, width, depth: Int
     let height: CGFloat
     let cells: [[Int]]?
+    let bounds: [[Float]]?
   }
 
   let name: String

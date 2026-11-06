@@ -22,7 +22,8 @@ SOURCE_TRANSLATION = np.array([.170918, .066481, -.148239])
 WORLD_AXES = np.array([1, -1, -1])
 
 
-def prepare(source, destination):
+
+def prepare(source, destination, require_complete=False):
     with source.open('rb') as stream:
         header = []
         for line in stream:
@@ -157,6 +158,8 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('source', type=Path)
     parser.add_argument('--output', type=Path, default=Path('assets/valmet'))
+    parser.add_argument('--require-complete', action='store_true',
+                        help='Reject the source unless every declared vertex validates')
     args = parser.parse_args()
     try:
         prepare(args.source, args.output)
