@@ -33,7 +33,7 @@ final class RenderedVision {
 
   private let readbacks = [Readback(), Readback()]
   private let inferenceAvailable = DispatchSemaphore(value: 1)
-  private static let sampleInterval: CFTimeInterval = 1.0 / 10
+  private static let sampleInterval: CFTimeInterval = 1.0 / 8
   private var nextSample: CFTimeInterval?
 
   func loadModel(at url: URL?, completion: @escaping (Bool) -> Void) {

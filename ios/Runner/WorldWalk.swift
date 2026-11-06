@@ -65,7 +65,6 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
   private let renderer: SplatRenderer
   private let reality = ARSCNView()
   private var virtual: UIView { renderer.view }
-  private let routeLayer = CAShapeLayer()
   private let detectionLayer = CAShapeLayer()
   private let message = UILabel()
   private let visionStatus = UILabel()
@@ -126,17 +125,11 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     reality.session.delegate = self
     reality.session.delegateQueue = .main
     floorCells = model.floor.map { Set($0.map { SIMD2($0[0], $0[1]) }) }
-    for (layer, color, width) in [
-      (routeLayer, UIColor.systemMint, CGFloat(4)),
-      (detectionLayer, UIColor.systemYellow, CGFloat(3)),
-    ] {
-      layer.strokeColor = color.cgColor
-      layer.fillColor = UIColor.clear.cgColor
-      layer.lineWidth = width
-      layer.lineJoin = .round
-      layer.lineCap = .round
-      virtual.layer.addSublayer(layer)
-    }
+    detectionLayer.strokeColor = UIColor.systemYellow.cgColor
+    detectionLayer.fillColor = UIColor.clear.cgColor
+    detectionLayer.lineWidth = 3
+    detectionLayer.lineJoin = .round
+    virtual.layer.addSublayer(detectionLayer)
 
     message.font = .preferredFont(forTextStyle: .callout)
     message.textColor = .white
@@ -279,7 +272,6 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
       ))
       updateDetectionPose(pose)
       renderer.render(pose: pose, projection: projection)
-      drawGuide(projection * pose.inverse)
     }
   }
 
@@ -473,33 +465,6 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
       simd_dot(frame.pose.columns.0, pose.columns.0) >= 0.99
   }
 
-  private func drawGuide(_ transform: simd_float4x4) {
-    let bounds = virtual.bounds
-    func project(_ point: SIMD3<Float>) -> CGPoint? {
-      let clip = transform * SIMD4(point.x, point.y, point.z, 1)
-      guard clip.w > 0.04 else { return nil }
-      return CGPoint(x: (CGFloat(clip.x / clip.w) + 1) * bounds.width / 2,
-                     y: (1 - CGFloat(clip.y / clip.w)) * bounds.height / 2)
-    }
-
-    let path = UIBezierPath()
-    var previous: CGPoint?
-    for cell in model.route {
-      guard let point = project(model.center(cell, height: 0.07)) else {
-        previous = nil
-        continue
-      }
-      if previous == nil { path.move(to: point) } else { path.addLine(to: point) }
-      previous = point
-    }
-
-    CATransaction.begin()
-    CATransaction.setDisableActions(true)
-    routeLayer.frame = bounds
-    routeLayer.path = path.cgPath
-    CATransaction.commit()
-  }
-
   @discardableResult private func drawDetections(_ detections: [RenderedVision.Detection]) -> [String] {
     let bounds = virtual.bounds
     let path = UIBezierPath()
@@ -610,7 +575,6 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
       virtual.isHidden = false
       let projection = frame.camera.projectionMatrix(for: orientation, viewportSize: size, zNear: 0.04, zFar: 40)
       renderer.render(pose: pose, projection: projection)
-      drawGuide(projection * pose.inverse)
     }
     let position = pose.columns.3
     let cell = cellAt(x: position.x, z: position.z)

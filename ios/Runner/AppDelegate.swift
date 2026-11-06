@@ -29,7 +29,9 @@ import UIKit
       }
       guard let renderer = SplatRenderer(data: points,
                                          roomSize: SIMD2(Float(model.width), Float(model.depth)) * model.cellSize,
-                                         sourceRotation: model.sourceRotation) else {
+                                         sourceRotation: model.sourceRotation,
+                                         route: model.route.map { model.center($0) },
+                                         cellSize: model.cellSize) else {
         return result(FlutterError(code: "metal", message: "Could not start the 3D renderer.", details: nil))
       }
       let detectorKey = registrar.lookupKey(forAsset: "assets/valmet/equipment-detector.mlmodel")

@@ -32,7 +32,7 @@ swiftc -O tools/build_pump_references.swift -o /tmp/valmet-pump-references
 
 The importer requires the complete Equipment Room scan. It registers the scan against the reviewed equipment frame and renders all 1,676,481 splats with their anisotropic covariance, opacity, and degree-3 view-dependent color. The navigation grid comes from observed floor and obstacle geometry. A neutral backing surface fills missing floor pixels and leaves walkability unchanged. Distances assume the reviewed scene uses metres. Keep the organizer's scan and derived assets local unless public redistribution is authorized.
 
-The iPhone detector samples the full rendered image locally at up to 10 frames per second. It skips frames while inference is busy. It returns image-space boxes for the catalog objects, without reading coordinates or camera images as recognition input. Routing and arrival use the separately mapped walkable approach.
+The iPhone detector samples the full rendered image locally at up to 8 frames per second. It skips frames while inference is busy. It returns image-space boxes for the catalog objects, without reading coordinates or camera images as recognition input. Routing and arrival use the separately mapped walkable approach.
 
 To prepare and train the detector on macOS with Xcode and Pillow installed:
 
@@ -83,7 +83,7 @@ The overhead illustration cuts geometry above 1.35 m to reveal the floor.
 The **Virtual avatar radius** selector checks clearance against obstacles, unknown
 floor and map boundaries. The walkthrough requires a route. The Equipment Room grid opens with a 0.10 m virtual camera radius and supports a 3.00 m route to the pump. The route becomes unavailable at 0.20 m. This radius describes the simulation; clearance for a person requires a calibrated floor and scale.
 
-On the iPhone, set the start and direction, then follow the green route in the
+On the iPhone, set the start and direction, then follow the mint floor arrows to the gold service marker in the
 3D viewer. Walk with the phone or enable **Forward and backward controls** to
 move with arrows and turn by rotating the phone. **Show camera** switches to
 the camera feed, and **Reset alignment** lets you align again. Arrival uses
