@@ -11,7 +11,9 @@ void main() {
   ) async {
     await tester.binding.setSurfaceSize(const Size(430, 900));
     addTearDown(() => tester.binding.setSurfaceSize(null));
-    final site = Site.fromJson(File('assets/site.json').readAsStringSync());
+    final site = Site.fromJson(
+      File('test/fixtures/site.json').readAsStringSync(),
+    );
     await tester.pumpWidget(ValmetApp(site: site));
     await tester.pumpAndSettle();
     final complete = find.widgetWithText(OutlinedButton, 'Complete service');

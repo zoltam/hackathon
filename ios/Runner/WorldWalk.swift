@@ -49,6 +49,7 @@ struct WorldAlignment {
 
 final class WorldWalk: UIViewController, ARSessionDelegate {
   private let model: WalkSite
+  private let points: Data
   private let reality = ARSCNView()
   private let virtual = SCNView()
   private let eye = SCNNode()
@@ -60,11 +61,11 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
   private var requestedCamera = false
   private var ready = false
   private var lastMessage: String?
-  private var solidCells = Set<SIMD2<Int>>()
   private var floorCells: Set<SIMD2<Int>>?
 
-  init(model: WalkSite) {
+  init(model: WalkSite, points: Data) {
     self.model = model
+    self.points = points
     super.init(nibName: nil, bundle: nil)
   }
 
@@ -148,58 +149,28 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     let root = scene.rootNode
     let size = CGFloat(model.cellSize)
 
-    func box(_ x: CGFloat, _ y: CGFloat, _ z: CGFloat,
-             _ width: CGFloat, _ height: CGFloat, _ depth: CGFloat, _ color: UIColor) {
-      let shape = SCNBox(width: width, height: height, length: depth, chamferRadius: 0)
-      shape.firstMaterial?.diffuse.contents = color
-      let node = SCNNode(geometry: shape)
-      node.position = SCNVector3(x, y, z)
-      root.addChildNode(node)
-    }
-
-    let ground = UIColor(red: 0.34, green: 0.39, blue: 0.40, alpha: 1)
-    if let floor = model.floor {
-      floorCells = Set(floor.map { SIMD2($0[0], $0[1]) })
-      for cell in floor {
-        let point = model.center(cell)
-        box(CGFloat(point.x), -0.06, CGFloat(point.z), size, 0.12, size, ground)
-      }
-    } else {
-      let width = CGFloat(model.width) * size, depth = CGFloat(model.depth) * size
-      box(width / 2, -0.06, depth / 2, width, 0.12, depth, ground)
-      let wall = UIColor(red: 0.43, green: 0.46, blue: 0.46, alpha: 1)
-      for z in [-0.09, depth + 0.09] {
-        box(width / 2, 1.45, z, width + 0.36, 2.9, 0.18, wall)
-      }
-      for x in [-0.09, width + 0.09] {
-        box(x, 1.45, depth / 2, 0.18, 2.9, depth, wall)
-      }
-      let lineColor = UIColor(white: 0.44, alpha: 1)
-      for x in 0...model.width {
-        box(CGFloat(x) * size, 0.002, depth / 2, 0.012, 0.003, depth, lineColor)
-      }
-      for z in 0...model.depth {
-        box(width / 2, 0.002, CGFloat(z) * size, width, 0.003, 0.012, lineColor)
-      }
-    }
+    let stride = 7 * MemoryLayout<Float>.stride
+    let count = points.count / stride
+    let positions = SCNGeometrySource(data: points, semantic: .vertex, vectorCount: count,
+                                      usesFloatComponents: true, componentsPerVector: 3,
+                                      bytesPerComponent: 4, dataOffset: 0, dataStride: stride)
+    let colors = SCNGeometrySource(data: points, semantic: .color, vectorCount: count,
+                                   usesFloatComponents: true, componentsPerVector: 4,
+                                   bytesPerComponent: 4, dataOffset: 12, dataStride: stride)
+    let indices = (0..<count).map(UInt32.init)
+    let indexData = indices.withUnsafeBufferPointer { Data(buffer: $0) }
+    let element = SCNGeometryElement(data: indexData, primitiveType: .point,
+                                     primitiveCount: count, bytesPerIndex: 4)
+    element.pointSize = 0.025
+    element.minimumPointScreenSpaceRadius = 1
+    element.maximumPointScreenSpaceRadius = 9
+    let cloud = SCNGeometry(sources: [positions, colors], elements: [element])
+    cloud.firstMaterial?.lightingModel = .constant
+    root.addChildNode(SCNNode(geometry: cloud))
+    floorCells = model.floor.map { Set($0.map { SIMD2($0[0], $0[1]) }) }
 
     for (index, object) in model.objects.enumerated() {
       let selected = model.target == index
-      let color = selected ? UIColor.systemOrange : UIColor(red: 0.29, green: 0.44, blue: 0.51, alpha: 1)
-      if let cells = object.cells {
-        for cell in cells {
-          solidCells.insert(SIMD2(cell[0], cell[1]))
-          let point = model.center(cell)
-          box(CGFloat(point.x), object.height / 2, CGFloat(point.z), size, object.height, size, color)
-        }
-      } else {
-        for x in object.x..<(object.x + object.width) {
-          for z in object.z..<(object.z + object.depth) { solidCells.insert(SIMD2(x, z)) }
-        }
-        box((CGFloat(object.x) + CGFloat(object.width) / 2) * size, object.height / 2,
-            (CGFloat(object.z) + CGFloat(object.depth) / 2) * size,
-            CGFloat(object.width) * size, object.height, CGFloat(object.depth) * size, color)
-      }
       if selected {
         let ring = SCNTorus(ringRadius: 0.24, pipeRadius: 0.022)
         ring.firstMaterial?.diffuse.contents = UIColor.systemYellow
@@ -218,7 +189,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     }
 
     for (from, to) in zip(model.route, model.route.dropFirst()) {
-      let a = model.center(from, height: 0.022), b = model.center(to, height: 0.022)
+      let a = model.center(from, height: 0.065), b = model.center(to, height: 0.065)
       let segment = SCNBox(width: 0.085, height: 0.018, length: size, chamferRadius: 0.005)
       segment.firstMaterial?.diffuse.contents = UIColor.systemMint
       segment.firstMaterial?.lightingModel = .constant
@@ -228,21 +199,13 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
       root.addChildNode(strip)
     }
     if let last = model.route.last {
-      let endpoint = model.center(last, height: 0.026)
-      box(CGFloat(endpoint.x), 0.026, CGFloat(endpoint.z), 0.22, 0.04, 0.22, .systemMint)
+      let marker = SCNCylinder(radius: 0.11, height: 0.04)
+      marker.firstMaterial?.diffuse.contents = UIColor.systemMint
+      marker.firstMaterial?.lightingModel = .constant
+      let endpoint = SCNNode(geometry: marker)
+      endpoint.simdPosition = model.center(last, height: 0.045)
+      root.addChildNode(endpoint)
     }
-
-    let ambient = SCNNode()
-    ambient.light = SCNLight()
-    ambient.light?.type = .ambient
-    ambient.light?.intensity = 600
-    root.addChildNode(ambient)
-    let directional = SCNNode()
-    directional.light = SCNLight()
-    directional.light?.type = .directional
-    directional.light?.intensity = 850
-    directional.eulerAngles = SCNVector3(-0.85, 0.5, 0)
-    root.addChildNode(directional)
 
     eye.camera = SCNCamera()
     eye.camera?.zNear = 0.04
@@ -305,7 +268,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     let position = pose.columns.3
     let cell = SIMD2(Int(floor(position.x / model.cellSize)), Int(floor(position.z / model.cellSize)))
     let outOfBounds = cell.x < 0 || cell.y < 0 || cell.x >= model.width || cell.y >= model.depth
-    if outOfBounds || solidCells.contains(cell) || floorCells?.contains(cell) == false {
+    if outOfBounds || floorCells?.contains(cell) == false {
       updateDisplay("Outside the model’s walkable area. Return to the route or show the camera.")
     } else if let end = model.route.last, cell == SIMD2(end[0], end[1]),
               let index = model.target, model.objects.indices.contains(index) {
