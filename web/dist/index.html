@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="fi">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Valmet · Huoltoreitti videolle</title>
+<style>
+:root{font:16px system-ui;color:#f1f5f4;background:#101a1a;color-scheme:dark;--line:#39504d;--mint:#79efd2;--muted:#b4c8c5}*{box-sizing:border-box}body{margin:auto;padding:24px;max-width:1400px}header{display:flex;justify-content:space-between;gap:16px;align-items:center;flex-wrap:wrap;margin-bottom:20px}h1,h2,p{margin:0 0 10px}h1{font-size:clamp(24px,4vw,38px)}h2{font-size:18px}.eyebrow{font-size:12px;letter-spacing:.14em;color:var(--mint);font-weight:700}small,.muted{color:var(--muted)}main{display:grid;grid-template-columns:minmax(0,2fr) minmax(285px,1fr);gap:18px}.panel{padding:15px;background:#192727;border:1px solid var(--line);border-radius:14px}button,.file,input,textarea,select{font:inherit}button,.file{background:#263b39;color:inherit;border:1px solid #4d6964;border-radius:8px;padding:8px 11px;cursor:pointer;display:inline-block}button:hover,.file:hover{background:#355451}button:disabled{opacity:.4;cursor:default}button[aria-pressed=true],.primary{background:var(--mint);color:#0e2420;border-color:var(--mint)}.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:8px 0}.stage{position:relative;background:#0b1112;border-radius:8px;overflow:hidden;line-height:0}.stage video{width:100%;display:block;min-height:160px}.stage canvas{position:absolute;inset:0;width:100%;height:100%;touch-action:none;cursor:crosshair}.stage canvas.playing{pointer-events:none}input[type=range]{flex:1;min-width:90px;accent-color:var(--mint)}input[type=text],textarea{width:100%;padding:8px;border:1px solid var(--line);border-radius:8px;background:#101a1a;color:inherit;margin:5px 0 8px}textarea{resize:vertical;min-height:105px}hr{border:0;border-top:1px solid var(--line);margin:15px 0}li{margin:6px 0}input[type=file]{max-width:100%}output{font-variant-numeric:tabular-nums}#status{min-height:3em}#sceneList{max-width:100%}@media(max-width:840px){main{grid-template-columns:1fr}body{padding:12px}}
+</style>
+<header>
+  <div><p class="eyebrow">VALMET / HUOLTO</p><h1>Huoltoreitti videolle</h1><p class="muted">Merkitse kulkualue, esteet ja huoltokohde. Reitti lasketaan videon kuvalle.</p></div>
+  <div class="row"><label class="file">Avaa video <input id="file" type="file" accept="video/*" hidden></label><button id="demo" class="primary">Avaa esimerkki</button></div>
+</header>
+<main>
+<section class="panel" aria-label="Video">
+  <div class="stage"><video id="video" playsinline preload="metadata"></video><canvas id="overlay" aria-label="Videon reitti ja merkinnät"></canvas></div>
+  <div class="row"><button id="play" disabled>Toista</button><input id="time" aria-label="Videon aika" type="range" min="0" max="0" value="0" step="0.01"><output id="clock">0.0 s</output></div>
+  <p id="status" role="status">Avaa oma video tai kokeile esimerkkiä.</p>
+  <div class="row"><button id="save" disabled>Tallenna merkinnät</button><label class="file">Tuo merkinnät <input id="load" type="file" accept=".json,application/json" hidden></label><button id="export" disabled>Vie merkitty video</button></div>
+  <small>Video käsitellään selaimessasi. Merkintätiedosto avataan saman videon kanssa.</small>
+</section>
+<aside class="panel">
+  <h2>Kuva ja reitti</h2>
+  <p><small>Pysäytä video. Lisää kuvakulma uudestaan, kun kamera siirtyy tai video leikkaa.</small></p>
+  <div class="row"><button id="newScene" disabled>Uusi kuvakulma tähän</button><select id="sceneList" aria-label="Kuvakulmat"></select><button id="removeScene" disabled>Poista</button></div>
+  <div class="row" id="tools">
+    <button data-tool="floor">Kulkualue</button><button data-tool="obstacle">Este</button>
+    <button data-tool="start">Lähtö</button><button data-tool="end">Huoltopaikka</button><button data-tool="target">Huoltokohde</button>
+  </div>
+  <div class="row"><button id="finish" disabled>Sulje monikulmio</button><button id="undo" disabled>Kumoa</button></div>
+  <small>Rajaa lattia ja esteet vähintään kolmella pisteellä. Valitse huoltopaikaksi vapaa kohta laitteen vierestä. Ympyröi laite kahdella klikkauksella (keskipiste, reuna).</small>
+  <hr>
+  <h2>Työohje</h2>
+  <label>Kohteen nimi<input id="name" type="text" placeholder="Esim. Pumppu P-02" maxlength="100"></label>
+  <label>Hyväksytyt huoltovaiheet, yksi per rivi<textarea id="steps" maxlength="6000" placeholder="Liitä laitteen työohje tai kirjoita vaiheet tähän."></textarea></label>
+  <ol id="instructions"></ol>
+</aside>
+</main>
+<script type="module" src="./app.js"></script>
+</html>
