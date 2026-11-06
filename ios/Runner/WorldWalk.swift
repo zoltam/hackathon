@@ -150,11 +150,14 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
       if self.visionMode == .benchmark, self.inBenchmarkWindow(CACurrentMediaTime()) {
         self.benchmarkLatencies.append(prediction.inferenceMilliseconds)
       }
-      guard self.view.window != nil, !self.virtual.isHidden,
-            let pose = self.currentPose, self.isCurrent(prediction.frame, comparedWith: pose) else { return }
+      guard self.view.window != nil, !self.virtual.isHidden, let pose = self.currentPose else { return }
+      guard self.isCurrent(prediction.frame, comparedWith: pose) else {
+        self.clearDetections()
+        return
+      }
       let detections = prediction.detections
       self.lastDetection = detections.isEmpty ? nil : prediction.frame
-      self.drawDetections(detections)
+      let confirmedIDs = self.drawDetections(detections)
       if self.visionMode == .benchmark, self.inBenchmarkWindow(CACurrentMediaTime()) {
         self.benchmarkOverlayAges.append(Int((CACurrentMediaTime() - prediction.frame.timestamp) * 1000))
       }
@@ -169,8 +172,8 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
         fflush(stdout)
         self.verificationFrames += 1
       }
-      let names = detections.map { detection in
-        self.model.objects.first { $0.objectId == detection.objectID }?.name ?? detection.objectID
+      let names = confirmedIDs.sorted().map { id in
+        self.model.objects.first { $0.objectId == id }?.name ?? id
       }
       self.visionStatus.text = names.isEmpty ? self.visionIdleText : "Vision · " + names.joined(separator: ", ")
     }
@@ -497,21 +500,21 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     CATransaction.commit()
   }
 
-  private func drawDetections(_ detections: [RenderedVision.Detection]) {
+  @discardableResult private func drawDetections(_ detections: [RenderedVision.Detection]) -> [String] {
     let bounds = virtual.bounds
     let path = UIBezierPath()
     // Each catalog ID names one physical object. Keep its strongest observation.
     let current = Dictionary(detections.map { ($0.objectID, $0) }, uniquingKeysWith: {
       $0.confidence >= $1.confidence ? $0 : $1
     }).mapValues { $0.bounds }
+    var confirmedIDs: [String] = []
     for (id, rawBox) in current {
-      var box = rawBox
-      if let previous = previousDetectionBoxes[id] {
-        box = CGRect(x: (previous.minX + rawBox.minX) / 2,
-                     y: (previous.minY + rawBox.minY) / 2,
-                     width: (previous.width + rawBox.width) / 2,
-                     height: (previous.height + rawBox.height) / 2)
-      }
+      guard let previous = previousDetectionBoxes[id] else { continue }
+      let box = CGRect(x: (previous.minX + rawBox.minX) / 2,
+                       y: (previous.minY + rawBox.minY) / 2,
+                       width: (previous.width + rawBox.width) / 2,
+                       height: (previous.height + rawBox.height) / 2)
+      confirmedIDs.append(id)
       path.append(UIBezierPath(roundedRect: CGRect(
         x: box.minX * bounds.width, y: (1 - box.maxY) * bounds.height,
         width: box.width * bounds.width, height: box.height * bounds.height
@@ -524,14 +527,19 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     detectionLayer.frame = bounds
     detectionLayer.path = path.cgPath
     CATransaction.commit()
+    return confirmedIDs
+  }
+
+  private func clearDetections() {
+    if lastDetection != nil { drawDetections([]) }
+    lastDetection = nil
+    visionStatus.text = visionIdleText
   }
 
   private func updateDetectionPose(_ pose: simd_float4x4) {
     currentPose = pose
     if let lastDetection, !isCurrent(lastDetection, comparedWith: pose) {
-      self.lastDetection = nil
-      visionStatus.text = visionIdleText
-      drawDetections([])
+      clearDetections()
     }
   }
 
@@ -658,10 +666,8 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     visionStatus.isHidden = !visible
     if !visible {
       buttons.removeAll()
-      if lastDetection != nil { drawDetections([]) }
-      lastDetection = nil
+      clearDetections()
       currentPose = nil
-      visionStatus.text = visionIdleText
     }
     align.isEnabled = ready || alignment != nil
     toggle.isEnabled = alignment != nil && ready
