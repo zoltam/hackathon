@@ -51,7 +51,7 @@ Do not encode a video just to analyze it: pass sampled renderer frames directly 
 
 Physical movement is handheld VR-style simulation, not recognition/localization in the real boiler room. Keep the real walking area clear, preserve the real-camera switch, and provide a recenter/reposition or virtual-movement option where physical space is insufficient. Virtual obstacles cannot protect the user from real furniture.
 
-Scene preparation and model training run on a Mac. The deployed model runs locally on iPhone. Scripted and physical offline checks used iPhone 15 with iOS 26.5. The reported iPhone 13 issue still needs a device test.
+Scene preparation and model training run on a Mac. The deployed model runs locally on iPhone. Scripted and physical offline checks used iPhone 15 with iOS 26.5. The user reported the app now works on iPhone 13.
 
 ## Four-person ownership
 
@@ -218,7 +218,7 @@ check.
 
 The current builder validates and renders all 1,676,481 Gaussians in Equipment Room.ply. Similarity registration to the reviewed scene yielded a 2.32 cm median nearest-neighbor distance. The navigation grid now uses 126 × 129 cells at 0.10 m resolution in the unchanged registered frame. Measured floor centres and bounded Gaussian footprints provide 3,213 floor cells. At the default 0.10 m virtual-camera radius, 2,106 of 2,130 clearance-valid cells connect to the pump approach (21.06 m²). The 1.55 m obstacle ceiling matches the 1.50 m virtual camera plus margin, not standing-person clearance. The imported route from the entrance to the pump is 31 steps (3.10 m). Eleven rendered-region anchors, including the full reviewed upper aisle, remain connected; real low obstacles stay blocked. Distances assume one reviewed scene unit is one metre.
 
-The generated `assets/valmet/site.json` has 17 reviewed objects. Eleven are the trained detector catalog, comprising five pumps, one inline valve, two control cabinets and three blue actuators. Six surrounding objects have 3D frames for proximity display: a floor fan, carton, platform trolley, rolling chair, jerrycan and storage bin. This is semi-automatic extraction using reviewed seed volumes and quantiles of the supporting Gaussians, not discovery of every object in the room. The bounds were inspected in multiple rendered views. Each record has stable `objectId`, `equipmentType`, metric `bounds` and `supportingSplats`. Keep `objectId` separate from the synthetic workbook's `asset_id`. Only the primary pump has a walkable `service` cell. The detector returns image-space boxes for the 11 catalog IDs. Other catalog boxes are available for proximity and workbook mapping.
+The generated `assets/valmet/site.json` has 17 reviewed objects. Eleven are the trained detector catalog, comprising five pumps, one inline valve, two control cabinets and three blue actuators. Six surrounding objects have 3D frames for proximity display: a floor fan, carton, platform trolley, rolling chair, jerrycan and storage bin. This is semi-automatic extraction using reviewed seed volumes and quantiles of the supporting Gaussians. The bounds were inspected in multiple rendered views. Each record has a stable `objectId`, `equipmentType`, metric `bounds` and `supportingSplats`. The five pumps and inline valve have reachable service viewpoints with the default 0.10 m virtual-camera radius. The detector returns image-space boxes for the 11 catalog IDs. Workbook tags are synthetic and stored separately from scene IDs.
 
 On the 69 held-out walking views, replaying the current workbook filter,
 capture-time geometry check and strongest box per ID gave 147 true positives,
@@ -238,6 +238,10 @@ rendered frames, before the iPhone's two-frame confirmation.
 For P-003, four false positives were boxes on the correct pump with IoU
 0.318–0.496. Five fragments of at most 1,080 pixels had no usable box.
 Confidence was already at least 0.994 for the four misplaced boxes.
+R6 added 80 reviewed wall-pump training views from disjoint camera cells.
+Step 450 improved wall-pump walking validation from 23 TP / 4 FP to
+26 TP / 3 FP, but original-view P-005 went from 16 TP / 0 FP to 14 TP / 2 FP.
+None of the four checkpoints cleared the regression checks. R3 remains deployed.
 
 ## Shared agreements before integration
 
@@ -283,7 +287,13 @@ Confidence was already at least 0.994 for the four misplaced boxes.
   passed the freshness check and 593 showed at least one confirmed box.
   Final cumulative p95 was 9 ms for inference and 122 ms from capture to
   overlay. GPU throughput fell to 25.40 FPS in the last interval. The
-  reported thermal state was 3 throughout. iPhone 13 remains unverified.
+  reported thermal state was 3 throughout. The user reported working
+  operation on iPhone 13. No instrumented iPhone 13 timing was recorded.
+- On the merged build, all six scripted iPhone 15 journeys reached their
+  service cell, confirmed the expected visual target, and loaded the matching
+  workbook report. Routes at the default 0.10 m radius were P-005 3.1 m,
+  P-004 3.2 m, P-003 4.5 m, P-001 4.5 m, P-002 4.0 m, and CV-003 4.1 m.
+  The scan start lacks clearance at 0.20 m and 0.30 m.
 - The iPhone crate test localized two positions from rendered QR corners. It
   blocked the original route, then blocked the active detour and reopened 27
   cells when moved. The test uses a tagged object and a stationary camera

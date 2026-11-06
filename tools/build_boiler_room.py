@@ -6,10 +6,11 @@ from pathlib import Path
 import argparse
 import json
 import hashlib
+import sys
 
 import numpy as np
 
-from scene_equipment import extract_equipment
+from scene_equipment import REVIEWED_APPROACHES, extract_equipment, service_approach
 
 
 # Similarity registration from the reviewed scan into Equipment Room.ply.
@@ -212,6 +213,32 @@ def prepare(source, destination):
         raise ValueError("The pump approach lacks virtual-camera clearance")
     start = min(safe_dist, key=lambda p: ((p[0] - entrance[0]) ** 2 + (p[1] - entrance[1]) ** 2, p))
     opacity = 1 / (1 + np.exp(-values[:, 10]))
+    equipment = extract_equipment(xyz, opacity, cell, service, origin)
+    primary = equipment[0]
+    # The runtime also blocks the reviewed primary pump's catalog footprint.
+    primary_cells = {
+        (x, z)
+        for x in range(primary['x'], primary['x'] + primary['width'])
+        for z in range(primary['z'], primary['z'] + primary['depth'])
+    }
+    route_floor = clearance_floor(walkable - primary_cells, cell, .10)
+    if start not in route_floor:
+        raise ValueError('The start lacks virtual-camera clearance')
+    reachable = distances(start, route_floor)
+    if service not in reachable:
+        raise ValueError('The reviewed pump approach is unreachable')
+    scan_points = xyz[opacity >= .12]
+    for obj in equipment[1:]:
+        if obj['equipmentType'] not in ('pump', 'valve'):
+            continue
+        reviewed = REVIEWED_APPROACHES.get(obj['objectId'])
+        preferred = (tuple(np.floor((origin[[0, 2]] + reviewed) / cell).astype(int).tolist())
+                     if reviewed is not None else None)
+        approach = service_approach(obj['bounds'], reachable, scan_points, cell, CAMERA_HEIGHT, preferred)
+        if approach is not None:
+            obj['service'] = approach
+        else:
+            print(f'No reachable inspection viewpoint for {obj["name"]}', file=sys.stderr)
     model = {
         'name': 'Equipment Room',
         'sourceFile': source.name,
@@ -237,8 +264,8 @@ def prepare(source, destination):
             'connectedClearanceCells': len(safe_dist),
         },
         'originShift': origin.tolist(), 'shRotation': SOURCE_ROTATION.tolist(),
-        'objects': (extract_equipment(xyz, opacity, cell, service, origin)
-                    + extract_surroundings(xyz, opacity, cell, origin)),
+        'primaryServiceObjectId': primary['objectId'],
+        'objects': equipment + extract_surroundings(xyz, opacity, cell, origin),
     }
 
     rgb = .5 + .28209479 * values[:, 7:10]

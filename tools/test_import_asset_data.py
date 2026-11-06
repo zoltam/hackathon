@@ -79,6 +79,19 @@ class ImportTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.run_export()
 
+    def test_primary_service_target_ranks_first_then_stable_ids(self):
+        self.site['objects'] += [
+            dict(objectId='zzz-route', service=[0, 2], equipmentType='pump'),
+            dict(objectId='aaa-route', service=[0, 2], equipmentType='pump'),
+        ]
+        self.assertEqual(list(self.run_export()['mappings'].items()), [
+            ('aaa-route', 'B'), ('grid:1:2:1:1', 'A'),
+        ])
+        self.site['primaryServiceObjectId'] = 'grid:1:2:1:1'
+        self.assertEqual(list(self.run_export()['mappings'].items()), [
+            ('grid:1:2:1:1', 'B'), ('aaa-route', 'A'),
+        ])
+
     def test_objects_without_a_compatible_class_stay_unmapped(self):
         self.site['objects'] += [
             dict(objectId='actuator', equipmentType='actuator'),
