@@ -23,10 +23,10 @@ import UIKit
       guard ARWorldTrackingConfiguration.isSupported else {
         return result(FlutterError(code: "unsupported", message: "AR needs a compatible physical iPhone.", details: nil))
       }
-      let key = registrar.lookupKey(forAsset: "assets/valmet/boiler-room.splats")
+      let key = registrar.lookupKey(forAsset: "assets/valmet/boiler-room-sh.splats")
       guard let path = Bundle.main.path(forResource: key, ofType: nil),
             let points = try? Data(contentsOf: URL(fileURLWithPath: path), options: .mappedIfSafe),
-            !points.isEmpty, points.count.isMultiple(of: 64) else {
+            !points.isEmpty, points.count.isMultiple(of: SplatRenderer.bytesPerSplat) else {
         return result(FlutterError(code: "missing_scan", message: "The boiler room scan is missing.", details: nil))
       }
       guard let renderer = SplatRenderer(data: points, roomSize: SIMD2(Float(model.width), Float(model.depth)) * model.cellSize) else {

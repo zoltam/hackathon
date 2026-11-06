@@ -9,7 +9,7 @@ import json
 import numpy as np
 
 
-def prepare(source, destination):
+def prepare(source, destination, require_complete=False):
     with source.open('rb') as stream:
         header = []
         for line in stream:
@@ -23,22 +23,40 @@ def prepare(source, destination):
         raise ValueError('Expected a little-endian EGS PLY')
     count = int(next(line.split()[-1] for line in header if line.startswith('element vertex ')))
     columns = [line.split()[-1] for line in header if line.startswith('property float ')]
+    keys = ('x', 'y', 'z', 'rot_0', 'rot_1', 'rot_2', 'rot_3', 'f_dc_0', 'f_dc_1', 'f_dc_2',
+            'opacity', 'scale_0', 'scale_1', 'scale_2')
+    if source.stat().st_size != offset + count * len(columns) * 4:
+        raise ValueError('PLY payload size does not match the header')
     raw = np.memmap(source, dtype='<f4', mode='r', offset=offset, shape=(count, len(columns)))
-    keys = ('x', 'y', 'z', 'rot_0', 'rot_1', 'rot_2', 'rot_3', 'f_dc_0', 'f_dc_1', 'f_dc_2', 'opacity', 'scale_0', 'scale_1', 'scale_2')
-    values = raw[:, [columns.index(key) for key in keys]]
-    valid = np.isfinite(values).all(axis=1) & (np.abs(values) < 40).all(axis=1)
-    values = values[valid]
-    values = values[np.abs(np.linalg.norm(values[:, 3:7], axis=1) - 1) < .01]
-    if not len(values):
+    attributes = [columns.index(key) for key in keys]
+    harmonics = [columns.index(f'f_rest_{i}') for i in range(45)]
+    accepted = []
+    for start in range(0, count, 32768):
+        batch = raw[start:start + 32768]
+        with np.errstate(invalid='ignore', over='ignore'):
+            values = batch[:, attributes]
+            valid = np.isfinite(batch).all(axis=1)
+            valid &= (np.abs(values[:, :3]) < 1000).all(axis=1)
+            valid &= (np.abs(np.linalg.norm(values[:, 3:7], axis=1) - 1) < .01)
+            valid &= (np.abs(batch[:, harmonics]) < 10).all(axis=1)
+            valid &= (np.abs(values[:, 7:]) < 40).all(axis=1)
+        if valid.any():
+            accepted.append(batch[valid][:, attributes + harmonics])
+    if not accepted:
         raise ValueError('No valid EGS vertices')
-    # The supplied EGS scan uses y down, with the main floor near y=1.07.
-    crop = np.array([[-5.0, -1.55, -4.0], [4.0, 1.42, -.7]])
-    values = values[((values[:, :3] >= crop[0]) & (values[:, :3] <= crop[1])).all(axis=1)]
-    navigation = (values[:, 1] <= 1.24) & (values[:, 10] >= -2.2)
-    visible = navigation | ((values[:, 1] >= .95) & (values[:, 10] >= -3))
-    values, navigation = values[visible], navigation[visible]
+    values = np.concatenate(accepted)
+    rejected = count - len(values)
+    print(f'{len(values):,}/{count:,} structurally valid vertices. Invalid: {rejected:,}.')
+    if require_complete and rejected:
+        raise ValueError('Full scan requested, but some PLY records failed validation')
+
+    # Keep every valid splat for rendering. Navigation is intentionally
+    # restricted to the observed floor in the calibrated region.
     x, y, z = values[:, :3].T
     xyz = np.stack((x + 5, 1.07 - y, -.7 - z), axis=1)
+    crop = np.array([[-5.0, -1.55, -4.0], [4.0, 1.24, -.7]])
+    navigation = ((values[:, :3] >= crop[0]) & (values[:, :3] <= crop[1])).all(axis=1)
+    navigation &= values[:, 10] >= -2.2
     cell = .25
     width, depth = 36, 14
     grid = np.floor(xyz[:, [0, 2]] / cell).astype(int)
@@ -108,19 +126,26 @@ def prepare(source, destination):
         2*(qx*qy + qz*w), 1 - 2*(qx*qx + qz*qz), 2*(qy*qz - qx*w),
         2*(qx*qz - qy*w), 2*(qy*qz + qx*w), 1 - 2*(qx*qx + qy*qy),
     )).reshape(-1, 3, 3)
-    axes = rotation * np.exp(np.clip(values[:, 11:14], -11, -1))[..., None, :]
+    axes = rotation * np.exp(np.clip(values[:, 11:14], -16, 4))[..., None, :]
     covariance = axes @ np.swapaxes(axes, 1, 2)
-    rgb = np.clip(.5 + .28209479 * values[:, 7:10], 0, 1)
+    rgb = .5 + .28209479 * values[:, 7:10]
     opacity = 1 / (1 + np.exp(-values[:, 10]))
     zero = np.zeros(len(values))
-    points = np.column_stack((
+    fields = np.column_stack((
         xyz, opacity, rgb, zero,
         covariance[:, 0, 0], covariance[:, 0, 1], covariance[:, 0, 2], covariance[:, 1, 1],
         covariance[:, 1, 2], covariance[:, 2, 2], zero, zero,
     )).astype('<f4')
+    # Four aligned float4 fields, followed by 45 channel-major SH
+    # coefficients and 3 padding values stored as half floats.
+    points = np.empty((len(values), 160), dtype=np.uint8)
+    points[:, :64] = fields.view(np.uint8).reshape(len(values), 64)
+    sh = np.zeros((len(values), 48), dtype='<f2')
+    sh[:, :45] = values[:, 14:]
+    points[:, 64:] = sh.view(np.uint8).reshape(len(values), 96)
     destination.mkdir(parents=True, exist_ok=True)
     (destination / 'site.json').write_text(json.dumps(model) + '\n', encoding='utf-8')
-    points.tofile(destination / 'boiler-room.splats')
+    points.tofile(destination / 'boiler-room-sh.splats')
     print(f'{len(points):,} Gaussian splats, {len(best)} walkable cells, {dist[service]} route steps')
 
 
@@ -128,5 +153,10 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('source', type=Path)
     parser.add_argument('--output', type=Path, default=Path('assets/valmet'))
+    parser.add_argument('--require-complete', action='store_true',
+                        help='Reject the source unless every declared vertex validates')
     args = parser.parse_args()
-    prepare(args.source, args.output)
+    try:
+        prepare(args.source, args.output, require_complete=args.require_complete)
+    except ValueError as error:
+        parser.exit(1, f'{error}\n')
