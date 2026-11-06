@@ -2,6 +2,8 @@
 
 Flutter starter for the Valmet hackathon challenge. See [challenge details](challenges.md).
 
+Team coordination: [development plan](PLAN.md) · [full challenge notes and scoring](challenge-shortlist.md).
+
 ## Run on iOS
 
 Use macOS with Flutter and Xcode installed. From the repository root:
