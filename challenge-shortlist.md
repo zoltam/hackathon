@@ -32,7 +32,7 @@ The brief explicitly prefers strong backend/spatial processing with lightweight 
 
 **Select faulty equipment → navigate through the actual scan → see nearby equipment and status → arrive and understand what to inspect next.**
 
-Keep the Flutter/iOS viewer already in the repository. It can show the simulated room using phone motion and guidance overlays. Add automatic avatar/camera playback to fulfil the requested journey and make the demonstration repeatable.
+Keep the Flutter/iOS viewer already in the repository. **Phone movement drives the virtual camera; clean rendered boiler-room frames feed a vision model running on the iPhone; detections are associated with 3D objects and displayed as stable overlays.** The model does not analyze the real room camera feed. Add automatic avatar/camera playback alongside physical movement to fulfil the requested journey and make the demonstration repeatable.
 
 The virtual camera's pose is known in simulation. Overlays in the supplied scene do not establish localization in a real industrial plant. Manual ARKit alignment is not visual recognition of the physical equipment.
 
@@ -40,11 +40,11 @@ The virtual camera's pose is known in simulation. Overlays in the supplied scene
 
 - The challenge permits multiple approaches: geometry/clustering, point-cloud processing, multi-view vision models lifted into 3D, pathfinding, and evidence-grounded AI.
 - Fine-tuning is not required and has no separate scoring category. First build a baseline that extracts persistent 3D assets and completes the service journey.
-- A local vision model may improve equipment labels or segmentation. Two-dimensional image detections must be associated with the 3D scene and combined across views.
+- Live vision inference on iPhone hardware is a team requirement. Start with a compact pretrained model whose export works on the actual phone; then fine-tune if rendered-scene evaluation reveals a useful adaptation target. Two-dimensional detections must be associated with the scene using matching frame-time pose and geometry/depth, and combined across views.
 - No labelled image-training dataset is included in the inspected package. Rendered training images need trustworthy labels and evaluation on distinct viewpoints, not near-duplicates.
 - Geometry-based scene rendering is not trained model inference. Disclose procedural labels, synthetic mapping and pretrained components.
 - A local diagnostic model should retrieve supplied evidence rather than invent device facts or unsupported interventions. Separate observations, hypotheses, confidence and next verification steps.
-- Distinguish local computer processing from on-iPhone inference. Claim offline/phone-only operation only for the parts actually demonstrated with connectivity disabled.
+- Scene preprocessing and training may run on a computer, but deployed vision inference must run on the phone. Sample clean renderer frames before overlays without encoding video; decouple inference from display rendering. Confirm performance with splat rendering and motion tracking running together. Record diagnostic execution location separately and verify offline claims with connectivity disabled.
 
 ## Supplied materials and constraints
 
