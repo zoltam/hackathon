@@ -30,12 +30,18 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
   private let queue: MTLCommandQueue
   private let pipeline: MTLRenderPipelineState
   private let floorPipeline: MTLRenderPipelineState
+  private let routePipeline: MTLRenderPipelineState
+  private let routeBuffer: MTLBuffer?
+  private let routeCount: Int
+  private let routeCellSize: Float
   private let roomSize: SIMD2<Float>
   private let sourceRotation: simd_float3x3
   private let splats: MTLBuffer
   private var sortBuffers: [MTLBuffer] = []
   private var nextBuffer = 0
-  private let inFlight = DispatchSemaphore(value: 3)
+  // Bound GPU queue age so sampled frames stay useful while turning.
+  private static let framesInFlight = 2
+  private let inFlight = DispatchSemaphore(value: SplatRenderer.framesInFlight)
   static let bytesPerSplat = 160
   private let count: Int
   private static let binCount = 2048
@@ -45,7 +51,8 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
   private var pendingFrame: (pose: simd_float4x4, projection: simd_float4x4, timestamp: CFTimeInterval)?
   private var lastDraw: CFTimeInterval = 0
 
-  init?(data: Data, roomSize: SIMD2<Float>, sourceRotation: simd_float3x3) {
+  init?(data: Data, roomSize: SIMD2<Float>, sourceRotation: simd_float3x3,
+        route: [SIMD3<Float>], cellSize: Float) {
     guard let device = MTLCreateSystemDefaultDevice(), let queue = device.makeCommandQueue(),
           let library = try? device.makeLibrary(source: Self.shader, options: nil) else { return nil }
     let format = MTLPixelFormat.bgra8Unorm
@@ -63,13 +70,18 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
     floorDescriptor.vertexFunction = library.makeFunction(name: "floorVertex")
     floorDescriptor.fragmentFunction = library.makeFunction(name: "floorFragment")
     floorDescriptor.colorAttachments[0].pixelFormat = format
-    guard let pipeline = try? device.makeRenderPipelineState(descriptor: descriptor),
+    // The guide shares the splat pass's premultiplied alpha blend.
+    let guideDescriptor = descriptor.copy() as! MTLRenderPipelineDescriptor
+    guideDescriptor.vertexFunction = library.makeFunction(name: "guideVertex")
+    guideDescriptor.fragmentFunction = library.makeFunction(name: "guideFragment")
+    guard let routePipeline = try? device.makeRenderPipelineState(descriptor: guideDescriptor),
+          let pipeline = try? device.makeRenderPipelineState(descriptor: descriptor),
           let floorPipeline = try? device.makeRenderPipelineState(descriptor: floorDescriptor),
           let splats = data.withUnsafeBytes({ bytes in
             bytes.baseAddress.flatMap { device.makeBuffer(bytes: $0, length: bytes.count, options: .storageModeShared) }
           }) else { return nil }
     let count = data.count / Self.bytesPerSplat
-    for _ in 0..<3 {
+    for _ in 0..<Self.framesInFlight {
       guard let buffer = device.makeBuffer(length: count * 4, options: .storageModeShared) else { return nil }
       sortBuffers.append(buffer)
     }
@@ -83,6 +95,17 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
     self.queue = queue
     self.pipeline = pipeline
     self.floorPipeline = floorPipeline
+    self.routePipeline = routePipeline
+    var markers = zip(route, route.dropFirst()).map { start, end in
+      SIMD4(start.x, start.z, end.x - start.x, end.z - start.z)
+    }
+    if let end = route.last { markers.append(SIMD4(end.x, end.z, 0, 0)) }
+    self.routeBuffer = markers.withUnsafeBytes { bytes in
+      guard !bytes.isEmpty, let base = bytes.baseAddress else { return nil }
+      return device.makeBuffer(bytes: base, length: bytes.count, options: .storageModeShared)
+    }
+    self.routeCount = markers.count
+    self.routeCellSize = cellSize
     self.roomSize = roomSize
     self.sourceRotation = sourceRotation
     self.splats = splats
@@ -142,6 +165,23 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
     encoder.endEncoding()
     vision.capture(drawable.texture, command: command,
                    frame: RenderedVision.Frame(pose: pose, timestamp: frame.timestamp))
+    if let routeBuffer {
+      // Draw guidance after the vision readback, using the same camera and drawable.
+      let guidePass = MTLRenderPassDescriptor()
+      let color = guidePass.colorAttachments[0]!
+      color.texture = drawable.texture
+      color.loadAction = .load
+      color.storeAction = .store
+      if let guide = command.makeRenderCommandEncoder(descriptor: guidePass) {
+        var cellSize = routeCellSize
+        guide.setRenderPipelineState(routePipeline)
+        guide.setVertexBuffer(routeBuffer, offset: 0, index: 0)
+        guide.setVertexBytes(&cellSize, length: MemoryLayout<Float>.size, index: 1)
+        guide.setVertexBytes(&uniforms, length: MemoryLayout<Uniforms>.stride, index: 2)
+        guide.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4, instanceCount: routeCount)
+        guide.endEncoding()
+      }
+    }
     command.present(drawable)
     command.addCompletedHandler { [inFlight, frameCounter] completed in
       inFlight.signal()
@@ -217,6 +257,50 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
     float tone = .80 + .16 * floorNoise(p * 1.3) + .10 * floorNoise(p * 12) + .04 * floorNoise(p * 43);
     return float4(float3(.56, .49, .39) * tone, 1);
   }
+  struct GuidePixel {
+    float4 position [[position]];
+    float2 local;
+    uint destination [[flat]];
+  };
+
+  vertex GuidePixel guideVertex(uint corner [[vertex_id]], uint index [[instance_id]],
+                                const device float4 *markers [[buffer(0)]],
+                                constant float &cellSize [[buffer(1)]],
+                                constant Uniforms &u [[buffer(2)]]) {
+    float4 marker = markers[index];
+    bool destination = all(marker.zw == float2(0));
+    float2 forward = destination ? float2(0, 1) : normalize(marker.zw);
+    float2 right = float2(-forward.y, forward.x);
+    float2 local = float2(corner & 1, (corner >> 1) & 1) * 2.0 - 1.0;
+    float2 p = marker.xy + (right * local.x + forward * local.y) * (cellSize * .49);
+    return { u.viewProjection * float4(p.x, .035, p.y, 1), local, uint(destination) };
+  }
+
+  float guideSegment(float2 p, float2 a, float2 b) {
+    float2 edge = b - a;
+    return length(p - a - edge * clamp(dot(p - a, edge) / dot(edge, edge), 0.0, 1.0));
+  }
+
+  fragment float4 guideFragment(GuidePixel in [[stage_in]]) {
+    float2 p = in.local;
+    float distance;
+    float3 ink;
+    if (in.destination != 0) {
+      float radius = length(p);
+      distance = min(abs(radius - .64) - .12, radius - .23);
+      ink = float3(1.0, .80, .31);
+    } else {
+      float2 tip = float2(0, .56);
+      distance = guideSegment(float2(abs(p.x), p.y), tip, float2(.57, -.32)) - .16;
+      ink = float3(.36, 1.0, .77);
+    }
+    float aa = clamp(fwidth(distance), .012, .11);
+    float fill = 1.0 - smoothstep(-aa, aa, distance);
+    float alpha = 1.0 - smoothstep(-aa, aa, distance - .13);
+    float3 outline = float3(.025, .12, .10);
+    return float4(mix(outline * alpha, ink, fill), alpha);
+  }
+
   struct Pixel {
     float4 position [[position]];
     float2 local;

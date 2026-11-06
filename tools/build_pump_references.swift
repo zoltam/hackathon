@@ -44,7 +44,8 @@ precondition(!data.isEmpty && data.count.isMultiple(of: stride))
 let splats = data.withUnsafeBytes { device.makeBuffer(bytes: $0.baseAddress!, length: $0.count)! }
 let count = data.count / stride
 let rows = splats.contents()
-let highQuality = CommandLine.arguments.contains("--detection-dataset-hq")
+let legacyAugmentation = CommandLine.arguments.contains("--legacy-augmentation")
+let highQuality = legacyAugmentation || CommandLine.arguments.contains("--detection-dataset-hq")
 let routeDataset = CommandLine.arguments.contains("--route-dataset")
 let width = routeDataset ? 720 : (highQuality ? 1440 : 820)
 let height = routeDataset ? 1560 : (highQuality ? 960 : 550)
@@ -203,7 +204,7 @@ let trainingEyes: [(String, SIMD3<Float>)] = [
   ("a", SIMD3(5.375, 1.50, 1.875)), ("b", SIMD3(5.125, 1.50, 1.875)),
   ("e", SIMD3(5.420, 1.53, 1.960)),
 ]
-let references = try (routeDataset ? [] : trainingEyes).map { name, eye in
+let references = try (routeDataset || legacyAugmentation ? [] : trainingEyes).map { name, eye in
   let image = render(eye: eye, aim: aim, bounds: target.bounds)
   try image.representation(using: .png, properties: [:])!
     .write(to: assets.appendingPathComponent("pump-reference-\(name).png"), options: .atomic)
@@ -302,11 +303,13 @@ if evaluateCatalog {
 }
 
 if !routeDataset && (highQuality || CommandLine.arguments.contains("--detection-dataset")) {
-  let output = highQuality ? "build/valmet-detection-hq" : "build/valmet-detection"
+  let output = legacyAugmentation ? "build/valmet-legacy-augmentation" :
+    (highQuality ? "build/valmet-detection-hq" : "build/valmet-detection")
   let directory = CommandLine.arguments.first { $0.hasPrefix("--output=") }
     .map { URL(fileURLWithPath: String($0.dropFirst("--output=".count))) } ?? root.appendingPathComponent(output)
   let buffers = annotationBuffers()
-  for (split, samples) in [("train", 18), ("validation", 4), ("test", 4)] {
+  let splits = legacyAugmentation ? [("train", 12)] : [("train", 18), ("validation", 4), ("test", 4)]
+  for (split, samples) in splits {
     let folder = directory.appendingPathComponent(split)
     try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
     var index: [[String: Any]] = []
@@ -316,12 +319,21 @@ if !routeDataset && (highQuality || CommandLine.arguments.contains("--detection-
         let base: SIMD3<Float> = i < 2 ? SIMD3(5.16, 1.50, 1.73) : SIMD3(6.48, 1.50, 1.29)
         // Keep disjoint pose groups for training, validation and final test.
         let zOffset: Float = split == "train" ? 0 : split == "validation" ? 0.26 : -0.30
-        let step = Float(sample)
-        let eye = base + SIMD3(sin(step * 2.40) * 0.25, cos(step * 1.77) * 0.20,
+        let step = Float(sample) + (legacyAugmentation ? 0.5 : 0)
+        let shift: SIMD3<Float> = legacyAugmentation ? SIMD3(-0.15, 0.04, 0.06) : .zero
+        let eye = base + shift + SIMD3(sin(step * 2.40) * 0.25, cos(step * 1.77) * 0.20,
                                sin(step * 1.09) * 0.16 + zOffset)
-        let look = center(of: object) + SIMD3(0, sin(step * 1.6 + Float(i)) * 0.24,
+        var look = center(of: object) + SIMD3(0, sin(step * 1.6 + Float(i)) * 0.24,
                                              cos(step * 2.1 + Float(i)) * 0.26)
-        let name = "\(i)-\(sample).\(highQuality ? "png" : "jpg")"
+        if legacyAugmentation && i < 2 {
+          // Include clipped, recognizable pump views on both sides of the image.
+          let delta = look - (eye + origin)
+          let horizontal = SIMD3(-delta.z, 0, delta.x)
+          let fraction: Float = [0, 0.33, -0.33, 0.52, -0.52, 0.63][sample % 6]
+          look += horizontal * fraction
+        }
+        let prefix = legacyAugmentation ? "legacy-" : ""
+        let name = "\(prefix)\(i)-\(sample).\(highQuality ? "png" : "jpg")"
         var labels: [[String: Any]] = []
         let frame = render(eye: eye, aim: look, masks: buffers) { labels = $0 }
         guard !labels.isEmpty else { continue }

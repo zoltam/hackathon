@@ -1,9 +1,7 @@
 import 'dart:convert';
-import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter/scheduler.dart';
 
 import 'site.dart';
 import 'asset_data.dart';
@@ -100,16 +98,13 @@ class SiteSimulation extends StatefulWidget {
   State<SiteSimulation> createState() => _SiteSimulationState();
 }
 
-class _SiteSimulationState extends State<SiteSimulation>
-    with SingleTickerProviderStateMixin {
+class _SiteSimulationState extends State<SiteSimulation> {
   late final _devices = widget.site.objects
       .where((o) => o.service != null)
       .toList();
   late SiteObject? _target = _devices.firstOrNull;
   late NavigationJourney? _journey = _createJourney();
   List<Cell> get _route => _journey?.route ?? [];
-  late final Ticker _ticker;
-  Duration _lastTick = Duration.zero;
   bool _moved = false;
   bool _keyControls = false;
   late double _clearanceMetres = widget.site.originShift == null ? 0.2 : 0.1;
@@ -126,49 +121,7 @@ class _SiteSimulationState extends State<SiteSimulation>
           );
   }
 
-  @override
-  void initState() {
-    super.initState();
-    _ticker = createTicker((elapsed) {
-      setState(() {
-        _journey?.advance(elapsed - _lastTick);
-        _lastTick = elapsed;
-      });
-      if (_journey?.status != JourneyStatus.playing) _ticker.stop();
-    });
-  }
-
-  void _resetJourney() {
-    _ticker.stop();
-    _journey = _createJourney();
-  }
-
-  void _togglePlayback() {
-    setState(() {
-      if (_journey?.status == JourneyStatus.playing) {
-        _journey?.pause();
-        _ticker.stop();
-      } else {
-        _journey?.play();
-        if (_journey?.status == JourneyStatus.playing) {
-          _lastTick = Duration.zero;
-          _ticker.start();
-        }
-      }
-    });
-  }
-
-  @override
-  void dispose() {
-    _ticker.dispose();
-    super.dispose();
-  }
-
   Future<void> _openWorld() async {
-    setState(() {
-      _journey?.pause();
-      _ticker.stop();
-    });
     final selectedTarget = _target;
     String? report;
     try {
@@ -254,7 +207,7 @@ class _SiteSimulationState extends State<SiteSimulation>
               ? null
               : (target) => setState(() {
                   _target = target;
-                  _resetJourney();
+                  _journey = _createJourney();
                 }),
         ),
         const SizedBox(height: 12),
@@ -281,7 +234,7 @@ class _SiteSimulationState extends State<SiteSimulation>
             if (radius == null) return;
             setState(() {
               _clearanceMetres = radius;
-              _resetJourney();
+              _journey = _createJourney();
             });
           },
         ),
@@ -308,62 +261,13 @@ class _SiteSimulationState extends State<SiteSimulation>
             value: _moved,
             onChanged: (value) => setState(() {
               _moved = value;
-              _resetJourney();
+              _journey = _createJourney();
             }),
           ),
-        ConstrainedBox(
-          constraints: const BoxConstraints(maxHeight: 360),
-          child: AspectRatio(
-            aspectRatio: 1.28,
-            child: CustomPaint(
-              painter: SitePainter(
-                site,
-                _target,
-                _route,
-                _moved,
-                position: _journey?.position,
-              ),
-            ),
-          ),
-        ),
         Text(
           _route.isEmpty
               ? 'No route with ${_clearanceMetres.toStringAsFixed(2)} m clearance to this device.'
               : '${site.metres(_route).toStringAsFixed(1)} m · route with ${_clearanceMetres.toStringAsFixed(2)} m clearance',
-        ),
-        const Text('Automatic route preview · 0.7 m/s'),
-        Row(
-          children: [
-            Expanded(
-              child: FilledButton.icon(
-                onPressed:
-                    _journey == null ||
-                        _route.isEmpty ||
-                        _journey?.status == JourneyStatus.arrived
-                    ? null
-                    : _togglePlayback,
-                icon: Icon(
-                  _journey?.status == JourneyStatus.playing
-                      ? Icons.pause
-                      : Icons.play_arrow,
-                ),
-                label: Text(
-                  _journey?.status == JourneyStatus.playing
-                      ? 'Pause preview'
-                      : 'Play route preview',
-                ),
-              ),
-            ),
-            TextButton(
-              onPressed: () => setState(_resetJourney),
-              child: const Text('Reset'),
-            ),
-          ],
-        ),
-        Text(
-          _journey?.status == JourneyStatus.arrived
-              ? 'At service position · target recognition is checked separately.'
-              : '${(_journey?.remainingMetres ?? 0).toStringAsFixed(1)} m remaining',
         ),
         if (_target case final target?)
           InspectionDetails(
@@ -373,144 +277,4 @@ class _SiteSimulationState extends State<SiteSimulation>
       ],
     );
   }
-}
-
-class SitePainter extends CustomPainter {
-  SitePainter(this.site, this.target, this.route, this.moved, {this.position});
-
-  final Site site;
-  final SiteObject? target;
-  final List<Cell> route;
-  final bool moved;
-  final Point<double>? position;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final unit = min(
-      size.width / (site.width + site.depth + 2),
-      size.height / (0.47 * (site.width + site.depth) + 7),
-    );
-    final origin = Offset(
-      (size.width - unit * (site.width + site.depth)) / 2 + unit * site.depth,
-      size.height / 2 - unit * (site.width + site.depth) * 0.18,
-    );
-    Offset point(num x, num z, [num y = 0]) =>
-        origin +
-        Offset((x - z) * unit, (0.47 * (x + z) - y / site.cellSize) * unit);
-
-    void polygon(List<Offset> points, Color color) {
-      canvas.drawPath(Path()..addPolygon(points, true), Paint()..color = color);
-    }
-
-    const floorColor = Color(0xffdce5e2);
-    polygon([
-      point(0, 0),
-      point(site.width, 0),
-      point(site.width, site.depth),
-      point(0, site.depth),
-    ], site.floor == null ? floorColor : const Color(0xffa7b4b1));
-    for (final (x, z) in site.floor ?? const <Cell>{}) {
-      polygon([
-        point(x, z),
-        point(x + 1, z),
-        point(x + 1, z + 1),
-        point(x, z + 1),
-      ], floorColor);
-    }
-    final grid = Paint()..color = const Color(0x22505858);
-    for (var x = 0; x <= site.width; x++) {
-      canvas.drawLine(point(x, 0), point(x, site.depth), grid);
-    }
-    for (var z = 0; z <= site.depth; z++) {
-      canvas.drawLine(point(0, z), point(site.width, z), grid);
-    }
-    final line = Paint()
-      ..color = const Color(0xff007558)
-      ..strokeCap = StrokeCap.round
-      ..strokeWidth = 3;
-    for (var index = 1; index < route.length; index++) {
-      final (x, z) = route[index - 1];
-      final (nextX, nextZ) = route[index];
-      canvas.drawLine(
-        point(x + 0.5, z + 0.5),
-        point(nextX + 0.5, nextZ + 0.5),
-        line,
-      );
-    }
-
-    final blocks = [
-      for (final object in site.visibleObjects(moved))
-        if (object.cells case final cells?)
-          for (final (x, z) in cells) (object, x, z, x + 1, z + 1)
-        else
-          (
-            object,
-            object.x,
-            object.z,
-            object.x + object.width,
-            object.z + object.depth,
-          ),
-    ]..sort((a, b) => (a.$4 + a.$5).compareTo(b.$4 + b.$5));
-    for (final (object, x, z, right, front) in blocks) {
-      final h = object.height;
-      final color = object == target
-          ? const Color(0xffdf7a20)
-          : object.service != null
-          ? const Color(0xff4c849d)
-          : const Color(0xff758883);
-      polygon([
-        point(right, z),
-        point(right, front),
-        point(right, front, h),
-        point(right, z, h),
-      ], Color.lerp(color, Colors.black, 0.25)!);
-      polygon([
-        point(x, front),
-        point(right, front),
-        point(right, front, h),
-        point(x, front, h),
-      ], Color.lerp(color, Colors.black, 0.40)!);
-      polygon([
-        point(x, z, h),
-        point(right, z, h),
-        point(right, front, h),
-        point(x, front, h),
-      ], color);
-    }
-    if (target case final device?) {
-      final center = point(
-        device.x + device.width / 2,
-        device.z + device.depth / 2,
-        device.height,
-      );
-      canvas.drawCircle(
-        center,
-        9,
-        Paint()
-          ..color = Colors.white
-          ..strokeWidth = 2
-          ..style = PaintingStyle.stroke,
-      );
-    }
-
-    final startX = position == null
-        ? site.start.$1 + 0.5
-        : position!.x / site.cellSize;
-    final startZ = position == null
-        ? site.start.$2 + 0.5
-        : position!.y / site.cellSize;
-    canvas.drawCircle(
-      point(startX, startZ),
-      5,
-      Paint()..color = const Color(0xff173751),
-    );
-  }
-
-  @override
-  bool shouldRepaint(covariant SitePainter oldDelegate) =>
-      site != oldDelegate.site ||
-      target != oldDelegate.target ||
-      route != oldDelegate.route ||
-      moved != oldDelegate.moved ||
-      position != oldDelegate.position;
 }
