@@ -63,7 +63,7 @@ In another terminal, monitor without altering the worker:
 python3 tools/monitor_equipment_training.py --watch --log /tmp/valmet-detector-hq-training.log --trainer /tmp/valmet-train-equipment-monitored
 ```
 
-Train and select on validation, then evaluate the chosen export with `--evaluate-only --split=test`. For intermediate checkpoints, copy the training session directory before using `--checkpoint-dir=<copy> --checkpoint-iteration=<step> --model=<separate-output>` on validation. The monitor can verify the evaluated export with `--expected-sha256 <digest>`. The repository includes the evaluated Core ML detector at `assets/valmet/equipment-detector.mlmodel`, which the iPhone app bundles automatically. The scan, renders and training checkpoints stay local.
+Train and select on validation, then evaluate the chosen export with `--evaluate-only --split=test --model=<candidate>`. Each `VALMET_EVAL` row reports counts for one instance. Training and checkpoint export default to `candidate.mlmodel` inside the dataset; evaluation alone defaults to the bundled detector. For intermediate checkpoints, copy the training session directory before using `--checkpoint-dir=<copy> --checkpoint-iteration=<step> --model=<separate-output>` on validation. The monitor can verify the evaluated export with `--expected-sha256 <digest>`. The repository includes the evaluated Core ML detector at `assets/valmet/equipment-detector.mlmodel`, which the iPhone app bundles automatically. The scan, renders and training checkpoints stay local.
 
 The generated scene JSON also contains reviewed equipment volumes and stable `objectId` values for the workbook and proximity features. See [the scene handoff](PLAN.md#scene-and-equipment-handoff) for coverage and coordinate assumptions.
 
@@ -74,8 +74,14 @@ xcrun devicectl device process launch --device <device> --terminate-existing --c
 xcrun devicectl device process launch --device <device> --terminate-existing --console <bundle-id> -- --benchmark-rendered-vision
 ```
 
-The verification prints image-space boxes for several rendered views. The
-15-second benchmark reports GPU frames, frame rate, inference latency and
+The verification prints image-space boxes for several rendered views. To check
+specific views with the workbook loaded, pass a JSON array after
+`--verify-rendered-vision`. Each entry has an `id`, an `eye` and `look` point in
+registered scene metres, and optional `expectedIDs` and `absentIDs` lists of
+scene object IDs. Each pose logs raw, 3D-matched and confirmed IDs separately.
+The expected and absent lists are checked against confirmed overlays.
+
+The 15-second benchmark reports GPU frames, frame rate, inference latency and
 frame-to-overlay latency. `inference_samples` counts completed predictions,
 `overlay_updates` counts predictions accepted by the frame freshness check,
 and `confirmed_frames` counts accepted predictions that show a box. Report
@@ -95,7 +101,8 @@ xcrun devicectl device process launch --device <device> --terminate-existing --c
 ```
 
 Pass a scene object ID to `dart tools/verify_service_route.dart` to test
-another service target. The app's **Service target** selector offers the five
+another service target. Append two floor-cell coordinates, `start-x start-z`,
+after the ID to test an alternate start. The app's **Service target** selector offers the five
 pumps and inline valve. Their routes are available at the default 0.10 m
 virtual-camera radius.
 

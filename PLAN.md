@@ -218,7 +218,7 @@ check.
 
 The current builder validates and renders all 1,676,481 Gaussians in Equipment Room.ply. Similarity registration to the reviewed scene yielded a 2.32 cm median nearest-neighbor distance. The navigation grid now uses 126 × 129 cells at 0.10 m resolution in the unchanged registered frame. Measured floor centres and bounded Gaussian footprints provide 3,213 floor cells. At the default 0.10 m virtual-camera radius, 2,106 of 2,130 clearance-valid cells connect to the pump approach (21.06 m²). The 1.55 m obstacle ceiling matches the 1.50 m virtual camera plus margin, not standing-person clearance. The imported route from the entrance to the pump is 31 steps (3.10 m). Eleven rendered-region anchors, including the full reviewed upper aisle, remain connected; real low obstacles stay blocked. Distances assume one reviewed scene unit is one metre.
 
-The generated `assets/valmet/site.json` has 17 reviewed objects. Eleven are the trained detector catalog, comprising five pumps, one inline valve, two control cabinets and three blue actuators. Six surrounding objects have 3D frames for proximity display: a floor fan, carton, platform trolley, rolling chair, jerrycan and storage bin. This is semi-automatic extraction using reviewed seed volumes and quantiles of the supporting Gaussians. The bounds were inspected in multiple rendered views. Each record has a stable `objectId`, `equipmentType`, metric `bounds` and `supportingSplats`. The five pumps and inline valve have reachable service viewpoints with the default 0.10 m virtual-camera radius. The detector returns image-space boxes for the 11 catalog IDs. Workbook tags are synthetic and stored separately from scene IDs.
+The generated `assets/valmet/site.json` has 33 reviewed objects. The shipped detector covers 11 IDs: five pumps, one inline valve, two control cabinets and three blue actuators. The other 22 objects have 3D proximity frames, including two red vessels, two orange actuators, a doorway valve, ladders, carts and chairs. New frames use silhouettes reviewed in multiple corrected-scan renders and supporting Gaussians lifted into 3D. Each record has a stable `objectId`, `equipmentType`, metric `bounds` and `supportingSplats`. The original six service viewpoints, navigation grid and packed splats are unchanged. Workbook tags are synthetic and stored separately from scene IDs.
 
 On the 69 held-out walking views, replaying the current workbook filter,
 capture-time geometry check and strongest box per ID gave 147 true positives,
@@ -260,6 +260,25 @@ None of the four checkpoints cleared the regression checks. R3 remains deployed.
 
 ## Brief coverage and device evidence
 
+### All-object recognition milestone
+
+The brief rewards the number of distinctly extracted and framed assets. Our
+target is at least 30 visually verified scene instances in the complete scan.
+Use independent views to check each object's identity and 3D frame. Train on
+RGB renders and report image-only precision and recall per instance at IoU
+0.50 on held-out camera positions, including distance, angle and occlusion.
+Keep source positions disjoint before adding crops. Compare the existing 11
+IDs against the shipping model on the original room and walking test sets.
+Keep the candidate separate until the regression checks pass. Test the final
+iPhone render-to-overlay path, alternate starts and replanning for the six
+workbook-compatible service targets. Add workbook tags only for compatible
+device classes.
+
+The first six-class context candidate reached 93.2% precision and 50.1%
+recall on 177 held-out renders after threshold selection on validation.
+Its recall was too low to replace the bundled detector. The next experiment
+trains one model with the existing 11 IDs and 19 additional instances.
+
 - The supplied DOCX names the original Industrial Boiler Room PLY. In that
   archive 502,482 of 1,506,136 records pass the structural guard. The team uses
   the complete registered Equipment Room replacement. The scene scale remains
@@ -294,6 +313,14 @@ None of the four checkpoints cleared the regression checks. R3 remains deployed.
   workbook report. Routes at the default 0.10 m radius were P-005 3.1 m,
   P-004 3.2 m, P-003 4.5 m, P-001 4.5 m, P-002 4.0 m, and CV-003 4.1 m.
   The scan start lacks clearance at 0.20 m and 0.30 m.
+- The route regression suite covers all six service targets from twelve starts
+  and six replans around a 0.50 m crate. It checks blocked starts and goals,
+  disconnected corridors, route recovery and arrival in the planner.
+- The iPhone 15 passed the P-005 route from cell `[69, 65]` (2.0 m), the
+  P-003 route (4.5 m) and the crate-recovery check with the 33-object scene.
+  A separate fixed-pose check
+  confirmed five of six service targets and rejected the negative view.
+  The wall pump was missed in all eight samples from one fixed approach angle.
 - The iPhone crate test localized two positions from rendered QR corners. It
   blocked the original route, then blocked the active detour and reopened 27
   cells when moved. The test uses a tagged object and a stationary camera
@@ -309,7 +336,7 @@ None of the four checkpoints cleared the regression checks. R3 remains deployed.
 ## Known gaps and decisions
 
 - The full brief favours lightweight UI and backend intelligence. iOS with live on-phone recognition is our chosen product requirement; keep it focused so the scored spatial/data/diagnostic work is delivered.
-- The scene builder uses 17 visually reviewed seed volumes. The fine-tuned detector is limited to these 11 object identities in rendered views.
+- The scene builder uses 33 visually reviewed seed volumes. The shipped detector remains limited to 11 object identities in rendered views until expanded candidates pass the image-only and device checks.
 - The replacement PLY passed structural validation. Recheck registered equipment bounds in the complete scene before publishing detection metrics.
 - Workbook scene coordinates are placeholders. Remap them to extracted objects; the brief explicitly allows procedural/random metadata association.
 - The local workbook contains 4,320 telemetry samples. Its referenced `telemetry_full_14d_30min.csv` is not in the supplied ZIP. Use the included sample unless more data is provided.

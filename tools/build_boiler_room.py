@@ -37,6 +37,22 @@ SURROUNDING_SEEDS = [
     ('rolling-chair', 'Rolling chair', 'chair', (5.70, .005, .62), (6.58, .90, 1.36)),
     ('white-jerrycan', 'White jerrycan', 'container', (5.71, .005, 1.47), (5.97, .29, 1.71)),
     ('black-storage-bin', 'Black storage bin', 'bin', (7.75, .005, -1.78), (8.32, .54, -1.15)),
+    ('rear-leaning-ladder', 'Rear leaning ladder', 'ladder', (7.865, 0.085, -2.465), (8.812, 1.506, -1.928)),
+    ('short-step-ladder', 'Short step ladder', 'ladder', (7.753, 0.058, -1.892), (8.932, 1.254, -1.481)),
+    ('tall-step-ladder', 'Tall step ladder', 'ladder', (7.793, 0.101, -1.381), (8.903, 1.475, -0.955)),
+    ('front-leaning-ladder', 'Front leaning ladder', 'ladder', (8.056, 0.073, -0.893), (8.935, 1.309, -0.477)),
+    ('black-shelf-cart', 'Black shelf cart', 'trolley', (7.635, 0.026, -0.972), (8.051, 1.046, -0.436)),
+    ('silver-platform-cart', 'Silver platform cart', 'trolley', (7.013, 0.002, 1.022), (8.15, 0.872, 1.851)),
+    ('yellow-wheel-hand-truck', 'Yellow-wheel hand truck', 'hand_truck', (6.349, 0.0, 1.073), (6.84, 1.085, 1.376)),
+    ('red-wheel-hand-truck', 'Red-wheel hand truck', 'hand_truck', (5.899, 0.0, 1.272), (6.241, 0.982, 1.498)),
+    ('black-hand-truck', 'Black hand truck', 'hand_truck', (5.865, 0.0, 2.01), (6.491, 1.103, 2.725)),
+    ('green-chair', 'Green swivel chair', 'chair', (5.477, 0.0, -2.289), (6.105, 0.704, -1.57)),
+    ('gray-cleaning-cart', 'Gray wheeled cleaning cart', 'cleaning_cart', (5.739, 0.0, -1.256), (6.501, 0.879, -0.904)),
+    ('rear-red-vessel', 'Rear red pressure vessel', 'vessel', (5.545, 0.371, -3.152), (6.433, 1.445, -2.359)),
+    ('doorway-blue-valve', 'Doorway blue inline valve', 'inline_valve', (5.515, 0.824, 2.385), (5.848, 1.033, 2.735)),
+    ('front-red-vessel', 'Front red vessel', 'vessel', (4.779, 0.0, -3.087), (5.453, 1.407, -2.363)),
+    ('orange-actuator-a', 'Orange actuator A', 'actuator', (4.399, 1.065, -2.418), (4.497, 1.230, -2.169)),
+    ('orange-actuator-b', 'Orange actuator B', 'actuator', (4.544, 1.084, -2.383), (4.644, 1.249, -2.171)),
 ]
 
 

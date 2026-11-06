@@ -8,7 +8,8 @@ import UIKit
     GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
     guard let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "ValmetField") else { return }
     let channel = FlutterMethodChannel(name: "valmet/field", binaryMessenger: registrar.messenger())
-    let open: (String, WorldWalk.VisionMode, @escaping FlutterResult) -> Void = { payload, visionMode, result in
+    let open: (String, WorldWalk.VisionMode, [WorldWalk.VerificationPose]?, @escaping FlutterResult) -> Void = {
+      payload, visionMode, verificationPoses, result in
       guard let host = UIApplication.shared.connectedScenes
         .compactMap({ $0 as? UIWindowScene }).flatMap({ $0.windows })
         .first(where: { $0.isKeyWindow })?.rootViewController,
@@ -36,7 +37,8 @@ import UIKit
       }
       let detectorKey = registrar.lookupKey(forAsset: "assets/valmet/equipment-detector.mlmodel")
       let detectorURL = Bundle.main.url(forResource: detectorKey, withExtension: nil)
-      let camera = WorldWalk(model: model, renderer: renderer, detectorURL: detectorURL, visionMode: visionMode)
+      let camera = WorldWalk(model: model, renderer: renderer, detectorURL: detectorURL,
+                             visionMode: visionMode, verificationPoses: verificationPoses)
       camera.replanRoute = { request, completion in
         channel.invokeMethod("replanServiceRoute", arguments: request, result: completion)
       }
@@ -48,14 +50,30 @@ import UIKit
       guard let payload = call.arguments as? String else {
         return result(FlutterError(code: "invalid_model", message: "Missing 3D model.", details: nil))
       }
-      open(payload, .normal, result)
+      open(payload, .normal, nil, result)
     }
     let arguments = ProcessInfo.processInfo.arguments
     let obstacleArgument = arguments.firstIndex(of: "--verify-obstacle-reroute")
     let journeyArgument = obstacleArgument ?? arguments.firstIndex(of: "--verify-service-journey")
+    let verifyArgument = arguments.firstIndex(of: "--verify-rendered-vision")
     let visionMode: WorldWalk.VisionMode = obstacleArgument != nil ? .obstacle : journeyArgument != nil ? .journey :
       arguments.contains("--benchmark-rendered-vision") ? .benchmark :
-      arguments.contains("--verify-rendered-vision") ? .verify : .normal
+      verifyArgument != nil ? .verify : .normal
+    let verificationPoses: [WorldWalk.VerificationPose]?
+    if visionMode == .verify, let verifyArgument, arguments.indices.contains(verifyArgument + 1),
+       !arguments[verifyArgument + 1].hasPrefix("-") {
+      guard let poses = try? JSONDecoder().decode([WorldWalk.VerificationPose].self,
+          from: Data(arguments[verifyArgument + 1].utf8)),
+          (1...64).contains(poses.count), poses.allSatisfy(\.isValid),
+          Set(poses.map(\.id)).count == poses.count else {
+        print("VALMET_VISION result=failed error=invalid_pose_fixture")
+        fflush(stdout)
+        return
+      }
+      verificationPoses = poses
+    } else {
+      verificationPoses = nil
+    }
     if visionMode != .normal {
       let logPrefix = visionMode == .obstacle ? "VALMET_OBSTACLE" : visionMode == .journey ? "VALMET_JOURNEY" :
         visionMode == .benchmark ? "VALMET_BENCH" : "VALMET_VISION"
@@ -65,7 +83,8 @@ import UIKit
               let data = try? Data(contentsOf: url),
               var site = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
               let start = site["start"] as? [Int], start.count == 2 else {
-          print(visionMode == .verify ? "VALMET_VISION missing scene" : "\(logPrefix) error=missing_scene")
+          print(verificationPoses != nil ? "VALMET_VISION result=failed error=missing_scene" :
+                visionMode == .verify ? "VALMET_VISION missing scene" : "\(logPrefix) error=missing_scene")
           fflush(stdout)
           return
         }
@@ -74,7 +93,7 @@ import UIKit
           guard arguments.indices.contains(journeyArgument + 1),
                 let journey = (try? JSONSerialization.jsonObject(
                   with: Data(arguments[journeyArgument + 1].utf8))) as? [String: Any],
-                let route = journey["route"] as? [[Int]], route.first == start,
+                let route = journey["route"] as? [[Int]], let routeStart = route.first,
                 let id = journey["targetID"] as? String,
                 let objects = site["objects"] as? [[String: Any]],
                 let target = objects.firstIndex(where: { $0["objectId"] as? String == id }),
@@ -93,6 +112,7 @@ import UIKit
             fflush(stdout)
             return
           }
+          site["start"] = routeStart
           site["target"] = target
           site["route"] = route
         } else {
@@ -101,15 +121,17 @@ import UIKit
         }
         func present(_ scene: [String: Any]) {
           guard let data = try? JSONSerialization.data(withJSONObject: scene) else { return }
-          open(String(decoding: data, as: UTF8.self), visionMode) { error in
+          open(String(decoding: data, as: UTF8.self), visionMode, verificationPoses) { error in
             if let error = error as? FlutterError {
-              print(visionMode == .verify ? "VALMET_VISION opening error: \(error.code)" : "\(logPrefix) error=\(error.code)")
+              print(verificationPoses != nil ? "VALMET_VISION result=failed error=\(error.code)" :
+                    visionMode == .verify ? "VALMET_VISION opening error: \(error.code)" : "\(logPrefix) error=\(error.code)")
               fflush(stdout)
             }
           }
         }
-        if visionMode == .journey, var objects = site["objects"] as? [[String: Any]],
-           let target = site["target"] as? Int, let targetID = objects[target]["objectId"] as? String {
+        if visionMode == .journey || verificationPoses != nil,
+           var objects = site["objects"] as? [[String: Any]], let target = site["target"] as? Int,
+           objects.indices.contains(target), let targetID = objects[target]["objectId"] as? String {
           channel.invokeMethod("serviceJourneyEvidence", arguments: [
             "targetID": targetID
           ]) { result in
