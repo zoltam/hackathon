@@ -135,6 +135,24 @@ On the same 88-image held-out test, the baseline produced 423 TP, 189 FP, 147 FN
 
 Model SHA-256: `43bd9f6551bfdb11ee2d9871c3de122e6ec099e4166525d3d5c6d80cc1ccbe91`. Model selection and benchmark commands are in [README](README.md). Synthetic results do not establish generalization to other boiler rooms.
 
+## Equipment Room detector handoff
+
+The complete scan supplies 396 training images, 88 validation images and 88 separate test images. Rendering uses 1440 × 960 lossless frames and derived portrait views within each split. Scene masks yield 2D reference boxes for visible splats within the 11 registered equipment volumes. The detector receives RGB pixels. Its output ID links to the stored 3D volume.
+
+| Export | Validation F1 | Validation pump | Test F1 | Test pump |
+| --- | ---: | ---: | ---: | ---: |
+| First detector, unchanged | 50.08% | 8/16 | 53.18% | 9/18 |
+| Step 150 | 82.17% | 13/16 | | |
+| Step 300, selected | 89.25% | 15/16 | 90.67% | 11/18 |
+| Step 450 | 89.19% | 14/16 | | |
+| Step 600 | 88.91% | 14/16 | | |
+
+At IoU ≥ 0.50 and score ≥ 0.25, test counts changed from 343 TP, 378 FP and 226 FN to 520 TP, 58 FP and 49 FN. The test views are from the same simulated room. The catalog covers 11 mapped equipment instances. Their stored positions are separate from synthetic workbook IDs and from recognition.
+
+The selected local export is `build/valmet-equipment-room/candidate/equipment-detector.mlmodel` (SHA-256 `7e0d9d80c6948ec6f20a9ea0f3513e79cbe091adc0074bd8331ff3775fc4ad68`). The installed app bundles the same bytes. Source PLY SHA-256 is `83d8c7d99316c08c9719cfc2c5a6b9d1903b89847780e2458adc662c79f32955`. Use the local equipment-room dataset and the checkpoint session at `build/valmet-equipment-room/checkpoints-600` to reproduce model selection.
+
+On iPhone 15 (iOS 26.5), the scripted 15-second complete-scan benchmark processed 449 GPU frames (29.93 FPS) and 29 predictions (5 ms median, 8 ms p95). The first detector on the same scan delivered 29.47 FPS and 6/7 ms median/p95. The selected model returned one red-pump box in each of six scripted samples that showed the pump and no detection in the remaining sample. This checks the renderer-to-model path; a person walking the full route is a separate acceptance check.
+
 ## Scene and equipment handoff
 
 The current builder validates and renders all 1,676,481 Gaussians in Equipment Room.ply. Similarity registration to the reviewed scene yielded a 2.32 cm median nearest-neighbor distance. The 51 × 52 grid uses 0.25 model units per cell and has 114 walkable cells connected to the pump approach. The imported route from the entrance to the pump is 11 steps. Distances assume one reviewed scene unit is one metre.
