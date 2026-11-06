@@ -77,6 +77,10 @@ frame-to-overlay latency. `inference_samples` counts completed predictions,
 and `confirmed_frames` counts accepted predictions that show a box. Report
 all three counts and the iPhone/iOS versions when investigating missing
 boxes. The run is invalidated if the app loses foreground focus.
+Append `--benchmark-seconds=90` after `--benchmark-rendered-vision` for a
+sustained check with cumulative counters every 15 seconds. Compare adjacent
+checkpoints to see whether inference, accepted predictions or visible boxes
+stop increasing. The duration is bounded to 15–180 seconds.
 
 To check target confirmation and arrival on the route from the Dart planner, run
 the scripted service journey on the connected phone:

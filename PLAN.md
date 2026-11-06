@@ -235,6 +235,10 @@ rendered frames, before the iPhone's two-frame confirmation.
 | P-005 | Red circulation pump | 67/69 | 0 |
 | CV-003 | Blue inline valve | 7/7 | 0 |
 
+For P-003, four false positives were boxes on the correct pump with IoU
+0.318–0.496. Five fragments of at most 1,080 pixels had no usable box.
+Confidence was already at least 0.994 for the four misplaced boxes.
+
 ## Shared agreements before integration
 
 | Topic | Agreement needed |
@@ -274,6 +278,12 @@ rendered frames, before the iPhone's two-frame confirmation.
   The user confirmed that the X button closes the report and returns to the route.
   The arrival panel places the filled **Open maintenance report** button
   immediately below the arrival message.
+- The 90-second scripted iPhone 15 benchmark completed 2,523 GPU frames
+  (28.03 FPS), with 120 predictions per 15 seconds. All 720 predictions
+  passed the freshness check and 593 showed at least one confirmed box.
+  Final cumulative p95 was 9 ms for inference and 122 ms from capture to
+  overlay. GPU throughput fell to 25.40 FPS in the last interval. The
+  reported thermal state was 3 throughout. iPhone 13 remains unverified.
 - The iPhone crate test localized two positions from rendered QR corners. It
   blocked the original route, then blocked the active detour and reopened 27
   cells when moved. The test uses a tagged object and a stationary camera

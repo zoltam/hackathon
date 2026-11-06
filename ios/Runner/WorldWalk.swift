@@ -128,8 +128,15 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
   private var replanPending = false
   private var replanAfterRetreat = false
   private let moveCrate = UIButton(type: .system)
-  private static let benchmarkDuration: CFTimeInterval = 15
+  private lazy var benchmarkDuration: CFTimeInterval = {
+    let prefix = "--benchmark-seconds="
+    let argument = ProcessInfo.processInfo.arguments.first { $0.hasPrefix(prefix) }
+    let seconds = argument.flatMap { Int($0.dropFirst(prefix.count)) } ?? 15
+    return CFTimeInterval(min(180, max(15, seconds)))
+  }()
   private var benchmarkStart: CFTimeInterval?
+  private var nextBenchmarkCheckpoint: CFTimeInterval = 15
+  private var benchmarkIdleTimerWasDisabled: Bool?
   private var benchmarkLink: CADisplayLink?
   private var benchmarkLatencies: [Int] = []
   private var benchmarkOverlayAges: [Int] = []
@@ -649,7 +656,9 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     visionStatus.isHidden = false
     let start = CACurrentMediaTime()
     benchmarkStart = start
-    renderer.frameCounter = SplatRenderer.FrameCounter(window: start..<(start + Self.benchmarkDuration))
+    benchmarkIdleTimerWasDisabled = UIApplication.shared.isIdleTimerDisabled
+    UIApplication.shared.isIdleTimerDisabled = true
+    renderer.frameCounter = SplatRenderer.FrameCounter(window: start..<(start + benchmarkDuration))
     let link = CADisplayLink(target: self, selector: #selector(benchmarkFrame(_:)))
     benchmarkLink = link
     NotificationCenter.default.addObserver(self, selector: #selector(benchmarkSceneDeactivated(_:)),
@@ -663,41 +672,49 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
 
   private func inBenchmarkWindow(_ time: CFTimeInterval) -> Bool {
     guard let benchmarkStart else { return false }
-    return time >= benchmarkStart && time - benchmarkStart < Self.benchmarkDuration
+    return time >= benchmarkStart && time - benchmarkStart < benchmarkDuration
   }
 
   @objc private func benchmarkFrame(_ link: CADisplayLink) {
     guard let benchmarkStart else { return }
     let elapsed = CACurrentMediaTime() - benchmarkStart
-    if elapsed < Self.benchmarkDuration {
+    if elapsed < benchmarkDuration {
+      if elapsed >= nextBenchmarkCheckpoint {
+        reportBenchmark(frames: renderer.frameCounter?.count ?? 0, elapsed: elapsed, checkpoint: true)
+        nextBenchmarkCheckpoint += 15
+      }
       renderVerificationPose(index: Int(elapsed / 0.72) % 12)
       return
     }
-    reportBenchmark(frames: stopBenchmarkRendering())
+    self.benchmarkStart = nil
+    reportBenchmark(frames: stopBenchmarkRendering(), elapsed: benchmarkDuration)
   }
 
   @discardableResult private func stopBenchmarkRendering() -> Int {
     NotificationCenter.default.removeObserver(self, name: UIScene.willDeactivateNotification, object: nil)
     benchmarkLink?.invalidate()
     benchmarkLink = nil
+    if let idleTimerWasDisabled = benchmarkIdleTimerWasDisabled {
+      UIApplication.shared.isIdleTimerDisabled = idleTimerWasDisabled
+      benchmarkIdleTimerWasDisabled = nil
+    }
     let frames = renderer.frameCounter?.count ?? 0
     renderer.frameCounter = nil
     return frames
   }
 
-  private func reportBenchmark(frames: Int) {
-    guard benchmarkStart != nil else { return }
-    benchmarkStart = nil
+  private func reportBenchmark(frames: Int, elapsed: CFTimeInterval, checkpoint: Bool = false) {
     let samples = benchmarkLatencies.sorted()
     func percentile(_ samples: [Int], _ fraction: Double) -> String {
       guard !samples.isEmpty else { return "na" }
       return String(samples[Int(ceil(Double(samples.count) * fraction)) - 1])
     }
     let overlayAges = benchmarkOverlayAges.sorted()
-    let elapsed = String(format: "%.3f", Self.benchmarkDuration)
-    let fps = String(format: "%.2f", Double(frames) / Self.benchmarkDuration)
+    let seconds = String(format: "%.3f", elapsed)
+    let fps = String(format: "%.2f", Double(frames) / elapsed)
     let thermal = ProcessInfo.processInfo.thermalState.rawValue
-    print("VALMET_BENCH elapsed_s=\(elapsed) gpu_frames=\(frames) fps=\(fps) inference_samples=\(samples.count) p50_ms=\(percentile(samples, 0.50)) p95_ms=\(percentile(samples, 0.95)) overlay_updates=\(overlayAges.count) confirmed_frames=\(benchmarkConfirmedFrames) overlay_p95_ms=\(percentile(overlayAges, 0.95)) thermal_state=\(thermal)")
+    let timeField = checkpoint ? "checkpoint_s" : "elapsed_s"
+    print("VALMET_BENCH \(timeField)=\(seconds) gpu_frames=\(frames) fps=\(fps) inference_samples=\(samples.count) p50_ms=\(percentile(samples, 0.50)) p95_ms=\(percentile(samples, 0.95)) overlay_updates=\(overlayAges.count) confirmed_frames=\(benchmarkConfirmedFrames) overlay_p95_ms=\(percentile(overlayAges, 0.95)) thermal_state=\(thermal)")
     fflush(stdout)
   }
 
