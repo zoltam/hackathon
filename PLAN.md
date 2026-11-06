@@ -271,6 +271,9 @@ rendered frames, before the iPhone's two-frame confirmation.
   an inspection report without a visible close control. The revised UI accepts
   positions within 30 cm on the final route cells and adds a close button to
   the report. The iPhone scripted journey passed again with arrival at 18.69 s.
+  The user confirmed that the X button closes the report and returns to the route.
+  The arrival panel places the filled **Open maintenance report** button
+  immediately below the arrival message.
 - The iPhone crate test localized two positions from rendered QR corners. It
   blocked the original route, then blocked the active detour and reopened 27
   cells when moved. The test uses a tagged object and a stationary camera

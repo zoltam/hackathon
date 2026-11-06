@@ -70,7 +70,13 @@ xcrun devicectl device process launch --device <device> --terminate-existing --c
 xcrun devicectl device process launch --device <device> --terminate-existing --console <bundle-id> -- --benchmark-rendered-vision
 ```
 
-The verification prints image-space boxes for several rendered views. The benchmark prints the number of GPU-completed frames, frame rate, inference latency, and frame-to-overlay latency for a 15-second scripted view sequence. The benchmark is invalidated if the app loses foreground focus.
+The verification prints image-space boxes for several rendered views. The
+15-second benchmark reports GPU frames, frame rate, inference latency and
+frame-to-overlay latency. `inference_samples` counts completed predictions,
+`overlay_updates` counts predictions accepted by the frame freshness check,
+and `confirmed_frames` counts accepted predictions that show a box. Report
+all three counts and the iPhone/iOS versions when investigating missing
+boxes. The run is invalidated if the app loses foreground focus.
 
 To check target confirmation and arrival on the route from the Dart planner, run
 the scripted service journey on the connected phone:
@@ -147,7 +153,7 @@ The scene includes 17 reviewed frames and the bundled detector has 11 classes.
 When the workbook is loaded, yellow boxes are limited to scene objects with a
 compatible workbook tag. The supplied data maps five pumps and one inline valve.
 A box requires two consecutive detections that agree with the mapped 3D bounds.
-At the service point, open **Inspection evidence** for the target.
+At the service point, tap **Open maintenance report** below the arrival message.
 
 To demonstrate a moving obstacle, enable **Movable demo crate** before opening
 the viewer. Align, tap **Place demo crate**, and aim down at its tag. After the

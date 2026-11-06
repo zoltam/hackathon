@@ -133,6 +133,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
   private var benchmarkLink: CADisplayLink?
   private var benchmarkLatencies: [Int] = []
   private var benchmarkOverlayAges: [Int] = []
+  private var benchmarkConfirmedFrames = 0
   private var lastDetection: RenderedVision.Frame?
   private var previousDetectionBoxes: [String: CGRect] = [:]
   private var visionIdleText = "Vision · Loading detector"
@@ -232,6 +233,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
       let confirmedIDs = self.drawDetections(detections)
       if self.visionMode == .benchmark, self.inBenchmarkWindow(CACurrentMediaTime()) {
         self.benchmarkOverlayAges.append(Int((CACurrentMediaTime() - prediction.frame.timestamp) * 1000))
+        if !confirmedIDs.isEmpty { self.benchmarkConfirmedFrames += 1 }
       }
       if self.journeyStart != nil, !self.journeyConfirmedTarget,
          let id = self.serviceTarget?.objectId, confirmedIDs.contains(id) {
@@ -266,8 +268,12 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     close.setTitle("Close", for: .normal)
     close.addTarget(self, action: #selector(closeWalk), for: .touchUpInside)
 
-    inspect.configuration = .tinted()
-    inspect.setTitle("Inspection evidence", for: .normal)
+    var inspectionButton = UIButton.Configuration.filled()
+    inspectionButton.title = "Open maintenance report"
+    inspectionButton.image = UIImage(systemName: "doc.text")
+    inspectionButton.imagePadding = 8
+    inspectionButton.buttonSize = .large
+    inspect.configuration = inspectionButton
     inspect.addTarget(self, action: #selector(showInspection), for: .touchUpInside)
     moveCrate.configuration = .tinted()
     moveCrate.setTitle("Place demo crate", for: .normal)
@@ -276,7 +282,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     row.distribution = .fillEqually
     row.spacing = 8
     movementControls = model.keyControls ? makeControls() : nil
-    let panel = UIStackView(arrangedSubviews: [message, visionStatus, nearbyStatus, movementControls, align, inspect, moveCrate, row].compactMap { $0 })
+    let panel = UIStackView(arrangedSubviews: [message, inspect, visionStatus, nearbyStatus, movementControls, align, moveCrate, row].compactMap { $0 })
     panel.axis = .vertical
     panel.spacing = 8
     panel.isLayoutMarginsRelativeArrangement = true
@@ -691,7 +697,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     let elapsed = String(format: "%.3f", Self.benchmarkDuration)
     let fps = String(format: "%.2f", Double(frames) / Self.benchmarkDuration)
     let thermal = ProcessInfo.processInfo.thermalState.rawValue
-    print("VALMET_BENCH elapsed_s=\(elapsed) gpu_frames=\(frames) fps=\(fps) inference_samples=\(samples.count) p50_ms=\(percentile(samples, 0.50)) p95_ms=\(percentile(samples, 0.95)) overlay_updates=\(overlayAges.count) overlay_p95_ms=\(percentile(overlayAges, 0.95)) thermal_state=\(thermal)")
+    print("VALMET_BENCH elapsed_s=\(elapsed) gpu_frames=\(frames) fps=\(fps) inference_samples=\(samples.count) p50_ms=\(percentile(samples, 0.50)) p95_ms=\(percentile(samples, 0.95)) overlay_updates=\(overlayAges.count) confirmed_frames=\(benchmarkConfirmedFrames) overlay_p95_ms=\(percentile(overlayAges, 0.95)) thermal_state=\(thermal)")
     fflush(stdout)
   }
 
