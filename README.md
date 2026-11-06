@@ -62,3 +62,52 @@ xcrun devicectl device process launch --device <device> --terminate-existing --c
 ```
 
 The verification prints image-space boxes for several rendered views. The benchmark prints the number of GPU-completed frames, frame rate and inference latency for a 15-second scripted view sequence. The benchmark is invalidated if the app loses foreground focus.
+
+## Navigation and inspection evidence (member 2)
+
+The Flutter screen plans four-neighbour routes over the observed floor. The
+**Virtual avatar radius** selector checks clearance against obstacles, unknown
+floor and map boundaries. No route disables walkthrough/playback. The Equipment Room grid opens with a 0.10 m virtual camera radius and supports a 2.75 m route to the pump. The route becomes unavailable at 0.20 m. This radius describes the simulation; clearance for a person requires a calibrated floor and scale.
+
+**Play route preview** animates the map marker at 0.7 m/s, with pause and reset.
+On the iPhone, align first, then use **Play route preview** in the 3D viewer for
+an automatic camera journey. Pause holds the virtual pose. **Show camera** pauses
+playback and returns control to physical tracking. **Reset alignment** lets you align again. Arrival uses horizontal distance to the service point, separately
+from target recognition. The yellow mapped marker is not a vision detection.
+
+Import the supplied workbook after generating `assets/valmet/site.json`:
+
+```sh
+python3 -m pip install -r tools/requirements-data.txt
+python3 tools/import_asset_data.py "/path/to/supplied-workbook.xlsx" \
+  --site assets/valmet/site.json
+```
+
+The importer writes ignored `assets/valmet/asset-data.json`, retaining original
+values, worksheet row references and a workbook SHA-256. It imports the included
+3-day telemetry sample, not the unavailable full telemetry CSV. Original inputs
+can be kept in ignored `sources/valmet/`. Keep source and generated data local.
+
+By default it sorts service-object IDs and associates them with workbook assets
+by increasing health score, breaking ties by asset ID. This is a **synthetic
+association**, not semantic recognition or verified physical identity. Override
+it with `--mapping /path/to/mapping.json`, whose JSON object maps scene
+`object_id` to workbook `asset_id`. Explicit `objectId` or `object_id` values are preferred;
+older objects use `grid:x:z:width:depth`. Regenerate/review the mapping when
+fallback geometry IDs change. Unknown or duplicate IDs are rejected.
+
+The arrival panel and iPhone **Inspection evidence** button show supplied current
+state, latest included telemetry, recent events/work orders, context documents,
+matching historical hypotheses and data-quality flags, all with source references.
+The snapshot date and supplied model confidence stay visible. This is a local,
+deterministic evidence-retrieval baseline; it does not call a generative AI model
+or establish a confirmed cause. Missing records remain explicit. Vision model
+integration belongs to members 1 and 3; changed-obstacle rerouting remains phase 2.
+
+Checks:
+
+```sh
+flutter analyze
+flutter test
+python3 -m unittest discover -s tools -p 'test_*.py'
+```

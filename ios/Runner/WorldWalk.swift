@@ -211,7 +211,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     row.distribution = .fillEqually
     row.spacing = 8
     movementControls = model.keyControls ? makeControls() : nil
-    let panel = UIStackView(arrangedSubviews: [message, visionStatus, movementControls, align, row].compactMap { $0 })
+    let panel = UIStackView(arrangedSubviews: [message, visionStatus, movementControls, align, playback, inspect, row].compactMap { $0 })
     panel.axis = .vertical
     panel.spacing = 8
     panel.isLayoutMarginsRelativeArrangement = true
@@ -472,10 +472,12 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
       floorCells?.contains(cell) != false
   }
 
-  private func arrivalText(at cell: SIMD2<Int>) -> String? {
-    guard let end = model.route.last, cell == SIMD2(end[0], end[1]),
+  private func arrivalText(at position: SIMD4<Float>) -> String? {
+    guard let end = model.route.last,
+          simd_distance(SIMD2(position.x, position.z), SIMD2(model.center(end).x, model.center(end).z))
+            <= (model.arrivalRadiusMetres ?? model.cellSize / 2),
           let index = model.target, model.objects.indices.contains(index) else { return nil }
-    return "At service position · \(model.objects[index].name)"
+    return "\(previewMode ? "Preview at" : "At") service position · \(model.objects[index].name)"
   }
 
   private func isCurrent(_ frame: RenderedVision.Frame, comparedWith pose: simd_float4x4) -> Bool {
@@ -602,8 +604,17 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     if model.keyControls {
       let seconds = Float(min(0.05, max(0, frame.timestamp - (lastFrame ?? frame.timestamp))))
       lastFrame = frame.timestamp
-      if showModel { move(motions: buttons.union(keys.values), seconds: seconds, pose: pose) }
+      if showModel && !previewMode { move(motions: buttons.union(keys.values), seconds: seconds, pose: pose) }
       pose.columns.3 = SIMD4(manualPosition.x, manualPosition.y, manualPosition.z, 1)
+    }
+    if previewMode {
+      if playbackRunning, let last = previousFrameTime {
+        playbackDistance = min(model.routeLength,
+          playbackDistance + Float(max(0, min(frame.timestamp - last, 0.1))) * 0.7)
+        if playbackDistance >= model.routeLength { playbackRunning = false }
+      }
+      previousFrameTime = frame.timestamp
+      pose = model.playbackPose(distance: playbackDistance) ?? pose
     }
     let size = virtual.bounds.size
     if showModel, size.width > 0, size.height > 0 {
@@ -615,9 +626,11 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     }
     let position = pose.columns.3
     let cell = cellAt(x: position.x, z: position.z)
+    arrived = false
     if !isWalkable(cell) {
       updateDisplay("Outside the model’s walkable area. Return to the route or show the camera.")
-    } else if let arrival = arrivalText(at: cell) {
+    } else if let arrival = arrivalText(at: position) {
+      arrived = true
       updateDisplay(arrival)
     } else {
       updateDisplay(model.name + (previewMode ? " · Automatic route preview" :
@@ -674,7 +687,11 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
   private func updateDisplay(_ text: String) {
     let visible = ready && showModel && alignment != nil
     virtual.isHidden = !visible
-    movementControls?.isHidden = !visible
+    movementControls?.isHidden = !visible || previewMode
+    playback.isHidden = !visible || model.route.count < 2
+    playback.setTitle(playbackRunning ? "Pause route preview" :
+      (playbackDistance >= model.routeLength ? "Replay route preview" : "Play route preview"), for: .normal)
+    inspect.isHidden = !visible || !arrived
     visionStatus.isHidden = !visible
     if !visible {
       buttons.removeAll()
@@ -695,7 +712,11 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
 
   @objc private func toggleView() {
     showModel.toggle()
-    if !showModel { playbackRunning = false; previousFrameTime = nil }
+    if !showModel {
+      previewMode = false
+      playbackRunning = false
+      previousFrameTime = nil
+    }
     updateDisplay(lastMessage ?? model.name)
   }
 

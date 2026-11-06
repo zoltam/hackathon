@@ -19,7 +19,7 @@ SHEETS = (
 
 
 def object_id(obj):
-    return obj.get('object_id') or 'grid:{x}:{z}:{width}:{depth}'.format(**obj)
+    return obj.get('objectId') or obj.get('object_id') or 'grid:{x}:{z}:{width}:{depth}'.format(**obj)
 
 
 def export(workbook, site, mappings=None):

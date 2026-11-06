@@ -7,8 +7,8 @@ import 'package:flutter/scheduler.dart';
 
 import 'site.dart';
 import 'asset_data.dart';
-import 'navigation.dart';
 import 'inspection_details.dart';
+import 'navigation.dart';
 
 void main() => runApp(const ValmetApp());
 
@@ -112,6 +112,7 @@ class _SiteSimulationState extends State<SiteSimulation>
   Duration _lastTick = Duration.zero;
   bool _moved = false;
   bool _keyControls = false;
+  late double _clearanceMetres = widget.site.originShift == null ? 0.2 : 0.1;
 
   NavigationJourney? _createJourney() {
     final target = _target;
@@ -254,6 +255,25 @@ class _SiteSimulationState extends State<SiteSimulation>
           subtitle: const Text('Use ↑/↓ to move. Turn by rotating the phone.'),
           value: _keyControls,
           onChanged: (value) => setState(() => _keyControls = value),
+        ),
+        DropdownButtonFormField<double>(
+          initialValue: _clearanceMetres,
+          decoration: const InputDecoration(labelText: 'Virtual avatar radius'),
+          items: const [
+            DropdownMenuItem(
+              value: 0.1,
+              child: Text('0.10 m · virtual camera'),
+            ),
+            DropdownMenuItem(value: 0.2, child: Text('0.20 m · avatar')),
+            DropdownMenuItem(value: 0.3, child: Text('0.30 m · avatar')),
+          ],
+          onChanged: (radius) {
+            if (radius == null) return;
+            setState(() {
+              _clearanceMetres = radius;
+              _resetJourney();
+            });
+          },
         ),
         FilledButton.icon(
           onPressed: _route.isEmpty ? null : _openWorld,
