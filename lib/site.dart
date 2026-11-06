@@ -12,6 +12,7 @@ Cell _cell(Object? value) {
 class SiteObject {
   SiteObject(Map<String, dynamic> json)
     : name = json['name'] as String,
+      objectId = json['objectId'] as String?,
       x = json['x'] as int,
       z = json['z'] as int,
       width = json['width'] as int,
@@ -19,14 +20,17 @@ class SiteObject {
       height = (json['height'] as num).toDouble(),
       movable = json['movable'] == true,
       cells = (json['cells'] as List?)?.map(_cell).toList(),
+      bounds = json['bounds'] as List?,
       service = json['service'] == null ? null : _cell(json['service']);
 
   final String name;
+  final String? objectId;
   final int x, z, width, depth;
   final double height;
   final bool movable;
   final Cell? service;
   final List<Cell>? cells;
+  final List<dynamic>? bounds;
 
   Iterable<Cell> get footprint sync* {
     if (cells case final cells?) {

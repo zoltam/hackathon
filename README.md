@@ -26,6 +26,10 @@ The iPhone demo loads the organizer-provided Industrial Boiler Room scan. From t
 
 ```sh
 python3 tools/build_boiler_room.py "/path/to/Industrial Boiler Room.ply"
+swiftc -O tools/build_pump_references.swift -o /tmp/valmet-pump-references
+/tmp/valmet-pump-references
 ```
 
 The importer reports how many EGS vertices validate against the PLY layout. Use `--require-complete` to reject any partial scan. It renders every valid splat with its anisotropic covariance, opacity, and degree-3 view-dependent color. The navigation crop does not limit the rendered geometry. A neutral floor surface fills missing scan coverage beneath the scanned room. It does not add walkable cells. The importer estimates the walkable floor and chooses a demo inspection target from observed geometry. The scan's scale is assumed to be metres. Keep the original and generated assets local unless public redistribution is authorized. A manually aligned model does not detect differences between virtual and physical obstacles.
+
+The single-target verifier requires iOS 17 or later. It compares the rendered pixels in the mapped red circulation pump’s projected region with three locally rendered reference views using Apple Vision feature prints. The yellow box is shown only after a visual match. The route and arrival use the separately mapped walkable approach. References stay local with the scan.

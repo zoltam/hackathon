@@ -8,9 +8,11 @@ let assumedPhoneHeight: Float = 1.50
 struct WalkSite: Decodable {
   struct Block: Decodable {
     let name: String
+    let objectId: String?
     let x, z, width, depth: Int
     let height: CGFloat
     let cells: [[Int]]?
+    let bounds: [[Float]]?
   }
 
   let name: String
@@ -58,6 +60,10 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
   private let visionStatus = UILabel()
   private let verifyVision: Bool
   private var verificationFrames = 0
+  private var lastTargetMatch: CFTimeInterval?
+  private var targetBounds: PumpBounds?
+  private var targetName: String?
+  private var targetID: String?
   private let align = UIButton(type: .system)
   private let toggle = UIButton(type: .system)
   private var alignment: WorldAlignment?
@@ -79,6 +85,12 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     self.model = model
     self.renderer = renderer
     self.verifyVision = verifyVision
+    if let index = model.target, model.objects.indices.contains(index) {
+      let target = model.objects[index]
+      targetBounds = target.bounds.flatMap(PumpBounds.init)
+      targetName = target.name
+      targetID = target.objectId
+    }
     super.init(nibName: nil, bundle: nil)
   }
 
@@ -121,13 +133,14 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     visionStatus.isHidden = true
     renderer.vision.onPrediction = { [weak self] prediction in
       guard let self, self.view.window != nil, !self.virtual.isHidden else { return }
+      self.lastTargetMatch = prediction.matched ? prediction.frame.timestamp : nil
       if self.verifyVision {
-        print("VALMET_VISION ts=\(prediction.frame.timestamp) x=\(prediction.frame.pose.columns.3.x) label=\(prediction.label) confidence=\(prediction.confidence) ms=\(prediction.inferenceMilliseconds)")
+        print("VALMET_VISION sample=\(self.verificationFrames) object=\(prediction.matched ? self.targetID ?? "none" : "none") ts=\(prediction.frame.timestamp) x=\(prediction.frame.pose.columns.3.x) matched=\(prediction.matched) distance=\(prediction.distance) red=\(prediction.redFraction) ms=\(prediction.inferenceMilliseconds)")
         fflush(stdout)
         self.verificationFrames += 1
       }
       guard CACurrentMediaTime() - prediction.frame.timestamp < 2 else { return }
-      self.visionStatus.text = "Scene classification · \(prediction.label)"
+      self.visionStatus.text = prediction.matched ? "Vision matched · \(self.targetName ?? "Target")" : "Vision · Searching for the target"
       self.visionStatus.isHidden = false
     }
     align.configuration = .filled()
@@ -188,17 +201,19 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
   // Repeatable device smoke check. Uses the normal renderer and model,
   // with synthetic camera poses instead of requiring a person to walk.
   private func verifyRenderedFrame(index: Int) {
-    guard view.window != nil, verificationFrames < 3, index < 12 else { return }
+    guard view.window != nil, verificationFrames < 7, index < 12 else { return }
     virtual.isHidden = false
     let size = virtual.bounds.size
     if size.width > 0, size.height > 0 {
-      let eye = model.center(model.start, height: assumedPhoneHeight) + SIMD3(Float(index) * 0.02, 0, 0)
-      let heading = initialForward
-      let yaw = atan2(-heading.x, -heading.z) + 0.15 + Float(index) * 0.035
-      let rotation = simd_quatf(angle: yaw, axis: SIMD3(0, 1, 0)) *
-        simd_quatf(angle: -0.18, axis: SIMD3(1, 0, 0))
-      var pose = simd_float4x4(rotation)
-      pose.columns.3 = SIMD4(eye.x, eye.y, eye.z, 1)
+      let eye = index == 5 ? SIMD3<Float>(4.625, 1.50, 1.625) :
+        SIMD3<Float>(5.385 - Float(index % 3) * 0.08, 1.50, 1.88 + Float(index % 2) * 0.06)
+      let look: SIMD3<Float> = index == 2 ? SIMD3(6.90, 1.15, 2.43) :
+        index == 3 ? SIMD3(3.0, 1.15, 1.875) : SIMD3(5.943, 1.164, 2.447)
+      let back = simd_normalize(eye - look)
+      let right = simd_normalize(simd_cross(SIMD3(0, 1, 0), back))
+      let up = simd_cross(back, right)
+      func vector(_ p: SIMD3<Float>, _ w: Float) -> SIMD4<Float> { SIMD4(p.x, p.y, p.z, w) }
+      let pose = simd_float4x4(columns: (vector(right, 0), vector(up, 0), vector(back, 0), vector(eye, 1)))
       let n: Float = 0.04, f: Float = 40, zoom: Float = 1.4
       let projection = simd_float4x4(columns: (
         SIMD4(zoom / Float(size.width / size.height), 0, 0, 0), SIMD4(0, zoom, 0, 0),
@@ -206,7 +221,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
       ))
       renderer.render(pose: pose, projection: projection)
     }
-    DispatchQueue.main.asyncAfter(deadline: .now() + 0.65) { [weak self] in
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.72) { [weak self] in
       self?.verifyRenderedFrame(index: index + 1)
     }
   }
@@ -341,16 +356,12 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     }
 
     let ring = UIBezierPath()
-    if let index = model.target, model.objects.indices.contains(index) {
-      let target = model.objects[index]
-      let position = SIMD3(
-        (Float(target.x) + Float(target.width) / 2) * model.cellSize,
-        Float(target.height),
-        (Float(target.z) + Float(target.depth) / 2) * model.cellSize
-      )
-      if let point = project(position) {
-        ring.addArc(withCenter: point, radius: 17, startAngle: 0, endAngle: 2 * .pi, clockwise: true)
-      }
+    if let match = lastTargetMatch, CACurrentMediaTime() - match < 1.2,
+       let region = targetBounds?.region(transform: transform) {
+      ring.append(UIBezierPath(roundedRect: CGRect(
+        x: region.minX * bounds.width, y: (1 - region.maxY) * bounds.height,
+        width: region.width * bounds.width, height: region.height * bounds.height
+      ), cornerRadius: 6))
     }
     CATransaction.begin()
     CATransaction.setDisableActions(true)
@@ -459,6 +470,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     if !visible {
       buttons.removeAll()
       visionStatus.isHidden = true
+      lastTargetMatch = nil
     }
     align.isEnabled = ready || alignment != nil
     toggle.isEnabled = alignment != nil && ready
