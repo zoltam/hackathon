@@ -92,7 +92,7 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
     let size = view.bounds.size
     guard size.width > 0, size.height > 0,
           inFlight.wait(timeout: .now()) == .success else { return }
-    let ratio = min(view.contentScaleFactor, 900 / max(size.width, size.height))
+    let ratio = min(view.contentScaleFactor, 1200 / max(size.width, size.height))
     let dimensions = CGSize(width: (size.width * ratio).rounded(), height: (size.height * ratio).rounded())
     if view.drawableSize != dimensions { view.drawableSize = dimensions }
     guard let pass = view.currentRenderPassDescriptor, let drawable = view.currentDrawable,
