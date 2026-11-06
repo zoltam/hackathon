@@ -34,7 +34,7 @@ class FieldScreen extends StatefulWidget {
 
 class _FieldScreenState extends State<FieldScreen> {
   late final _site = rootBundle
-      .loadString('assets/site.json')
+      .loadString('assets/valmet/site.json')
       .then(Site.fromJson);
   static const _ar = MethodChannel('valmet/field');
 
@@ -63,7 +63,9 @@ class _FieldScreenState extends State<FieldScreen> {
                 builder: (context, snapshot) {
                   if (snapshot.hasError) {
                     return const Center(
-                      child: Text('Could not read the site model.'),
+                      child: Text(
+                        'Industrial Boiler Room scan is missing. Prepare the Valmet PLY before building.',
+                      ),
                     );
                   }
                   final site = snapshot.data;

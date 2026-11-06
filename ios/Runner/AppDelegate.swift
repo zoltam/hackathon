@@ -25,7 +25,13 @@ import UIKit
               let model = try? JSONDecoder().decode(WalkSite.self, from: Data(payload.utf8)) else {
           return result(FlutterError(code: "invalid_model", message: "Could not open this 3D model.", details: nil))
         }
-        camera = WorldWalk(model: model)
+        let key = registrar.lookupKey(forAsset: "assets/valmet/boiler-room.bin")
+        guard let path = Bundle.main.path(forResource: key, ofType: nil),
+              let points = try? Data(contentsOf: URL(fileURLWithPath: path), options: .mappedIfSafe),
+              !points.isEmpty, points.count.isMultiple(of: 28) else {
+          return result(FlutterError(code: "missing_scan", message: "The boiler room scan is missing.", details: nil))
+        }
+        camera = WorldWalk(model: model, points: points)
       } else {
         camera = RouteCamera()
       }

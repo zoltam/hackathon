@@ -4,7 +4,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:valmet_field_app/site.dart';
 
 void main() {
-  final site = Site.fromJson(File('assets/site.json').readAsStringSync());
+  final site = Site.fromJson(
+    File('test/fixtures/site.json').readAsStringSync(),
+  );
 
   test('finds the shortest legal detour around the partition and pallet', () {
     final goal = site.objects
