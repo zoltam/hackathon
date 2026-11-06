@@ -96,10 +96,7 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
     self.pipeline = pipeline
     self.floorPipeline = floorPipeline
     self.routePipeline = routePipeline
-    var markers = zip(route, route.dropFirst()).map { start, end in
-      SIMD4(start.x, start.z, end.x - start.x, end.z - start.z)
-    }
-    if let end = route.last { markers.append(SIMD4(end.x, end.z, 0, 0)) }
+    let markers = Self.guideMarkers(for: route, cellSize: cellSize)
     self.routeBuffer = markers.withUnsafeBytes { bytes in
       guard !bytes.isEmpty, let base = bytes.baseAddress else { return nil }
       return device.makeBuffer(bytes: base, length: bytes.count, options: .storageModeShared)
@@ -192,6 +189,52 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
     command.commit()
   }
 
+  static func guideMarkers(for route: [SIMD3<Float>], cellSize: Float) -> [SIMD4<Float>] {
+    guard let end = route.last, cellSize > 0 else { return [] }
+    let points = route.map { SIMD2($0.x, $0.z) }
+    var path: [SIMD2<Float>] = []
+    var arrows: [SIMD4<Float>] = []
+    for index in points.indices.dropLast() {
+      let point = points[index]
+      let outgoing = points[index + 1] - point
+      var arrowPosition = point
+      var direction = outgoing
+      if index > 0 {
+        let incoming = point - points[index - 1]
+        // Round a grid corner inside its own cell, tangent to both straight legs.
+        if simd_length_squared(incoming) > 0, simd_length_squared(outgoing) > 0,
+           abs(simd_dot(incoming, outgoing)) < cellSize * cellSize * 0.01 {
+          let entry = point - incoming * 0.43
+          let exit = point + outgoing * 0.43
+          for step in 0...8 {
+            let t = Float(step) / 8
+            let s = 1 - t
+            path.append(entry * (s * s) + point * (2 * s * t) + exit * (t * t))
+          }
+          arrowPosition = (entry + point * 2 + exit) / 4
+          direction = exit - entry
+        } else {
+          path.append(point)
+        }
+      } else {
+        path.append(point)
+      }
+      arrows.append(SIMD4(arrowPosition.x, arrowPosition.y, atan2(direction.y, direction.x), 0))
+    }
+    path.append(SIMD2(end.x, end.z))
+    // The final component selects the marker: positive ribbon length, zero arrow, negative ring.
+    var markers: [SIMD4<Float>] = zip(path, path.dropFirst()).compactMap { start, end in
+      let delta = end - start
+      let length = simd_length(delta)
+      guard length > 0 else { return nil }
+      let center = (start + end) / 2
+      return SIMD4(center.x, center.y, atan2(delta.y, delta.x), length / cellSize)
+    }
+    markers += arrows
+    markers.append(SIMD4(end.x, end.z, 0, -1))
+    return markers
+  }
+
   private func sort(pose: simd_float4x4, into buffer: MTLBuffer) -> Int {
     let back = pose.columns.2, origin = pose.columns.3
     let eye = SIMD3(origin.x, origin.y, origin.z)
@@ -260,7 +303,7 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
   struct GuidePixel {
     float4 position [[position]];
     float2 local;
-    uint destination [[flat]];
+    float ribbonLength [[flat]];
   };
 
   vertex GuidePixel guideVertex(uint corner [[vertex_id]], uint index [[instance_id]],
@@ -268,12 +311,14 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
                                 constant float &cellSize [[buffer(1)]],
                                 constant Uniforms &u [[buffer(2)]]) {
     float4 marker = markers[index];
-    bool destination = all(marker.zw == float2(0));
-    float2 forward = destination ? float2(0, 1) : normalize(marker.zw);
+    float2 forward = float2(cos(marker.z), sin(marker.z));
     float2 right = float2(-forward.y, forward.x);
     float2 local = float2(corner & 1, (corner >> 1) & 1) * 2.0 - 1.0;
-    float2 p = marker.xy + (right * local.x + forward * local.y) * (cellSize * .49);
-    return { u.viewProjection * float4(p.x, .035, p.y, 1), local, uint(destination) };
+    float2 extent = marker.w > 0 ? float2(.11, marker.w * .5 + .11) : float2(.43);
+    float2 offset = local * extent;
+    float2 p = marker.xy + (right * offset.x + forward * offset.y) * cellSize;
+    return { u.viewProjection * float4(p.x, .035, p.y, 1),
+             marker.w > 0 ? offset : local, marker.w };
   }
 
   float guideSegment(float2 p, float2 a, float2 b) {
@@ -285,18 +330,25 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
     float2 p = in.local;
     float distance;
     float3 ink;
-    if (in.destination != 0) {
+    float border = .12;
+    if (in.ribbonLength > 0) {
+      distance = length(float2(p.x, max(abs(p.y) - in.ribbonLength * .5, 0.0))) - .036;
+      ink = float3(.27, .78, .64);
+      float aa = clamp(fwidth(distance), .005, .018);
+      float alpha = 1.0 - smoothstep(-aa, aa, distance);
+      return float4(ink * alpha, alpha);
+    } else if (in.ribbonLength < 0) {
       float radius = length(p);
       distance = min(abs(radius - .64) - .12, radius - .23);
       ink = float3(1.0, .80, .31);
     } else {
-      float2 tip = float2(0, .56);
-      distance = guideSegment(float2(abs(p.x), p.y), tip, float2(.57, -.32)) - .16;
+      float2 tip = float2(0, .62);
+      distance = guideSegment(float2(abs(p.x), p.y), tip, float2(.59, -.30)) - .17;
       ink = float3(.36, 1.0, .77);
     }
-    float aa = clamp(fwidth(distance), .012, .11);
+    float aa = clamp(fwidth(distance), .005, border);
     float fill = 1.0 - smoothstep(-aa, aa, distance);
-    float alpha = 1.0 - smoothstep(-aa, aa, distance - .13);
+    float alpha = 1.0 - smoothstep(-aa, aa, distance - border);
     float3 outline = float3(.025, .12, .10);
     return float4(mix(outline * alpha, ink, fill), alpha);
   }
