@@ -63,12 +63,11 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
   private var ready = false
   private var lastMessage: String?
   private var floorCells: Set<SIMD2<Int>>?
-  private enum Motion: Hashable { case forward, backward, left, right }
+  private enum Motion: Hashable { case forward, backward }
   private var keys: [UIKeyboardHIDUsage: Motion] = [:]
   private var buttons = Set<Motion>()
+  private var movementControls: UIView?
   private var manualPosition = SIMD3<Float>.zero
-  private var manualYaw: Float = 0
-  private var displayLink: CADisplayLink?
   private var lastFrame: CFTimeInterval?
 
   override var canBecomeFirstResponder: Bool { model.keyControls }
@@ -84,8 +83,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
   override func viewDidLoad() {
     super.viewDidLoad()
     view.backgroundColor = .black
-    let previews: [UIView] = model.keyControls ? [virtual] : [reality, virtual]
-    for preview in previews {
+    for preview in [reality, virtual] {
       preview.translatesAutoresizingMaskIntoConstraints = false
       view.addSubview(preview)
       NSLayoutConstraint.activate([
@@ -95,10 +93,8 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
         preview.trailingAnchor.constraint(equalTo: view.trailingAnchor),
       ])
     }
-    if !model.keyControls {
-      reality.session.delegate = self
-      reality.session.delegateQueue = .main
-    }
+    reality.session.delegate = self
+    reality.session.delegateQueue = .main
     floorCells = model.floor.map { Set($0.map { SIMD2($0[0], $0[1]) }) }
     for (layer, color, width) in [
       (routeLayer, UIColor.systemMint, CGFloat(4)),
@@ -129,8 +125,8 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     let row = UIStackView(arrangedSubviews: [toggle, close])
     row.distribution = .fillEqually
     row.spacing = 8
-    let panel = UIStackView(arrangedSubviews: model.keyControls
-      ? [message, makeControls(), close] : [message, align, row])
+    movementControls = model.keyControls ? makeControls() : nil
+    let panel = UIStackView(arrangedSubviews: [message, movementControls, align, row].compactMap { $0 })
     panel.axis = .vertical
     panel.spacing = 8
     panel.isLayoutMarginsRelativeArrangement = true
@@ -144,26 +140,12 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
       panel.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -12),
       panel.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -10),
     ])
-    if model.keyControls {
-      manualPosition = model.center(model.start, height: assumedPhoneHeight)
-      let forward = initialForward
-      manualYaw = atan2(-forward.x, -forward.z)
-      updateDisplay("WASD or arrows · Move and turn")
-    } else {
-      updateDisplay("Hold the phone steady while tracking starts.")
-    }
+    updateDisplay("Hold the phone steady while tracking starts.")
   }
 
   override func viewDidAppear(_ animated: Bool) {
     super.viewDidAppear(animated)
-    if model.keyControls {
-      becomeFirstResponder()
-      let link = CADisplayLink(target: self, selector: #selector(stepManual))
-      link.preferredFramesPerSecond = 30
-      link.add(to: .main, forMode: .common)
-      displayLink = link
-      return
-    }
+    if model.keyControls { becomeFirstResponder() }
     guard !requestedCamera else { return }
     requestedCamera = true
     AVCaptureDevice.requestAccess(for: .video) { [weak self] allowed in
@@ -182,8 +164,6 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
 
   override func viewWillDisappear(_ animated: Bool) {
     super.viewWillDisappear(animated)
-    displayLink?.invalidate()
-    displayLink = nil
     lastFrame = nil
     keys.removeAll()
     buttons.removeAll()
@@ -198,8 +178,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     row.spacing = 8
     row.distribution = .fillEqually
     let controls: [(Motion, String, String)] = [
-      (.left, "arrow.left", "Turn left"), (.forward, "arrow.up", "Move forward"),
-      (.backward, "arrow.down", "Move backward"), (.right, "arrow.right", "Turn right"),
+      (.forward, "arrow.up", "Move forward"), (.backward, "arrow.down", "Move backward"),
     ]
     for (motion, symbol, title) in controls {
       let button = UIButton(type: .system)
@@ -212,7 +191,10 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
       button.addAction(UIAction { [weak self] _ in self?.buttons.remove(motion) },
                        for: [.touchUpInside, .touchUpOutside, .touchCancel])
       button.addAction(UIAction { [weak self] _ in
-        if UIAccessibility.isVoiceOverRunning { self?.move(motions: [motion], seconds: 0.2) }
+        if UIAccessibility.isVoiceOverRunning, let self, self.ready, self.showModel,
+           let frame = self.reality.session.currentFrame, let alignment = self.alignment {
+          self.move(motions: [motion], seconds: 0.12, pose: alignment.modelPose(frame.camera.transform))
+        }
       }, for: .primaryActionTriggered)
       row.addArrangedSubview(button)
     }
@@ -221,10 +203,8 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
 
   private func motion(for usage: UIKeyboardHIDUsage) -> Motion? {
     switch usage {
-    case .keyboardW, .keyboardUpArrow: return .forward
-    case .keyboardS, .keyboardDownArrow: return .backward
-    case .keyboardA, .keyboardLeftArrow: return .left
-    case .keyboardD, .keyboardRightArrow: return .right
+    case .keyboardUpArrow: return .forward
+    case .keyboardDownArrow: return .backward
     default: return nil
     }
   }
@@ -262,38 +242,18 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     if !unhandled.isEmpty { super.pressesCancelled(unhandled, with: event) }
   }
 
-  private func move(motions: Set<Motion>, seconds: Float) {
-    func axis(_ positive: Motion, _ negative: Motion) -> Float {
-      (motions.contains(positive) ? 1 : 0) - (motions.contains(negative) ? 1 : 0)
-    }
-    manualYaw += axis(.left, .right) * seconds * 1.65
-    let step = axis(.forward, .backward) * seconds * 1.2
-    let x = manualPosition.x - sin(manualYaw) * step
-    let z = manualPosition.z - cos(manualYaw) * step
+  private func move(motions: Set<Motion>, seconds: Float, pose: simd_float4x4) {
+    let direction: Float = (motions.contains(.forward) ? 1 : 0) -
+      (motions.contains(.backward) ? 1 : 0)
+    guard direction != 0 else { return }
+    let back = pose.columns.2
+    let heading = SIMD2(-back.x, -back.z)
+    guard simd_length(heading) > 0.1 else { return }
+    let offset = simd_normalize(heading) * (direction * seconds * 1.2)
+    let x = manualPosition.x + offset.x
+    let z = manualPosition.z + offset.y
     if isWalkable(cellAt(x: x, z: manualPosition.z)) { manualPosition.x = x }
     if isWalkable(cellAt(x: manualPosition.x, z: z)) { manualPosition.z = z }
-  }
-
-  @objc private func stepManual(_ link: CADisplayLink) {
-    let seconds = Float(min(0.05, max(0, link.timestamp - (lastFrame ?? link.timestamp))))
-    lastFrame = link.timestamp
-    move(motions: buttons.union(keys.values), seconds: seconds)
-
-    let size = virtual.bounds.size
-    guard size.width > 0, size.height > 0 else { return }
-    let yaw = simd_quatf(angle: manualYaw, axis: SIMD3(0, 1, 0))
-    let pitch = simd_quatf(angle: -0.16, axis: SIMD3(1, 0, 0))
-    var pose = simd_float4x4(yaw * pitch)
-    pose.columns.3 = SIMD4(manualPosition.x, manualPosition.y, manualPosition.z, 1)
-    let zoom: Float = 1.35, near: Float = 0.04, far: Float = 40
-    let projection = simd_float4x4(columns: (
-      SIMD4(zoom / Float(size.width / size.height), 0, 0, 0), SIMD4(0, zoom, 0, 0),
-      SIMD4(0, 0, far / (near - far), -1), SIMD4(0, 0, near * far / (near - far), 0)
-    ))
-    renderer.render(pose: pose, projection: projection)
-    drawGuide(projection * pose.inverse)
-    let cell = cellAt(x: manualPosition.x, z: manualPosition.z)
-    updateDisplay(arrivalText(at: cell) ?? "WASD or arrows · Move and turn")
   }
 
   private func cellAt(x: Float, z: Float) -> SIMD2<Int> {
@@ -356,6 +316,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     if alignment != nil {
       alignment = nil
       showModel = false
+      lastFrame = nil
       updateDisplay("Stand at your start, hold the phone upright and face the first direction of the route.")
       return
     }
@@ -377,6 +338,8 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
       modelStart: start,
       modelForward: forward
     )
+    manualPosition = model.center(model.start, height: assumedPhoneHeight)
+    lastFrame = nil
     showModel = true
     updatePose(frame)
   }
@@ -385,6 +348,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     guard case .normal = frame.camera.trackingState else {
       if ready {
         ready = false
+        lastFrame = nil
         updateDisplay("Tracking paused. Hold still and point at recognizable features.")
       }
       return
@@ -401,7 +365,13 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
   private func updatePose(_ frame: ARFrame) {
     guard let alignment else { return }
     let orientation = view.window?.windowScene?.interfaceOrientation ?? .portrait
-    let pose = alignment.modelPose(frame.camera.viewMatrix(for: orientation).inverse)
+    var pose = alignment.modelPose(frame.camera.viewMatrix(for: orientation).inverse)
+    if model.keyControls {
+      let seconds = Float(min(0.05, max(0, frame.timestamp - (lastFrame ?? frame.timestamp))))
+      lastFrame = frame.timestamp
+      if showModel { move(motions: buttons.union(keys.values), seconds: seconds, pose: pose) }
+      pose.columns.3 = SIMD4(manualPosition.x, manualPosition.y, manualPosition.z, 1)
+    }
     let size = virtual.bounds.size
     if showModel, size.width > 0, size.height > 0 {
       virtual.isHidden = false
@@ -434,8 +404,10 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
   }
 
   private func updateDisplay(_ text: String) {
-    let visible = model.keyControls || (ready && showModel && alignment != nil)
+    let visible = ready && showModel && alignment != nil
     virtual.isHidden = !visible
+    movementControls?.isHidden = !visible
+    if !visible { buttons.removeAll() }
     align.isEnabled = ready || alignment != nil
     toggle.isEnabled = alignment != nil && ready
     align.setTitle(alignment == nil ? "Set start and direction" : "Reset alignment", for: .normal)
@@ -452,7 +424,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
   }
 
   @objc private func closeWalk() {
-    if !model.keyControls { reality.session.pause() }
+    reality.session.pause()
     dismiss(animated: true)
   }
 }

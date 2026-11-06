@@ -32,9 +32,11 @@ def prepare(source, destination):
     if not len(values):
         raise ValueError('No valid EGS vertices')
     # The supplied EGS scan uses y down, with the main floor near y=1.07.
-    crop = np.array([[-5.0, -1.55, -4.0], [4.0, 1.24, -.7]])
+    crop = np.array([[-5.0, -1.55, -4.0], [4.0, 1.42, -.7]])
     values = values[((values[:, :3] >= crop[0]) & (values[:, :3] <= crop[1])).all(axis=1)]
-    values = values[values[:, 10] >= -2.2]
+    navigation = (values[:, 1] <= 1.24) & (values[:, 10] >= -2.2)
+    visible = navigation | ((values[:, 1] >= .95) & (values[:, 10] >= -3))
+    values, navigation = values[visible], navigation[visible]
     x, y, z = values[:, :3].T
     xyz = np.stack((x + 5, 1.07 - y, -.7 - z), axis=1)
     cell = .25
@@ -43,7 +45,7 @@ def prepare(source, destination):
     grid = np.clip(grid, [0, 0], [width - 1, depth - 1])
 
     def counts(mask):
-        return Counter(map(tuple, grid[mask].tolist()))
+        return Counter(map(tuple, grid[mask & navigation].tolist()))
 
     occupied = {p for p, n in counts((xyz[:, 1] >= .17) & (xyz[:, 1] <= 1.8)).items() if n >= 20}
     # Add a small horizontal margin around dense obstacle points.

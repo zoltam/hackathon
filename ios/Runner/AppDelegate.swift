@@ -20,7 +20,7 @@ import UIKit
             let model = try? JSONDecoder().decode(WalkSite.self, from: Data(payload.utf8)) else {
         return result(FlutterError(code: "invalid_model", message: "Could not open this 3D model.", details: nil))
       }
-      guard model.keyControls || ARWorldTrackingConfiguration.isSupported else {
+      guard ARWorldTrackingConfiguration.isSupported else {
         return result(FlutterError(code: "unsupported", message: "AR needs a compatible physical iPhone.", details: nil))
       }
       let key = registrar.lookupKey(forAsset: "assets/valmet/boiler-room.splats")
@@ -29,7 +29,7 @@ import UIKit
             !points.isEmpty, points.count.isMultiple(of: 64) else {
         return result(FlutterError(code: "missing_scan", message: "The boiler room scan is missing.", details: nil))
       }
-      guard let renderer = SplatRenderer(data: points) else {
+      guard let renderer = SplatRenderer(data: points, roomSize: SIMD2(Float(model.width), Float(model.depth)) * model.cellSize) else {
         return result(FlutterError(code: "metal", message: "Could not start the 3D renderer.", details: nil))
       }
       let camera = WorldWalk(model: model, renderer: renderer)

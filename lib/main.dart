@@ -170,8 +170,8 @@ class _SiteSimulationState extends State<SiteSimulation> {
         Text('Settings', style: Theme.of(context).textTheme.titleMedium),
         SwitchListTile(
           contentPadding: EdgeInsets.zero,
-          title: const Text('Keyboard and screen controls'),
-          subtitle: const Text('Use WASD, arrow keys or on-screen buttons'),
+          title: const Text('Forward and backward controls'),
+          subtitle: const Text('Use ↑/↓ to move. Turn by rotating the phone.'),
           value: _keyControls,
           onChanged: (value) => setState(() => _keyControls = value),
         ),
