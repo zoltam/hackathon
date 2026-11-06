@@ -25,6 +25,9 @@ Future<AssetData?> _loadAssetData([
 
 void main() => runApp(const ValmetApp());
 
+String? _workbookTag(SiteObject object, AssetData? data) =>
+    data?.tagForObject(object.objectId, equipmentType: object.equipmentType);
+
 class ValmetApp extends StatelessWidget {
   const ValmetApp({super.key, this.site});
 
@@ -71,13 +74,28 @@ class _FieldScreenState extends State<FieldScreen> {
     if (call.method == 'serviceJourneyEvidence') {
       final request = call.arguments as Map<Object?, Object?>;
       final data = await _loadAssetData();
-      final target = data?.forObject(request['targetID'] as String);
+      final site = widget.site ?? await _site;
+      final targetId = request['targetID'] as String;
+      final object = site.objects
+          .where((object) => object.objectId == targetId)
+          .singleOrNull;
+      final target = object == null
+          ? null
+          : data?.forObject(targetId, equipmentType: object.equipmentType);
       return {
         'inspectionReport': target?.reportText,
         'inspectionSummary': target?.arrivalSummary,
+        'hasWorkbook': data != null,
+        'tags': {
+          for (final object in site.objects)
+            object.objectId: _workbookTag(object, data),
+        },
         'conditions': {
-          for (final id in (request['objectIDs'] as List).cast<String>())
-            id: data?.conditionForObject(id),
+          for (final object in site.objects)
+            object.objectId: data?.conditionForObject(
+              object.objectId,
+              equipmentType: object.equipmentType,
+            ),
         },
       };
     }
@@ -178,6 +196,7 @@ class SiteSimulation extends StatefulWidget {
 }
 
 class _SiteSimulationState extends State<SiteSimulation> {
+  late final _assetData = _loadAssetData(widget.loadAssetData);
   late final _devices = widget.site.objects
       .where((o) => o.service != null)
       .toList();
@@ -203,8 +222,13 @@ class _SiteSimulationState extends State<SiteSimulation> {
 
   Future<void> _openWorld() async {
     final selectedTarget = _target;
-    final data = await _loadAssetData(widget.loadAssetData);
-    final diagnosis = data?.forObject(selectedTarget?.objectId ?? '');
+    final data = await _assetData;
+    final diagnosis = selectedTarget == null
+        ? null
+        : data?.forObject(
+            selectedTarget.objectId,
+            equipmentType: selectedTarget.equipmentType,
+          );
     if (!mounted || selectedTarget != _target) return;
     final site = widget.site;
     final visible = site.visibleObjects(_moved).toList();
@@ -216,6 +240,7 @@ class _SiteSimulationState extends State<SiteSimulation> {
       jsonEncode({
         'inspectionReport': diagnosis?.reportText,
         'inspectionSummary': diagnosis?.arrivalSummary,
+        'hasWorkbook': data != null,
         'name': site.name,
         'keyControls': _keyControls,
         'obstacleDemo': _obstacleDemo && _route.isNotEmpty,
@@ -249,7 +274,11 @@ class _SiteSimulationState extends State<SiteSimulation> {
               'cells': object.cells?.map(pair).toList(),
               'bounds': object.bounds,
               'service': object.service == null ? null : pair(object.service!),
-              'syntheticCondition': data?.conditionForObject(object.objectId),
+              'workbookTag': _workbookTag(object, data),
+              'syntheticCondition': data?.conditionForObject(
+                object.objectId,
+                equipmentType: object.equipmentType,
+              ),
             },
         ],
       }),
@@ -264,19 +293,28 @@ class _SiteSimulationState extends State<SiteSimulation> {
       children: [
         Text(site.name, style: Theme.of(context).textTheme.titleLarge),
         const SizedBox(height: 12),
-        DropdownButtonFormField<SiteObject>(
-          initialValue: _target,
-          decoration: const InputDecoration(labelText: 'Service target'),
-          items: [
-            for (final device in _devices)
-              DropdownMenuItem(value: device, child: Text(device.name)),
-          ],
-          onChanged: _devices.isEmpty
-              ? null
-              : (target) => setState(() {
-                  _target = target;
-                  _journey = _createJourney();
-                }),
+        FutureBuilder<AssetData?>(
+          future: _assetData,
+          builder: (context, snapshot) => DropdownButtonFormField<SiteObject>(
+            initialValue: _target,
+            decoration: const InputDecoration(labelText: 'Service target'),
+            items: [
+              for (final device in _devices)
+                DropdownMenuItem(
+                  value: device,
+                  child: Text(switch (_workbookTag(device, snapshot.data)) {
+                    final String tag => '$tag · ${device.name}',
+                    null => device.name,
+                  }),
+                ),
+            ],
+            onChanged: _devices.isEmpty
+                ? null
+                : (target) => setState(() {
+                    _target = target;
+                    _journey = _createJourney();
+                  }),
+          ),
         ),
         const SizedBox(height: 12),
         Text('Settings', style: Theme.of(context).textTheme.titleMedium),
@@ -350,6 +388,7 @@ class _SiteSimulationState extends State<SiteSimulation> {
         if (_target case final target?)
           InspectionDetails(
             objectId: target.objectId,
+            equipmentType: target.equipmentType,
             arrived: _journey?.status == JourneyStatus.arrived,
           ),
       ],

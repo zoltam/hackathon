@@ -7,9 +7,11 @@ class InspectionDetails extends StatefulWidget {
   const InspectionDetails({
     super.key,
     required this.objectId,
+    required this.equipmentType,
     required this.arrived,
   });
   final String objectId;
+  final String equipmentType;
   final bool arrived;
 
   @override
@@ -31,7 +33,10 @@ class _InspectionDetailsState extends State<InspectionDetails> {
         );
       }
       if (!snapshot.hasData) return const SizedBox.shrink();
-      final diagnosis = snapshot.data!.forObject(widget.objectId);
+      final diagnosis = snapshot.data!.forObject(
+        widget.objectId,
+        equipmentType: widget.equipmentType,
+      );
       if (diagnosis == null) {
         return const Text('No workbook asset is mapped to this scene object.');
       }

@@ -111,16 +111,19 @@ import UIKit
         if visionMode == .journey, var objects = site["objects"] as? [[String: Any]],
            let target = site["target"] as? Int, let targetID = objects[target]["objectId"] as? String {
           channel.invokeMethod("serviceJourneyEvidence", arguments: [
-            "targetID": targetID, "objectIDs": objects.compactMap { $0["objectId"] as? String }
+            "targetID": targetID
           ]) { result in
             if let evidence = result as? [String: Any] {
               let conditions = evidence["conditions"] as? [String: Any] ?? [:]
+              let tags = evidence["tags"] as? [String: Any] ?? [:]
               for index in objects.indices {
                 if let id = objects[index]["objectId"] as? String {
                   objects[index]["syntheticCondition"] = conditions[id] as? String
+                  objects[index]["workbookTag"] = tags[id] as? String
                 }
               }
               site["objects"] = objects
+              site["hasWorkbook"] = evidence["hasWorkbook"] as? Bool
               site["inspectionReport"] = evidence["inspectionReport"] as? String
               site["inspectionSummary"] = evidence["inspectionSummary"] as? String
             }

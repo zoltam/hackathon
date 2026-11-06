@@ -80,23 +80,39 @@ class AssetData {
     'Current_State',
   ).where((r) => r['asset_id'] == assetId).singleOrNull;
 
-  String? conditionForObject(String objectId) {
-    final assetId = (_json['mappings'] as RecordData)[objectId];
-    if (assetId == null) return null;
-    final condition = _currentState(assetId)?['condition_state'];
-    return condition is String && condition.isNotEmpty
-        ? '$assetId · $condition'
-        : null;
-  }
-
-  AssetDiagnosis? forObject(String objectId) {
+  RecordData? _assetForObject(String objectId, String? equipmentType) {
     final assetId = (_json['mappings'] as RecordData)[objectId];
     if (assetId == null) return null;
     final asset = _rows(
       'Asset_Master',
     ).where((r) => r['asset_id'] == assetId).singleOrNull;
+    final compatible = switch (equipmentType) {
+      null => true,
+      'pump' => asset?['asset_class'] == 'PROCESS_PUMP',
+      'valve' => asset?['asset_class'] == 'CONTROL_VALVE',
+      _ => false,
+    };
+    return compatible ? asset : null;
+  }
+
+  String? tagForObject(String objectId, {required String equipmentType}) {
+    final tag = _assetForObject(objectId, equipmentType)?['tag'];
+    return tag is String && tag.isNotEmpty ? tag : null;
+  }
+
+  String? conditionForObject(String objectId, {String? equipmentType}) {
+    final assetId = _assetForObject(objectId, equipmentType)?['asset_id'];
+    if (assetId == null) return null;
+    final condition = _currentState(assetId)?['condition_state'];
+    return condition is String && condition.isNotEmpty ? condition : null;
+  }
+
+  AssetDiagnosis? forObject(String objectId, {String? equipmentType}) {
+    final asset = _assetForObject(objectId, equipmentType);
+    if (asset == null) return null;
+    final assetId = asset['asset_id'] as Object;
     final state = _currentState(assetId);
-    if (asset == null || state == null) return null;
+    if (state == null) return null;
 
     List<RecordData> latest(String name, String time) {
       final rows = _rows(name).where((r) => r['asset_id'] == assetId).toList();

@@ -104,6 +104,22 @@ void main() {
     expect(data.forObject('unknown'), isNull);
   });
 
+  test('uses the exact workbook tag only for a compatible scene class', () {
+    final json = bundle();
+    final tables = json['tables'] as Map;
+    final asset = (tables['Asset_Master'] as List).single as Map;
+    asset['tag'] = 'P-005';
+    asset['asset_class'] = 'PROCESS_PUMP';
+    final data = AssetData.fromJson(jsonEncode(json));
+
+    expect(data.tagForObject('object-1', equipmentType: 'pump'), 'P-005');
+    expect(data.forObject('object-1', equipmentType: 'pump')?.tag, 'P-005');
+    expect(data.conditionForObject('object-1', equipmentType: 'pump'), 'watch');
+    expect(data.tagForObject('object-1', equipmentType: 'valve'), isNull);
+    expect(data.forObject('object-1', equipmentType: 'valve'), isNull);
+    expect(data.conditionForObject('object-1', equipmentType: 'valve'), isNull);
+  });
+
   test('missing evidence is explicit and confidence is not manufactured', () {
     final json = jsonDecode(jsonEncode(bundle())) as Map<String, dynamic>;
     final tables = json['tables'] as Map;

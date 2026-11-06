@@ -21,11 +21,12 @@ class ImportTests(unittest.TestCase):
     def setUp(self):
         self.book = Book({name: Sheet([('asset_id',)]) for name in SHEETS})
         self.book['Asset_Master'] = Sheet([
-            ('asset_id', 'tag'), ('A', 'TEST-A'), ('B', 'TEST-B')])
+            ('asset_id', 'asset_class'), ('A', 'PROCESS_PUMP'), ('B', 'PROCESS_PUMP'),
+            ('C', 'CONTROL_VALVE')])
         self.book['Current_State'] = Sheet([
-            ('asset_id', 'health_score'), ('A', 80), ('B', 40)])
+            ('asset_id', 'health_score'), ('A', 80), ('B', 40), ('C', 20)])
         self.site = {'objects': [dict(name='Test', x=1, z=2, width=1,
-                                     depth=1, service=[0, 2])]}
+                                     depth=1, service=[0, 2], equipmentType='pump')]}
 
     def run_export(self, mapping=None, *, include_nearby=False):
         with tempfile.TemporaryDirectory() as temp:
@@ -38,7 +39,7 @@ class ImportTests(unittest.TestCase):
         result = self.run_export()
         self.assertEqual(result, self.run_export())
         self.assertEqual(result['mappings'], {'grid:1:2:1:1': 'B'})
-        self.assertEqual(result['mappingMethod'], 'synthetic_ranked')
+        self.assertEqual(result['mappingMethod'], 'synthetic_class_ranked')
         self.assertEqual(result['tables']['Current_State'][0]['_source'], 'Current_State!2')
         self.assertTrue(result['synthetic'])
 
@@ -51,10 +52,14 @@ class ImportTests(unittest.TestCase):
             self.run_export({'unknown-object': 'A'})
 
     def test_nearby_mapping_preserves_the_service_target_rank(self):
-        self.site['objects'].append(dict(objectId='aaa-nearby'))
+        self.site['objects'] += [
+            dict(objectId='aaa-nearby', equipmentType='pump'),
+            dict(objectId='bbb-nearby', equipmentType='valve'),
+            dict(objectId='ccc-nearby', equipmentType='pump'),
+        ]
         self.assertEqual(self.run_export()['mappings'], {'grid:1:2:1:1': 'B'})
         self.assertEqual(self.run_export(include_nearby=True)['mappings'], {
-            'grid:1:2:1:1': 'B', 'aaa-nearby': 'A',
+            'grid:1:2:1:1': 'B', 'aaa-nearby': 'A', 'bbb-nearby': 'C',
         })
         with self.assertRaises(ValueError):
             self.run_export({'aaa-nearby': 'A'})
@@ -70,16 +75,13 @@ class ImportTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.run_export()
 
-    def test_surrounding_objects_do_not_shift_existing_mappings(self):
-        self.site['objects'].append(dict(objectId='zz-equipment'))
-        before = self.run_export(include_nearby=True)['mappings']
-        self.site['objects'].append(dict(objectId='aaa-carton', detectorEnabled=False))
-        self.book['Asset_Master'] = Sheet([
-            ('asset_id', 'tag'), ('A', 'TEST-A'), ('B', 'TEST-B'), ('C', 'TEST-C')])
-        self.book['Current_State'] = Sheet([
-            ('asset_id', 'health_score'), ('A', 80), ('B', 40), ('C', 95)])
-        after = self.run_export(include_nearby=True)['mappings']
-        self.assertEqual(after, {**before, 'aaa-carton': 'C'})
+    def test_objects_without_a_compatible_class_stay_unmapped(self):
+        self.site['objects'] += [
+            dict(objectId='actuator', equipmentType='actuator'),
+            dict(objectId='carton', equipmentType='carton', detectorEnabled=False),
+        ]
+        self.assertEqual(self.run_export(include_nearby=True)['mappings'],
+                         {'grid:1:2:1:1': 'B'})
 
 
 if __name__ == '__main__':

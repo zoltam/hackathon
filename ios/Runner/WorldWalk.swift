@@ -13,8 +13,13 @@ struct WalkSite: Decodable {
     let height: CGFloat
     let cells: [[Int]]?
     let bounds: [[Float]]?
+    let workbookTag: String?
     let syntheticCondition: String?
     let service: [Int]?
+
+    var displayName: String {
+      workbookTag.map { "\($0) · \(name)" } ?? name
+    }
 
     func floorBounds(cellSize: Float) -> (min: SIMD2<Float>, max: SIMD2<Float>) {
       if let bounds, bounds.count == 2, bounds.allSatisfy({ $0.count == 3 }),
@@ -28,6 +33,7 @@ struct WalkSite: Decodable {
   }
 
   let name: String
+  let hasWorkbook: Bool?
   let keyControls: Bool
   let obstacleDemo: Bool?
   let moved: Bool?
@@ -102,6 +108,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
   private var previousObstacleCenter: SIMD2<Float>?
   private var plannedObstacleCenter: SIMD2<Float>?
   private var obstacleStage = 0
+  private var firstObstacleTestCenter: SIMD2<Float>?
   private var obstacleTestCenter: SIMD2<Float>?
   private var confirmedBlockedCells = Set<[Int]>()
   private var obstacleConfirmed = false
@@ -204,6 +211,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
       let viewProjection = prediction.frame.projection * prediction.frame.pose.inverse
       let detections = prediction.detections.filter { detection in
         guard let object = self.model.objects.first(where: { $0.objectId == detection.objectID }) else { return false }
+        guard self.model.hasWorkbook != true || object.workbookTag != nil else { return false }
         guard let bounds = object.bounds else { return true }
         return RenderedVision.matches(detection, to: bounds, viewProjection: viewProjection)
       }
@@ -230,7 +238,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
         self.verificationFrames += 1
       }
       let names = confirmedIDs.sorted().map { id in
-        self.model.objects.first { $0.objectId == id }?.name ?? id
+        self.model.objects.first { $0.objectId == id }?.displayName ?? id
       }
       self.visionStatus.text = names.isEmpty ? self.visionIdleText : "Vision · " + names.joined(separator: ", ")
     }
@@ -373,6 +381,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     let index = min(Int((1.10 / model.cellSize).rounded()), model.route.count - 2)
     let center = model.center(model.route[index])
     obstacleTestCenter = SIMD2(center.x, center.z)
+    firstObstacleTestCenter = obstacleTestCenter
     obstacleStart = CACurrentMediaTime()
     print("VALMET_OBSTACLE phase=initial_route cells=\(model.route.count)")
     fflush(stdout)
@@ -393,7 +402,9 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
       print("VALMET_OBSTACLE phase=placed stage=\(obstacleStage + 1)")
       fflush(stdout)
     }
-    let eye = model.center(model.start, height: assumedPhoneHeight)
+    let eye = obstacleStage == 2
+      ? SIMD3(center.x - 0.12, assumedPhoneHeight, center.y)
+      : model.center(model.start, height: assumedPhoneHeight)
     updateWalkStatus(at: SIMD4(eye.x, eye.y, eye.z, 1))
     renderScriptedView(eye: eye, look: SIMD3(center.x, ObstacleTag.height, center.y))
     DispatchQueue.main.asyncAfter(deadline: .now() + 1.0 / 30.0) { [weak self] in
@@ -468,9 +479,10 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
       let previousRouteBlocked = self.activeRoute.contains { !walkable.contains($0) }
       let originalRouteBlocked = self.model.route.contains { !walkable.contains($0) }
       let reopened = self.confirmedBlockedCells.intersection(walkable).count
+      let sameFootprint = self.confirmedBlockedCells == Set(blocked)
       self.confirmedBlockedCells = Set(blocked)
       self.floorCells = Set(floor.map { SIMD2($0[0], $0[1]) })
-      self.replanAfterRetreat = self.obstacleStart == nil && !self.isWalkable(from)
+      self.replanAfterRetreat = !self.isWalkable(from)
       let remaining = self.activeRoute.dropFirst(self.activeRoute.firstIndex(of: [from.x, from.y]) ?? 0)
       if self.obstacleStart != nil || !remaining.contains([from.x, from.y]) ||
          remaining.contains(where: { !walkable.contains($0) }) {
@@ -482,8 +494,19 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
       let error = simd_distance(center, expected)
       print("VALMET_OBSTACLE phase=replanned cells=\(route.count) previous_route_blocked=\(previousRouteBlocked) original_route_blocked=\(originalRouteBlocked) reopened=\(reopened) error_m=\(error)")
       fflush(stdout)
-      guard error < 0.12, previousRouteBlocked, !route.isEmpty,
-            self.obstacleStage == 0 || reopened > 0,
+      if self.obstacleStage == 2 {
+        guard error < 0.12, self.replanAfterRetreat, self.activeRoute.isEmpty, route.isEmpty else {
+          self.finishObstacleCheck(error: "expected_blocked_camera")
+          return
+        }
+        self.obstacleStage = 3
+        return
+      }
+      let expectedChange = self.obstacleStage == 3
+        ? sameFootprint && [from.x, from.y] == self.model.start
+        : previousRouteBlocked
+      guard error < 0.12, expectedChange, !route.isEmpty,
+            self.obstacleStage != 1 || reopened > 0,
             route.first == [from.x, from.y], route.last == end,
             route.allSatisfy(walkable.contains), blocked.allSatisfy({ !walkable.contains($0) }) else {
         self.finishObstacleCheck(error: "unexpected_replan")
@@ -494,6 +517,9 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
         let index = min(Int((1.50 / self.model.cellSize).rounded()), route.count - 2)
         let next = self.model.center(route[index])
         self.obstacleTestCenter = SIMD2(next.x, next.z)
+      } else if self.obstacleStage == 1 {
+        self.obstacleStage = 2
+        self.obstacleTestCenter = self.firstObstacleTestCenter
       } else {
         self.finishObstacleCheck(error: nil)
       }
@@ -505,7 +531,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     if let error {
       print("VALMET_OBSTACLE result=failed error=\(error)")
     } else {
-      print("VALMET_OBSTACLE result=passed observations=2")
+      print("VALMET_OBSTACLE result=passed observations=3 recovered=true")
     }
     fflush(stdout)
   }
@@ -785,7 +811,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     }.sorted { $0.distance == $1.distance ? $0.index < $1.index : $0.distance < $1.distance }
     let lines = nearby.prefix(3).map { entry in
       let object = model.objects[entry.index]
-      return "\(object.name) · \(conditionText(for: object))"
+      return "\(object.displayName) · \(conditionText(for: object))"
     }
     let text = lines.isEmpty ? nil : (["Nearby equipment"] + lines).joined(separator: "\n")
     if nearbyStatus.text != text { nearbyStatus.text = text }
@@ -825,7 +851,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
       frames.append(frame)
       frameCount += 1
       if object.syntheticCondition != nil { mappedFrameCount += 1 }
-      let label = nearbyLabel(at: entry.index, text: object.name + "\n" + conditionText(for: object))
+      let label = nearbyLabel(at: entry.index, text: object.displayName + "\n" + conditionText(for: object))
       let projected = frame.bounds
       let size = label.sizeThatFits(CGSize(width: labelArea.width * 0.65, height: .greatestFiniteMagnitude))
       let width = min(labelArea.width, ceil(size.width) + 12)
@@ -912,7 +938,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
           simd_distance(SIMD2(position.x, position.z), SIMD2(model.center(end).x, model.center(end).z))
             <= (model.arrivalRadiusMetres ?? model.cellSize / 2),
           let target = serviceTarget else { return nil }
-    return "At service position · \(target.name)"
+    return "At service position · \(target.displayName)"
   }
 
   private func isCurrent(_ frame: RenderedVision.Frame, comparedWith pose: simd_float4x4) -> Bool {

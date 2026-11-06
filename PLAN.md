@@ -244,16 +244,22 @@ The generated `assets/valmet/site.json` has 17 reviewed objects. Eleven are the 
 - The local Core ML detector recognizes the 11 trained catalog IDs. Its
   capture-time projection must agree with each mapped 3D frame. Teal frames
   and their synthetic workbook conditions come from proximity within 2.5 m.
-  Yellow boxes require two consecutive image detections.
-- The iPhone scripted 3.10 m first-person route confirmed the pump, showed
-  up to four mapped nearby 3D frames in one view, and displayed the
-  workbook-based next check at arrival. The first-person AR walkthrough also remains available for manual
-  use. A physical walkthrough with Wi-Fi and cellular disabled is pending.
+  Yellow boxes require two consecutive image detections. With the workbook
+  loaded they are limited to the six catalog entries with compatible Excel
+  classes. The app displays the exact Excel tag alongside the scene name.
+- With the class-checked workbook mapping, the iPhone scripted 3.10 m route
+  confirmed the pump as `P-005 · Red circulation pump` and displayed the
+  workbook-based next check at arrival in 20.36 seconds. Up to four nearby
+  frames were visible, including two with compatible workbook mappings.
+  A physical walkthrough with Wi-Fi and cellular disabled is pending.
 - The iPhone crate test localized two positions from rendered QR corners. It
   blocked the original route, then blocked the active detour and reopened 27
   cells when moved. The test uses a tagged object and a stationary camera
   at the route start. The interactive crate demo supports movement and a
-  no-route state, with planner tests for a fully blocked corridor.
+  no-route state, with planner tests for a fully blocked corridor. An extended
+  iPhone test put the simulated camera in a newly blocked cell, confirmed an
+  empty route and recovered a 32-cell route after returning to the start with
+  the same vision-derived footprint.
 - Arrival shows a deterministic summary and the existing workbook evidence
   report. [Demo plan](DEMO.md) and [technical note](docs/TECHNICAL-NOTE.md)
   record what the submission can demonstrate and what remains unverified.

@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Export the supplied workbook and explicit synthetic scene mapping for Flutter.
+"""Export the supplied workbook and synthetic scene mapping for Flutter.
 
 Requires openpyxl. Source workbook and generated output must remain local.
 """
 import argparse
+from collections import defaultdict, deque
 from datetime import date, datetime
 import hashlib
 import json
@@ -16,6 +17,10 @@ SHEETS = (
     'Maintenance_History', 'Historical_Service_Cases', 'Knowledge_Docs',
     'Data_Quality',
 )
+ASSET_CLASS_BY_EQUIPMENT_TYPE = {
+    'pump': 'PROCESS_PUMP',
+    'valve': 'CONTROL_VALVE',
+}
 
 
 def object_id(obj):
@@ -55,23 +60,28 @@ def export(workbook, site, mappings=None, *, include_nearby=False):
             if row['asset_id'] not in assets:
                 raise ValueError(f"Unknown asset at {row['_source']}")
 
-    ids = sorted(object_id(o) for o in site['objects'] if o.get('service') is not None)
+    objects = sorted((o for o in site['objects'] if o.get('service') is not None),
+                     key=object_id)
     if include_nearby:
         # Keep the service target and existing detector catalog assignments stable.
         nearby = (o for o in site['objects'] if o.get('service') is None)
-        ids += [object_id(o) for o in sorted(
-            nearby, key=lambda o: (o.get('detectorEnabled') is False, object_id(o))
-        )]
+        objects += sorted(nearby, key=lambda o: (o.get('detectorEnabled') is False, object_id(o)))
+    ids = [object_id(o) for o in objects]
     if len(set(ids)) != len(ids):
         raise ValueError('Mapped scene objects need unique object_id values')
-    mapping_method = 'synthetic_ranked' if mappings is None else 'synthetic_explicit'
+    mapping_method = 'synthetic_class_ranked' if mappings is None else 'synthetic_explicit'
     if mappings is None:
-        # Reproducible association allowed by the brief. No semantic identity claim.
+        # Prioritize service targets and rank only within compatible workbook classes.
+        by_class = defaultdict(deque)
         ranked = sorted(states, key=lambda a: (
             states[a].get('health_score', 101), a))
-        if len(ids) > len(ranked):
-            raise ValueError('More mapped scene objects than workbook assets with current state')
-        mappings = dict(zip(ids, ranked))
+        for asset_id in ranked:
+            by_class[assets[asset_id].get('asset_class')].append(asset_id)
+        mappings = {}
+        for obj in objects:
+            asset_class = ASSET_CLASS_BY_EQUIPMENT_TYPE.get(obj.get('equipmentType'))
+            if asset_class and by_class[asset_class]:
+                mappings[object_id(obj)] = by_class[asset_class].popleft()
     if set(mappings) - set(ids):
         raise ValueError('Mapping contains scene objects outside the selected mapping scope')
     if set(mappings.values()) - assets.keys():

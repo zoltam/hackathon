@@ -143,9 +143,11 @@ the camera feed, and **Reset alignment** lets you align again. Arrival uses
 horizontal distance to the service point, separately from target recognition.
 The viewer frames nearby catalog objects within 2.5 m and labels visible frames
 with their synthetic condition. The panel lists the three closest objects.
-The scene includes 17 reviewed frames, of which 11 also have detector classes. A yellow
-box marks a visual detection after two consecutive frames agree with its mapped
-3D bounds. At the service point, open **Inspection evidence** for the target.
+The scene includes 17 reviewed frames and the bundled detector has 11 classes.
+When the workbook is loaded, yellow boxes are limited to scene objects with a
+compatible workbook tag. The supplied data maps five pumps and one inline valve.
+A box requires two consecutive detections that agree with the mapped 3D bounds.
+At the service point, open **Inspection evidence** for the target.
 
 To demonstrate a moving obstacle, enable **Movable demo crate** before opening
 the viewer. Align, tap **Place demo crate**, and aim down at its tag. After the
@@ -169,10 +171,12 @@ values, worksheet row references and a workbook SHA-256. It imports the included
 3-day telemetry sample, not the unavailable full telemetry CSV. Original inputs
 can be kept in ignored `sources/valmet/`. Keep source and generated data local.
 
-By default it sorts service-object IDs and associates them with workbook assets
-by increasing health score, breaking ties by asset ID. The nearby option then
-assigns the remaining equipment without changing service-target assignments. This is a **synthetic
-association**, not semantic recognition or verified physical identity. Override
+By default it sorts service-object IDs and associates them with compatible
+workbook classes by increasing health score, breaking ties by asset ID. The
+nearby option considers the remaining scene objects without changing service
+targets. Pumps map to `PROCESS_PUMP`. The inline valve uses `CONTROL_VALVE` as
+its synthetic valve-family mapping. The app shows the exact workbook tag
+alongside the scene name. These workbook identities are synthetic. Override
 it with `--mapping /path/to/mapping.json`, whose JSON object maps scene
 `object_id` to workbook `asset_id`. Explicit `objectId` or `object_id` values are preferred;
 older objects use `grid:x:z:width:depth`. Regenerate/review the mapping when

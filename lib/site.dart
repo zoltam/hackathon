@@ -12,6 +12,7 @@ Cell _cell(Object? value) {
 class SiteObject {
   SiteObject(Map<String, dynamic> json)
     : name = json['name'] as String,
+      equipmentType = json['equipmentType'] as String? ?? '',
       objectId =
           (json['objectId'] ?? json['object_id']) as String? ??
           'grid:${json['x']}:${json['z']}:${json['width']}:${json['depth']}',
@@ -27,6 +28,7 @@ class SiteObject {
 
   final String objectId;
   final String name;
+  final String equipmentType;
   final int x, z, width, depth;
   final double height;
   final bool movable;
