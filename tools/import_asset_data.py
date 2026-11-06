@@ -60,8 +60,9 @@ def export(workbook, site, mappings=None, *, include_nearby=False):
             if row['asset_id'] not in assets:
                 raise ValueError(f"Unknown asset at {row['_source']}")
 
+    primary_service_id = site.get('primaryServiceObjectId')
     objects = sorted((o for o in site['objects'] if o.get('service') is not None),
-                     key=object_id)
+                     key=lambda o: (object_id(o) != primary_service_id, object_id(o)))
     if include_nearby:
         # Keep the service target and existing detector catalog assignments stable.
         nearby = (o for o in site['objects'] if o.get('service') is None)

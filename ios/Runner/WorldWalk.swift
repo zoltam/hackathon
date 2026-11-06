@@ -136,7 +136,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
   }()
   private var benchmarkStart: CFTimeInterval?
   private var nextBenchmarkCheckpoint: CFTimeInterval = 15
-  private var benchmarkIdleTimerWasDisabled: Bool?
+  private var verificationIdleTimerWasDisabled: Bool?
   private var benchmarkLink: CADisplayLink?
   private var benchmarkLatencies: [Int] = []
   private var benchmarkOverlayAges: [Int] = []
@@ -570,6 +570,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     }
     showModel = true
     journeyStart = CACurrentMediaTime()
+    keepVerificationScreenAwake()
     let distance = Float(model.route.count - 1) * model.cellSize
     print("VALMET_JOURNEY phase=start id=\(id) cells=\(model.route.count) distance_m=\(distance)")
     fflush(stdout)
@@ -611,7 +612,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     renderScriptedView(eye: eye, look: look)
     if arrived && !hadArrived {
       print("VALMET_JOURNEY phase=arrival elapsed_s=\(elapsed)")
-      print("VALMET_JOURNEY evidence=\(hasJourneyWorkbookEvidence ? "workbook" : "unavailable")")
+      print("VALMET_JOURNEY evidence=\(hasJourneyWorkbookEvidence ? "workbook" : "unavailable") tag=\(target.workbookTag ?? "unavailable")")
       fflush(stdout)
     }
     if elapsed >= elapsedWalking + 4 {
@@ -636,6 +637,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
   private func stopJourney(error: String?) {
     guard let start = journeyStart else { return }
     journeyStart = nil
+    restoreVerificationIdleTimer()
     let elapsed = CACurrentMediaTime() - start
     print("VALMET_JOURNEY nearby_frames_max=\(journeyNearbyMax.frames) mapped_nearby_frames_max=\(journeyNearbyMax.mapped)")
     if let error {
@@ -656,8 +658,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     visionStatus.isHidden = false
     let start = CACurrentMediaTime()
     benchmarkStart = start
-    benchmarkIdleTimerWasDisabled = UIApplication.shared.isIdleTimerDisabled
-    UIApplication.shared.isIdleTimerDisabled = true
+    keepVerificationScreenAwake()
     renderer.frameCounter = SplatRenderer.FrameCounter(window: start..<(start + benchmarkDuration))
     let link = CADisplayLink(target: self, selector: #selector(benchmarkFrame(_:)))
     benchmarkLink = link
@@ -694,13 +695,21 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     NotificationCenter.default.removeObserver(self, name: UIScene.willDeactivateNotification, object: nil)
     benchmarkLink?.invalidate()
     benchmarkLink = nil
-    if let idleTimerWasDisabled = benchmarkIdleTimerWasDisabled {
-      UIApplication.shared.isIdleTimerDisabled = idleTimerWasDisabled
-      benchmarkIdleTimerWasDisabled = nil
-    }
+    restoreVerificationIdleTimer()
     let frames = renderer.frameCounter?.count ?? 0
     renderer.frameCounter = nil
     return frames
+  }
+
+  private func keepVerificationScreenAwake() {
+    verificationIdleTimerWasDisabled = UIApplication.shared.isIdleTimerDisabled
+    UIApplication.shared.isIdleTimerDisabled = true
+  }
+
+  private func restoreVerificationIdleTimer() {
+    guard let previous = verificationIdleTimerWasDisabled else { return }
+    UIApplication.shared.isIdleTimerDisabled = previous
+    verificationIdleTimerWasDisabled = nil
   }
 
   private func reportBenchmark(frames: Int, elapsed: CFTimeInterval, checkpoint: Bool = false) {

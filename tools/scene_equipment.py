@@ -19,6 +19,12 @@ SEEDS = [
     ("right-blue-actuator", "Right blue actuator", "actuator", (7.32, .58, 2.25), (7.53, .80, 2.54)),
 ]
 
+# Registered viewpoints reviewed with the shipped detector.
+REVIEWED_APPROACHES = {
+    'boiler-room:far-circulation-pump': (7.85, .80),
+    'boiler-room:black-circulation-pump': (7.35, .80),
+}
+
 
 def extract_equipment(xyz, opacity, cell, approach, origin):
     objects = []
@@ -55,3 +61,32 @@ def extract_equipment(xyz, opacity, cell, approach, origin):
             obj['cells'] = []
         objects.append(obj)
     return objects
+
+
+def service_approach(bounds, reachable, scan_points, cell, camera_height, preferred=None):
+    """Use a reviewed viewpoint if reachable, otherwise find the closest clear view."""
+    lo, hi = np.array(bounds)
+    target = (lo + hi) / 2
+    target[1] = hi[1] * .9  # Same aim point as the scripted iOS journey.
+    max_standoff, sight_radius = 2.0, .055
+    margin = max_standoff + sight_radius
+    local = scan_points[((scan_points >= lo - margin) & (scan_points <= hi + margin)).all(axis=1)]
+    blockers = local[~((local >= lo) & (local <= hi)).all(axis=1)]
+    candidates = []
+    for p, steps in reachable.items():
+        eye = np.array([(p[0] + .5) * cell, camera_height, (p[1] + .5) * cell])
+        gap = np.maximum(np.maximum(lo - eye, eye - hi), 0)[[0, 2]]
+        distance_squared = gap @ gap
+        if 0 < distance_squared <= max_standoff ** 2:
+            candidates.append((p != preferred, distance_squared, steps, p, eye))
+    # ponytail: screen dense clusters of splat centres; use rendered depth for precise occlusion.
+    for _, _, _, p, eye in sorted(candidates):
+        ray = target - eye
+        relative = blockers - eye
+        along = np.einsum('ij,j->i', relative, ray) / (ray @ ray)
+        offset = relative - along[:, None] * ray
+        hits = along[(along > 0) & (along < 1) & ((offset * offset).sum(axis=1) < sight_radius ** 2)]
+        bins = (hits * np.linalg.norm(ray) / cell).astype(int)
+        if np.bincount(bins).max(initial=0) < 4:
+            return p
+    return None
