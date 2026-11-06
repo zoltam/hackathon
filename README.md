@@ -79,6 +79,10 @@ Manual movement checks substeps no longer than half a cell to prevent skipping
 obstacles. The registered renderer/detector frame and 11 equipment bounds remain
 unchanged; the reviewed pump approach moves only 3.5 cm to a finer cell centre.
 
+The repository includes the generated navigation map at `assets/valmet/site.json`
+and its PNG illustration at `docs/images/equipment-room-walking-paths.png`.
+Regenerating the scan assets also refreshes the navigation JSON.
+
 The current Equipment Room build contains 3,213 observed floor cells. With the
 default 0.10 m radius, 2,130 cells pass clearance and 2,106 connect to the pump:
 21.06 m², compared with 11.19 m² previously. Seven reviewed room regions,
