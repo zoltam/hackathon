@@ -132,12 +132,14 @@ class _SiteSimulationState extends State<SiteSimulation> {
           for (final object in visible)
             {
               'name': object.name,
+              'objectId': object.objectId,
               'x': object.x,
               'z': object.z,
               'width': object.width,
               'depth': object.depth,
               'height': object.height,
               'cells': object.cells?.map(pair).toList(),
+              'bounds': object.bounds,
             },
         ],
       }),

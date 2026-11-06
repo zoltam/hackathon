@@ -101,19 +101,21 @@ def prepare(source, destination, require_complete=False):
         raise ValueError('No sufficiently large walkable floor in this scan')
     start = min(best, key=lambda p: (p[1], abs(p[0] - 12), p[0]))
     dist = distances(start, best)
-    # Place the demo target at an observed structure near the route end.
-    service, target = max(
-        ((p, q) for p in best for q in occupied
-         if abs(p[0]-q[0]) + abs(p[1]-q[1]) == 2),
-        key=lambda pair: (dist[pair[0]], pair),
-    )
+    # Manually registered from three views of the red circulation pump.
+    # The Excel mapping is independent of this physical scene identity.
+    service = (21, 7)
+    target = (23, 9)
+    if service not in best:
+        raise ValueError('The mapped pump approach is not on the observed walkable floor')
     model = {
         'name': 'Industrial Boiler Room',
         'width': width, 'depth': depth, 'cellSize': cell,
         'start': start, 'floor': sorted(best),
         'objects': [{
-            'name': 'Inspection target', 'x': target[0], 'z': target[1],
-            'width': 1, 'depth': 1, 'height': 1.2, 'service': service,
+            'objectId': 'boiler-room:red-circulation-pump',
+            'name': 'Red circulation pump', 'x': target[0], 'z': target[1],
+            'width': 1, 'depth': 1, 'height': 1.32, 'service': service,
+            'bounds': [[5.77, 1.045, 2.27], [6.10, 1.32, 2.63]],
         }],
     }
 

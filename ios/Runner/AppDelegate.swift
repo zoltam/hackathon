@@ -30,6 +30,13 @@ import UIKit
       guard let renderer = SplatRenderer(data: points, roomSize: SIMD2(Float(model.width), Float(model.depth)) * model.cellSize) else {
         return result(FlutterError(code: "metal", message: "Could not start the 3D renderer.", details: nil))
       }
+      renderer.vision.referenceURLs = ["a", "b", "e"].compactMap {
+        let key = registrar.lookupKey(forAsset: "assets/valmet/pump-reference-\($0).png")
+        return Bundle.main.url(forResource: key, withExtension: nil)
+      }
+      if let index = model.target, model.objects.indices.contains(index) {
+        renderer.vision.bounds = model.objects[index].bounds.flatMap(PumpBounds.init)
+      }
       let camera = WorldWalk(model: model, renderer: renderer, verifyVision: verify)
       camera.modalPresentationStyle = .fullScreen
       host.present(camera, animated: !verify) { result(nil) }
@@ -53,6 +60,7 @@ import UIKit
           return
         }
         site["keyControls"] = false
+        site["target"] = 0
         site["route"] = [start, [start[0], start[1] + 1]]
         guard let data = try? JSONSerialization.data(withJSONObject: site) else { return }
         open(String(decoding: data, as: UTF8.self), true) { error in
