@@ -99,12 +99,35 @@ import UIKit
           site["target"] = 0
           site["route"] = [start, [start[0], start[1] + 1]]
         }
-        guard let data = try? JSONSerialization.data(withJSONObject: site) else { return }
-        open(String(decoding: data, as: UTF8.self), visionMode) { error in
-          if let error = error as? FlutterError {
-            print(visionMode == .verify ? "VALMET_VISION opening error: \(error.code)" : "\(logPrefix) error=\(error.code)")
-            fflush(stdout)
+        func present(_ scene: [String: Any]) {
+          guard let data = try? JSONSerialization.data(withJSONObject: scene) else { return }
+          open(String(decoding: data, as: UTF8.self), visionMode) { error in
+            if let error = error as? FlutterError {
+              print(visionMode == .verify ? "VALMET_VISION opening error: \(error.code)" : "\(logPrefix) error=\(error.code)")
+              fflush(stdout)
+            }
           }
+        }
+        if visionMode == .journey, var objects = site["objects"] as? [[String: Any]],
+           let target = site["target"] as? Int, let targetID = objects[target]["objectId"] as? String {
+          channel.invokeMethod("serviceJourneyEvidence", arguments: [
+            "targetID": targetID, "objectIDs": objects.compactMap { $0["objectId"] as? String }
+          ]) { result in
+            if let evidence = result as? [String: Any] {
+              let conditions = evidence["conditions"] as? [String: Any] ?? [:]
+              for index in objects.indices {
+                if let id = objects[index]["objectId"] as? String {
+                  objects[index]["syntheticCondition"] = conditions[id] as? String
+                }
+              }
+              site["objects"] = objects
+              site["inspectionReport"] = evidence["inspectionReport"] as? String
+              site["inspectionSummary"] = evidence["inspectionSummary"] as? String
+            }
+            present(site)
+          }
+        } else {
+          present(site)
         }
       }
     }

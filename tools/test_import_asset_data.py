@@ -70,6 +70,17 @@ class ImportTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.run_export()
 
+    def test_surrounding_objects_do_not_shift_existing_mappings(self):
+        self.site['objects'].append(dict(objectId='zz-equipment'))
+        before = self.run_export(include_nearby=True)['mappings']
+        self.site['objects'].append(dict(objectId='aaa-carton', detectorEnabled=False))
+        self.book['Asset_Master'] = Sheet([
+            ('asset_id', 'tag'), ('A', 'TEST-A'), ('B', 'TEST-B'), ('C', 'TEST-C')])
+        self.book['Current_State'] = Sheet([
+            ('asset_id', 'health_score'), ('A', 80), ('B', 40), ('C', 95)])
+        after = self.run_export(include_nearby=True)['mappings']
+        self.assertEqual(after, {**before, 'aaa-carton': 'C'})
+
 
 if __name__ == '__main__':
     unittest.main()

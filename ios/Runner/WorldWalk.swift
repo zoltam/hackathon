@@ -49,6 +49,7 @@ struct WalkSite: Decodable {
   let arrivalRadiusMetres: Float?
   let clearanceMetres: Float?
   let inspectionReport: String?
+  let inspectionSummary: String?
 
   func center(_ cell: [Int], height: Float = 0) -> SIMD3<Float> {
     SIMD3((Float(cell[0]) + 0.5) * cellSize, height, (Float(cell[1]) + 0.5) * cellSize)
@@ -82,6 +83,9 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
   private let reality = ARSCNView()
   private var virtual: UIView { renderer.view }
   private let detectionLayer = CAShapeLayer()
+  private let nearbyFrameLayer = CAShapeLayer()
+  private var nearbyLabels: [Int: UILabel] = [:]
+  private weak var controlPanel: UIStackView?
   private let message = UILabel()
   private let visionStatus = UILabel()
   private let nearbyStatus = UILabel()
@@ -90,6 +94,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
   private var verificationFrames = 0
   private var journeyStart: CFTimeInterval?
   private var journeyConfirmedTarget = false
+  private var journeyNearbyMax = (frames: 0, mapped: 0)
   var replanRoute: (([String: Any], @escaping (Any?) -> Void) -> Void)?
   private lazy var activeRoute = model.route
   private var obstacleStart: CFTimeInterval?
@@ -156,6 +161,11 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     reality.session.delegate = self
     reality.session.delegateQueue = .main
     floorCells = (model.walkableFloor ?? model.floor).map { Set($0.map { SIMD2($0[0], $0[1]) }) }
+    nearbyFrameLayer.strokeColor = UIColor.systemTeal.cgColor
+    nearbyFrameLayer.fillColor = UIColor.clear.cgColor
+    nearbyFrameLayer.lineWidth = 1.75
+    nearbyFrameLayer.lineJoin = .round
+    virtual.layer.addSublayer(nearbyFrameLayer)
     detectionLayer.strokeColor = UIColor.systemYellow.cgColor
     detectionLayer.fillColor = UIColor.clear.cgColor
     detectionLayer.lineWidth = 3
@@ -169,9 +179,11 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     visionStatus.textColor = .white
     visionStatus.numberOfLines = 2
     visionStatus.isHidden = true
-    renderer.onFrameReady = { [weak self] pose in
-      guard let self, self.view.window != nil, !self.virtual.isHidden else { return }
+    renderer.onFrameReady = { [weak self] pose, projection, size in
+      guard let self, self.view.window != nil, !self.virtual.isHidden,
+            self.virtual.bounds.size == size else { return }
       self.updateDetectionPose(pose)
+      self.updateNearbyEquipment(at: pose.columns.3, viewProjection: projection * pose.inverse)
     }
     nearbyStatus.font = .preferredFont(forTextStyle: .caption1)
     nearbyStatus.textColor = .white
@@ -251,6 +263,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     panel.layer.cornerRadius = 12
     panel.translatesAutoresizingMaskIntoConstraints = false
     view.addSubview(panel)
+    controlPanel = panel
     NSLayoutConstraint.activate([
       panel.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 12),
       panel.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -12),
@@ -527,6 +540,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     renderScriptedView(eye: eye, look: look)
     if arrived && !hadArrived {
       print("VALMET_JOURNEY phase=arrival elapsed_s=\(elapsed)")
+      print("VALMET_JOURNEY evidence=\(model.inspectionSummary == nil ? "unavailable" : "workbook")")
       fflush(stdout)
     }
     if elapsed >= elapsedWalking + 4 {
@@ -542,6 +556,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     guard let start = journeyStart else { return }
     journeyStart = nil
     let elapsed = CACurrentMediaTime() - start
+    print("VALMET_JOURNEY nearby_frames_max=\(journeyNearbyMax.frames) mapped_nearby_frames_max=\(journeyNearbyMax.mapped)")
     if let error {
       print("VALMET_JOURNEY result=failed error=\(error) confirmed=\(journeyConfirmedTarget) arrived=\(arrived) elapsed_s=\(elapsed)")
     } else {
@@ -731,23 +746,136 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
       floorCells?.contains(cell) != false
   }
 
-  private func updateNearbyEquipment(at position: SIMD4<Float>) {
+  private func updateNearbyEquipment(at position: SIMD4<Float>, viewProjection: simd_float4x4) {
     let point = SIMD2(position.x, position.z)
     let radius: Float = 2.5
-    let nearby = model.objects.compactMap { object -> (WalkSite.Block, Float)? in
-      let bounds = object.floorBounds(cellSize: model.cellSize)
-      let nearest = simd_clamp(point, bounds.min, bounds.max)
-      let distance = simd_distance_squared(point, nearest)
-      return distance <= radius * radius ? (object, distance) : nil
-    }.sorted {
-      $0.1 == $1.1 ? $0.0.name < $1.0.name : $0.1 < $1.1
-    }.prefix(3)
-    let lines = nearby.map { object, _ in
-      let condition = object.syntheticCondition.map { "Synthetic condition: \($0)" } ?? "Condition unavailable"
-      return "\(object.name) · \(condition)"
+    let nearby = model.objects.indices.compactMap { index -> (index: Int, distance: Float)? in
+      let bounds = model.objects[index].floorBounds(cellSize: model.cellSize)
+      let distance = simd_distance_squared(point, simd_clamp(point, bounds.min, bounds.max))
+      return distance <= radius * radius ? (index, distance) : nil
+    }.sorted { $0.distance == $1.distance ? $0.index < $1.index : $0.distance < $1.distance }
+    let lines = nearby.prefix(3).map { entry in
+      let object = model.objects[entry.index]
+      return "\(object.name) · \(conditionText(for: object))"
     }
     let text = lines.isEmpty ? nil : (["Nearby equipment"] + lines).joined(separator: "\n")
     if nearbyStatus.text != text { nearbyStatus.text = text }
+    nearbyStatus.isHidden = text == nil
+
+    let viewport = virtual.bounds
+    var labelArea = viewport.insetBy(dx: 6, dy: 6)
+    if let panel = controlPanel {
+      labelArea.size.height = max(0, min(labelArea.maxY, virtual.convert(panel.bounds, from: panel).minY - 6) - labelArea.minY)
+    }
+    let frames = UIBezierPath()
+    var placedLabels: [CGRect] = []
+    var visibleLabels = Set<Int>()
+    var frameCount = 0
+    var mappedFrameCount = 0
+    CATransaction.begin()
+    CATransaction.setDisableActions(true)
+    for entry in nearby {
+      let object = model.objects[entry.index]
+      guard let bounds = object.bounds, bounds.count == 2,
+            bounds.allSatisfy({ $0.count == 3 && $0.allSatisfy(\.isFinite) }),
+            zip(bounds[0], bounds[1]).allSatisfy({ $0.0 < $0.1 }) else { continue }
+      let corners = (0..<8).map { index in
+        viewProjection * SIMD4(bounds[index & 1][0], bounds[(index >> 1) & 1][1],
+                               bounds[(index >> 2) & 1][2], 1)
+      }
+      let frame = UIBezierPath()
+      for corner in corners.indices {
+        for axis in [1, 2, 4] where corner & axis == 0 {
+          if let (a, b) = Self.clipEdge(corners[corner], corners[corner | axis], to: viewport) {
+            frame.move(to: a)
+            frame.addLine(to: b)
+          }
+        }
+      }
+      guard !frame.isEmpty else { continue }
+      frames.append(frame)
+      frameCount += 1
+      if object.syntheticCondition != nil { mappedFrameCount += 1 }
+      let label = nearbyLabel(at: entry.index, text: object.name + "\n" + conditionText(for: object))
+      let projected = frame.bounds
+      let size = label.sizeThatFits(CGSize(width: labelArea.width * 0.65, height: .greatestFiniteMagnitude))
+      let width = min(labelArea.width, ceil(size.width) + 12)
+      let height = ceil(size.height) + 6
+      guard width > 0, labelArea.height >= height else { continue }
+      let x = min(max(projected.minX, labelArea.minX), labelArea.maxX - width)
+      let base = min(max(projected.minY - height - 4, labelArea.minY), labelArea.maxY - height)
+      for offset in [0, 1, -1, 2, -2, 3, -3] {
+        let y = base + CGFloat(offset) * (height + 3)
+        let candidate = CGRect(x: x, y: y, width: width, height: height)
+        guard labelArea.contains(candidate),
+              !placedLabels.contains(where: { $0.insetBy(dx: -3, dy: -2).intersects(candidate) })
+        else { continue }
+        label.frame = candidate
+        label.isHidden = false
+        placedLabels.append(candidate)
+        visibleLabels.insert(entry.index)
+        let anchor = CGPoint(x: projected.minX, y: projected.minY)
+        frames.move(to: anchor)
+        frames.addLine(to: CGPoint(x: min(max(anchor.x, candidate.minX), candidate.maxX),
+                                   y: min(max(anchor.y, candidate.minY), candidate.maxY)))
+        break
+      }
+    }
+    for (index, label) in nearbyLabels where !visibleLabels.contains(index) { label.isHidden = true }
+    nearbyFrameLayer.frame = viewport
+    nearbyFrameLayer.path = frames.cgPath
+    CATransaction.commit()
+    if journeyStart != nil {
+      journeyNearbyMax.frames = max(journeyNearbyMax.frames, frameCount)
+      journeyNearbyMax.mapped = max(journeyNearbyMax.mapped, mappedFrameCount)
+    }
+  }
+
+  private func conditionText(for object: WalkSite.Block) -> String {
+    object.syntheticCondition.map { "Synthetic: \($0)" } ?? "Condition unavailable"
+  }
+
+  private func nearbyLabel(at index: Int, text: String) -> UILabel {
+    if let label = nearbyLabels[index] { return label }
+    let label = UILabel()
+    label.font = .preferredFont(forTextStyle: .caption2)
+    label.textColor = .white
+    label.backgroundColor = UIColor.black.withAlphaComponent(0.85)
+    label.layer.borderColor = UIColor.systemTeal.cgColor
+    label.layer.borderWidth = 1
+    label.layer.cornerRadius = 4
+    label.layer.masksToBounds = true
+    label.textAlignment = .center
+    label.numberOfLines = 2
+    label.lineBreakMode = .byTruncatingTail
+    label.text = text
+    label.isHidden = true
+    virtual.addSubview(label)
+    nearbyLabels[index] = label
+    return label
+  }
+
+  private static func clipEdge(_ a: SIMD4<Float>, _ b: SIMD4<Float>, to viewport: CGRect) -> (CGPoint, CGPoint)? {
+    // Clip in homogeneous coordinates before dividing by w. Metal's depth is 0...w.
+    let aPlanes = [a.w + a.x, a.w - a.x, a.w + a.y, a.w - a.y, a.z, a.w - a.z]
+    let bPlanes = [b.w + b.x, b.w - b.x, b.w + b.y, b.w - b.y, b.z, b.w - b.z]
+    var first: Float = 0
+    var last: Float = 1
+    for (from, to) in zip(aPlanes, bPlanes) {
+      guard from.isFinite, to.isFinite, from >= 0 || to >= 0 else { return nil }
+      if from < 0 { first = max(first, from / (from - to)) }
+      if to < 0 { last = min(last, from / (from - to)) }
+    }
+    guard first < last else { return nil }
+    let start = a + (b - a) * first
+    let end = a + (b - a) * last
+    guard start.w > 0, end.w > 0 else { return nil }
+    func project(_ point: SIMD4<Float>) -> CGPoint {
+      let x = CGFloat(point.x / point.w + 1) / 2
+      let y = CGFloat(1 - point.y / point.w) / 2
+      return CGPoint(x: viewport.minX + x * viewport.width, y: viewport.minY + y * viewport.height)
+    }
+    return (project(start), project(end))
   }
 
   private func arrivalText(at position: SIMD4<Float>) -> String? {
@@ -880,7 +1008,6 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
   }
 
   private func updateWalkStatus(at position: SIMD4<Float>) {
-    if showModel { updateNearbyEquipment(at: position) }
     let cell = cellAt(x: position.x, z: position.z)
     arrived = false
     if !isWalkable(cell) {
@@ -891,7 +1018,8 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
       }
     } else if let arrival = arrivalText(at: position) {
       arrived = true
-      updateDisplay(arrival)
+      let summary = model.inspectionSummary.map { "\n\($0)" } ?? ""
+      updateDisplay(arrival + summary)
     } else {
       let guidance = activeRoute.isEmpty ? "No route to target" : "Follow the green route"
       let obstacleStatus = model.obstacleDemo == true && renderer.obstacleCenter != nil
@@ -947,6 +1075,11 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     if !visible {
       buttons.removeAll()
       clearDetections()
+      if nearbyFrameLayer.path != nil {
+        nearbyFrameLayer.path = nil
+        nearbyLabels.values.forEach { $0.isHidden = true }
+        nearbyStatus.text = nil
+      }
       currentPose = nil
     }
     align.isEnabled = ready || alignment != nil

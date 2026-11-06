@@ -94,17 +94,17 @@ Statuses: **Ready → In progress → In review → Done**. The coordinator upda
 | Confirm target phone and baseline model/export | 1 + 3 | In review | `vision/iphone-baseline` | Model loads and predicts on the actual phone; input format, labels, size and latency are recorded |
 | Capture clean rendered frames and run live inference | 3 + 1 | In review | `vision/rendered-frame-loop` | Boiler-room frames, not real camera images, reach the local model; overlays are excluded; stale frames do not queue |
 | Recognize and highlight the single target | 1 + 3 | In review | `vision/single-target` | On-phone detection of the rendered target produces a stable highlight associated with its mapped 3D object |
-| Complete phase 1 guided walk | 2 + 3 + 4 | Ready | `navigation/single-target-walk` | User aligns, sees and follows the route, recognizes the target and reaches its approach point on the actual phone |
+| Complete phase 1 guided walk | 2 + 3 + 4 | In review | `navigation/single-target-walk` | User aligns, sees and follows the route, recognizes the target and reaches its approach point on the actual phone |
 | Expand extraction to multiple 3D assets | 1 + 2 + 3 | In review | `scene/extract-equipment` | After single-target integration, expand persistent boxes and labels for the scored extraction/proximity requirements |
 | Import workbook and map a faulty target | 2 | Ready | `ai/asset-data` | Target and surrounding assets show reproducibly mapped supplied records, clearly labelled synthetic |
 | Validate routes and add automatic inspection playback | 2 + 3 | Ready | `navigation/inspection-route` | Start-to-target movement follows the walkability model; unreachable cases are handled |
-| Show nearby assets and their condition | 3 | Ready | `ui/proximity-overlays` | Boxes and information change with simulated position without showing every asset at once |
-| Add grounded arrival diagnostics | 2 + 3 | Ready | `ai/asset-diagnostics` | Arrival shows observations, hypotheses, evidence references and a supported next check |
+| Show nearby assets and their condition | 3 | In review | `ui/proximity-overlays` | Boxes and information change with simulated position without showing every asset at once |
+| Add grounded arrival diagnostics | 2 + 3 | In review | `ai/asset-diagnostics` | Arrival shows observations, hypotheses, evidence references and a supported next check |
 | Write demo story and collect company feedback | 4 | Ready | `demo/story-and-plan` | One user, problem, journey and value are clear; feedback is recorded |
 | Label rendered data and improve/fine-tune model if needed | 1 | In review | `vision/model-adaptation` | Train/evaluation viewpoints are separate; adapted export is compared with baseline on the phone; classes and limits are disclosed |
-| Later: detect a moved simulated obstacle | 1 + 3 | Ready (phase 2) | `vision/changed-obstacles` | Changed scene object is detected from rendered frames and localized; planner is not fed scripted ground truth as detection |
-| Later: update obstacle map and reroute | 2 + 3 | Ready (phase 2) | `navigation/dynamic-reroute` | Confirmed obstacle blocks the old route; guidance updates from current position or reports no route |
-| Benchmark combined rendering and vision | 1 + 3 + 4 | Ready | `vision/device-evaluation` | Record actual phone/iOS, scene coverage, render FPS, inference latency/rate, sustained behaviour and recognition errors; verify inference without connectivity |
+| Detect a moved simulated obstacle | 1 + 3 | In review (tagged demo) | `vision/changed-obstacles` | Changed scene object is detected from rendered frames and localized; planner is not fed scripted ground truth as detection |
+| Update obstacle map and reroute | 2 + 3 | In review (tagged demo) | `navigation/dynamic-reroute` | Confirmed obstacle blocks the old route; guidance updates from current position or reports no route |
+| Benchmark combined rendering and vision | 1 + 3 + 4 | In review | `vision/device-evaluation` | Record actual phone/iOS, scene coverage, render FPS, inference latency/rate, sustained behaviour and recognition errors; verify inference without connectivity |
 | Record video, prepare slides and submission | 4, with all members | Ready | `demo/submission` | Video, 5–8 slides, technical note, README, source ZIP and submission fields are checked |
 
 ## How to work in parallel
@@ -218,7 +218,7 @@ check.
 
 The current builder validates and renders all 1,676,481 Gaussians in Equipment Room.ply. Similarity registration to the reviewed scene yielded a 2.32 cm median nearest-neighbor distance. The navigation grid now uses 126 × 129 cells at 0.10 m resolution in the unchanged registered frame. Measured floor centres and bounded Gaussian footprints provide 3,213 floor cells. At the default 0.10 m virtual-camera radius, 2,106 of 2,130 clearance-valid cells connect to the pump approach (21.06 m²). The 1.55 m obstacle ceiling matches the 1.50 m virtual camera plus margin, not standing-person clearance. The imported route from the entrance to the pump is 31 steps (3.10 m). Eleven rendered-region anchors, including the full reviewed upper aisle, remain connected; real low obstacles stay blocked. Distances assume one reviewed scene unit is one metre.
 
-The generated `assets/valmet/site.json` now has 11 reviewed objects: five pumps, one inline valve, two control cabinets and three blue actuators. This is semi-automatic extraction using reviewed seed volumes and quantiles of the supporting Gaussians, not discovery of every object in the room. The bounds were inspected in multiple rendered views. Each record has stable `objectId`, `equipmentType`, metric `bounds` and `supportingSplats`. Keep `objectId` separate from the synthetic workbook's `asset_id`. Only the primary pump has a walkable `service` cell. The detector returns image-space boxes for the 11 catalog IDs. Other catalog boxes are available for proximity and workbook mapping.
+The generated `assets/valmet/site.json` has 17 reviewed objects. Eleven are the trained detector catalog, comprising five pumps, one inline valve, two control cabinets and three blue actuators. Six surrounding objects have 3D frames for proximity display: a floor fan, carton, platform trolley, rolling chair, jerrycan and storage bin. This is semi-automatic extraction using reviewed seed volumes and quantiles of the supporting Gaussians, not discovery of every object in the room. The bounds were inspected in multiple rendered views. Each record has stable `objectId`, `equipmentType`, metric `bounds` and `supportingSplats`. Keep `objectId` separate from the synthetic workbook's `asset_id`. Only the primary pump has a walkable `service` cell. The detector returns image-space boxes for the 11 catalog IDs. Other catalog boxes are available for proximity and workbook mapping.
 
 ## Shared agreements before integration
 
@@ -235,10 +235,33 @@ The generated `assets/valmet/site.json` now has 11 reviewed objects: five pumps,
 | Diagnostics | Condition, observations, hypotheses, source IDs, uncertainty and next check |
 | Local operation | Vision inference must run on the phone; record location of scene preprocessing, training and diagnostics separately. Prove offline inference on device |
 
+## Brief coverage and device evidence
+
+- The supplied DOCX names the original Industrial Boiler Room PLY. In that
+  archive 502,482 of 1,506,136 records pass the structural guard. The team uses
+  the complete registered Equipment Room replacement. The scene scale remains
+  a model-unit-to-metre assumption.
+- The local Core ML detector recognizes the 11 trained catalog IDs. Its
+  capture-time projection must agree with each mapped 3D frame. Teal frames
+  and their synthetic workbook conditions come from proximity within 2.5 m.
+  Yellow boxes require two consecutive image detections.
+- The iPhone scripted 3.10 m first-person route confirmed the pump, showed
+  up to four mapped nearby 3D frames in one view, and displayed the
+  workbook-based next check at arrival. The first-person AR walkthrough also remains available for manual
+  use. A physical walkthrough with Wi-Fi and cellular disabled is pending.
+- The iPhone crate test localized two positions from rendered QR corners. It
+  blocked the original route, then blocked the active detour and reopened 27
+  cells when moved. The test uses a tagged object and a stationary camera
+  at the route start. The interactive crate demo supports movement and a
+  no-route state, with planner tests for a fully blocked corridor.
+- Arrival shows a deterministic summary and the existing workbook evidence
+  report. The diagnostic model and submission materials are separate from
+  the scene extraction and iPhone integration.
+
 ## Known gaps and decisions
 
 - The full brief favours lightweight UI and backend intelligence. iOS with live on-phone recognition is our chosen product requirement; keep it focused so the scored spatial/data/diagnostic work is delivered.
-- The scene builder uses 11 visually reviewed seed volumes. The fine-tuned detector is limited to these 11 object identities in rendered views.
+- The scene builder uses 17 visually reviewed seed volumes. The fine-tuned detector is limited to these 11 object identities in rendered views.
 - The replacement PLY passed structural validation. Recheck registered equipment bounds in the complete scene before publishing detection metrics.
 - Workbook scene coordinates are placeholders. Remap them to extracted objects; the brief explicitly allows procedural/random metadata association.
 - The local workbook contains 4,320 telemetry samples. Its referenced `telemetry_full_14d_30min.csv` is not in the supplied ZIP. Use the included sample unless more data is provided.

@@ -64,7 +64,11 @@ pass.colorAttachments[0].storeAction = .store
 pass.colorAttachments[0].clearColor = MTLClearColor(red: 0.10, green: 0.11, blue: 0.12, alpha: 1)
 
 struct Site: Decodable {
-  struct Object: Decodable { let objectId: String; let bounds: [[Float]] }
+  struct Object: Decodable {
+    let objectId: String
+    let bounds: [[Float]]
+    let detectorEnabled: Bool?
+  }
   let width, depth: Int
   let cellSize: Float
   let floor: [SIMD2<Int>]?
@@ -73,7 +77,8 @@ struct Site: Decodable {
   let objects: [Object]
 }
 let site = try JSONDecoder().decode(Site.self, from: Data(contentsOf: assets.appendingPathComponent("site.json")))
-let target = site.objects[0]
+let detectorObjects = site.objects.filter { $0.detectorEnabled != false }
+let target = detectorObjects[0]
 let evaluate = CommandLine.arguments.contains("--evaluate")
 let evaluateCatalog = CommandLine.arguments.contains("--evaluate-catalog")
 let origin = site.originShift ?? .zero
@@ -89,13 +94,13 @@ func vector(_ p: SIMD3<Float>, _ w: Float) -> SIMD4<Float> { SIMD4(p.x, p.y, p.z
 func annotationBuffers() -> [MTLBuffer] {
   let memberships = (0..<count).map { i -> Int in
     let p = rows.load(fromByteOffset: i * stride, as: SIMD4<Float>.self)
-    return site.objects.firstIndex { o in
+    return detectorObjects.firstIndex { o in
       let lo = o.bounds[0], hi = o.bounds[1]
       return p.x >= lo[0] && p.x <= hi[0] && p.y >= lo[1] && p.y <= hi[1] &&
         p.z >= lo[2] && p.z <= hi[2]
     } ?? -1
   }
-  return (0..<((site.objects.count + 2) / 3)).map { group in
+  return (0..<((detectorObjects.count + 2) / 3)).map { group in
     let buffer = device.makeBuffer(bytes: rows, length: data.count, options: .storageModeShared)!
     for (i, member) in memberships.enumerated() {
       let base = buffer.contents().advanced(by: i * stride)
@@ -162,7 +167,7 @@ func render(eye legacyEye: SIMD3<Float>, aim: SIMD3<Float>, bounds: [[Float]]? =
       pixels.withUnsafeMutableBytes {
         texture.getBytes($0.baseAddress!, bytesPerRow: width * 4, from: area, mipmapLevel: 0)
       }
-      for channel in 0..<3 where group * 3 + channel < site.objects.count {
+      for channel in 0..<3 where group * 3 + channel < detectorObjects.count {
         var minX = width, minY = height, maxX = 0, maxY = 0, support = 0
         for y in 0..<height {
           for x in 0..<width where pixels[(y * width + x) * 4 + channel] >= 80 {
@@ -173,7 +178,7 @@ func render(eye legacyEye: SIMD3<Float>, aim: SIMD3<Float>, bounds: [[Float]]? =
         }
         let w = maxX - minX + 1, h = maxY - minY + 1
         if support >= 75 && w >= 12 && h >= 12 {
-          labels.append(["label": site.objects[group * 3 + channel].objectId,
+          labels.append(["label": detectorObjects[group * 3 + channel].objectId,
                          "coordinates": ["x": Double(minX + maxX) / 2, "y": Double(minY + maxY) / 2,
                                          "width": Double(w), "height": Double(h)]])
         }
@@ -232,9 +237,9 @@ if evaluate {
   let checks: [(String, SIMD3<Float>, Site.Object, Bool)] = [
     ("held-out nearby", SIMD3(5.31, 1.50, 1.96), target, true),
     ("held-out partially occluded", SIMD3(4.625, 1.50, 1.625), target, true),
-    ("different red pump", SIMD3(5.375, 1.50, 1.875), site.objects[1], false),
-    ("different wall pump", SIMD3(6.50, 1.50, 1.25), site.objects[2], false),
-    ("blue inline valve", SIMD3(6.50, 1.50, 1.25), site.objects[5], false),
+    ("different red pump", SIMD3(5.375, 1.50, 1.875), detectorObjects[1], false),
+    ("different wall pump", SIMD3(6.50, 1.50, 1.25), detectorObjects[2], false),
+    ("blue inline valve", SIMD3(6.50, 1.50, 1.25), detectorObjects[5], false),
   ]
   var errors = 0
   for (name, eye, object, expected) in checks {
@@ -261,7 +266,7 @@ if evaluateCatalog {
   typealias LabeledPrint = (objectID: String, observation: VNFeaturePrintObservation)
   var training: [LabeledPrint] = []
   var evaluation: [LabeledPrint] = []
-  for (index, object) in site.objects.enumerated() {
+  for (index, object) in detectorObjects.enumerated() {
     let eyeSets: [SIMD3<Float>]
     if index == 0 {
       eyeSets = trainingEyes.prefix(2).map { $0.1 } + [SIMD3(5.29, 1.49, 1.89)]
@@ -316,7 +321,7 @@ if !routeDataset && (highQuality || CommandLine.arguments.contains("--detection-
     try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
     var index: [[String: Any]] = []
     var counts: [String: Int] = [:]
-    for (i, object) in site.objects.enumerated() {
+    for (i, object) in detectorObjects.enumerated() {
       for sample in 0..<samples {
         let base: SIMD3<Float> = i < 2 ? SIMD3(5.16, 1.50, 1.73) : SIMD3(6.48, 1.50, 1.29)
         // Keep disjoint pose groups for training, validation and final test.
@@ -401,7 +406,7 @@ if actuatorTraining {
   let folder = directory.appendingPathComponent("train")
   try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
   let buffers = annotationBuffers()
-  let targets = site.objects.filter {
+  let targets = detectorObjects.filter {
     $0.objectId.hasSuffix(":left-blue-actuator") || $0.objectId.hasSuffix(":middle-blue-actuator")
   }
   let pump = center(of: target)

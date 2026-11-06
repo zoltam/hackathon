@@ -28,6 +28,9 @@ class AssetDiagnosis {
   final double? confidence;
   final List<Evidence> evidence, hypotheses, qualityIssues;
 
+  String get arrivalSummary =>
+      '$tag · $condition · Synthetic workbook\nNext check · $nextCheck';
+
   String get reportText => [
     '$tag · $condition ($assetId)',
     mappingNotice,
@@ -81,7 +84,9 @@ class AssetData {
     final assetId = (_json['mappings'] as RecordData)[objectId];
     if (assetId == null) return null;
     final condition = _currentState(assetId)?['condition_state'];
-    return condition is String && condition.isNotEmpty ? condition : null;
+    return condition is String && condition.isNotEmpty
+        ? '$assetId · $condition'
+        : null;
   }
 
   AssetDiagnosis? forObject(String objectId) {

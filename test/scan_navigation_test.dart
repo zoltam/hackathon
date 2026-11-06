@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -9,10 +10,17 @@ void main() {
   test(
     'reviewed scan regions connect without moving equipment or opening obstacles',
     () {
-      final site = Site.fromJson(scan.readAsStringSync());
+      final source = scan.readAsStringSync();
+      final site = Site.fromJson(source);
+      final catalog =
+          (jsonDecode(source) as Map<String, dynamic>)['objects'] as List;
       expect(site.cellSize, .1);
       expect(site.originShift, [2, 0, 6.25]);
-      expect(site.objects, hasLength(11));
+      expect(site.objects, hasLength(17));
+      expect(
+        catalog.where((object) => object['detectorEnabled'] != false),
+        hasLength(11),
+      );
       final pump = site.objects.firstWhere(
         (o) => o.objectId == 'boiler-room:red-circulation-pump',
       );

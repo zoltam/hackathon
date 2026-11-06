@@ -35,7 +35,7 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
   let view: MTKView
   let vision = RenderedVision()
   var frameCounter: FrameCounter?
-  var onFrameReady: ((simd_float4x4) -> Void)?
+  var onFrameReady: ((simd_float4x4, simd_float4x4, CGSize) -> Void)?
   var obstacleCenter: SIMD2<Float>?
   private var renderLimit: CGFloat = 1200
   private var slowFrames = 0
@@ -255,7 +255,7 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
           self.slowFrames = now - frame.timestamp > 0.16 ? self.slowFrames + 1 : 0
           if self.slowFrames >= 3 { self.renderLimit = 900 }
         }
-        self.onFrameReady?(pose)
+        self.onFrameReady?(pose, projection, size)
       }
     }
     command.commit()

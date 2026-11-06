@@ -57,8 +57,11 @@ def export(workbook, site, mappings=None, *, include_nearby=False):
 
     ids = sorted(object_id(o) for o in site['objects'] if o.get('service') is not None)
     if include_nearby:
-        # Assign the service targets first, keeping their original ranked conditions.
-        ids += sorted(object_id(o) for o in site['objects'] if o.get('service') is None)
+        # Keep the service target and existing detector catalog assignments stable.
+        nearby = (o for o in site['objects'] if o.get('service') is None)
+        ids += [object_id(o) for o in sorted(
+            nearby, key=lambda o: (o.get('detectorEnabled') is False, object_id(o))
+        )]
     if len(set(ids)) != len(ids):
         raise ValueError('Mapped scene objects need unique object_id values')
     mapping_method = 'synthetic_ranked' if mappings is None else 'synthetic_explicit'

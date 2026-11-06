@@ -27,6 +27,44 @@ CELL_SIZE = .10
 CAMERA_HEIGHT = 1.50
 OBSTACLE_TOP = CAMERA_HEIGHT + .05
 
+# Bounds reviewed against multiple renders in the registered frame before originShift.
+# These objects provide scene context and have no classes in the released detector.
+SURROUNDING_SEEDS = [
+    ('floor-fan', 'Portable floor fan', 'fan', (8.37, .015, .27), (8.66, .46, .73)),
+    ('floor-carton', 'Floor carton', 'carton', (7.96, .005, .86), (8.50, .355, 1.35)),
+    ('blue-platform-trolley', 'Blue platform trolley', 'trolley', (7.77, .005, -.40), (8.45, .24, .37)),
+    ('rolling-chair', 'Rolling chair', 'chair', (5.70, .005, .62), (6.58, .90, 1.36)),
+    ('white-jerrycan', 'White jerrycan', 'container', (5.71, .005, 1.47), (5.97, .29, 1.71)),
+    ('black-storage-bin', 'Black storage bin', 'bin', (7.75, .005, -1.78), (8.32, .54, -1.15)),
+]
+
+
+def extract_surroundings(xyz, opacity, cell, origin):
+    objects = []
+    for slug, name, kind, minimum, maximum in SURROUNDING_SEEDS:
+        lo, hi = np.round(np.array([minimum, maximum]) + origin, 4)
+        support = int(np.count_nonzero(
+            ((xyz >= lo) & (xyz <= hi)).all(axis=1) & (opacity >= .12)))
+        if support < 50:
+            raise ValueError(f'Mapped object {slug} has insufficient scan evidence: {support} points')
+        x, z = np.floor(lo[[0, 2]] / cell).astype(int).tolist()
+        end_x, end_z = np.ceil(hi[[0, 2]] / cell).astype(int).tolist()
+        objects.append({
+            'objectId': f'boiler-room:{slug}',
+            'name': name,
+            'equipmentType': kind,
+            'bounds': [lo.tolist(), hi.tolist()],
+            'supportingSplats': support,
+            'x': x,
+            'z': z,
+            'width': end_x - x,
+            'depth': end_z - z,
+            'height': float(hi[1]),
+            'cells': [],
+            'detectorEnabled': False,
+        })
+    return objects
+
 
 def observed_floor(xyz, opacity_logits, grid, covariance=None):
     """Keep measured floor support; let the runtime planner apply radius clearance."""
@@ -199,7 +237,8 @@ def prepare(source, destination):
             'connectedClearanceCells': len(safe_dist),
         },
         'originShift': origin.tolist(), 'shRotation': SOURCE_ROTATION.tolist(),
-        'objects': extract_equipment(xyz, opacity, cell, service, origin),
+        'objects': (extract_equipment(xyz, opacity, cell, service, origin)
+                    + extract_surroundings(xyz, opacity, cell, origin)),
     }
 
     rgb = .5 + .28209479 * values[:, 7:10]

@@ -8,6 +8,21 @@ import 'asset_data.dart';
 import 'inspection_details.dart';
 import 'navigation.dart';
 
+Future<AssetData?> _loadAssetData([
+  Future<AssetData?> Function()? loader,
+]) async {
+  try {
+    if (loader != null) return await loader();
+    return AssetData.fromJson(
+      await rootBundle.loadString('assets/valmet/asset-data.json'),
+    );
+  } on FlutterError {
+    return null;
+  } on FormatException {
+    return null;
+  }
+}
+
 void main() => runApp(const ValmetApp());
 
 class ValmetApp extends StatelessWidget {
@@ -53,6 +68,19 @@ class _FieldScreenState extends State<FieldScreen> {
   }
 
   Future<Object?> _handleNativeCall(MethodCall call) async {
+    if (call.method == 'serviceJourneyEvidence') {
+      final request = call.arguments as Map<Object?, Object?>;
+      final data = await _loadAssetData();
+      final target = data?.forObject(request['targetID'] as String);
+      return {
+        'inspectionReport': target?.reportText,
+        'inspectionSummary': target?.arrivalSummary,
+        'conditions': {
+          for (final id in (request['objectIDs'] as List).cast<String>())
+            id: data?.conditionForObject(id),
+        },
+      };
+    }
     if (call.method != 'replanServiceRoute') {
       throw MissingPluginException();
     }
@@ -175,20 +203,8 @@ class _SiteSimulationState extends State<SiteSimulation> {
 
   Future<void> _openWorld() async {
     final selectedTarget = _target;
-    AssetData? data;
-    String? report;
-    try {
-      data = widget.loadAssetData != null
-          ? await widget.loadAssetData!()
-          : AssetData.fromJson(
-              await rootBundle.loadString('assets/valmet/asset-data.json'),
-            );
-      report = data?.forObject(selectedTarget?.objectId ?? '')?.reportText;
-    } on FlutterError {
-      // Navigation remains available when local workbook data is absent.
-    } on FormatException {
-      // The viewer will explicitly report unavailable inspection evidence.
-    }
+    final data = await _loadAssetData(widget.loadAssetData);
+    final diagnosis = data?.forObject(selectedTarget?.objectId ?? '');
     if (!mounted || selectedTarget != _target) return;
     final site = widget.site;
     final visible = site.visibleObjects(_moved).toList();
@@ -198,7 +214,8 @@ class _SiteSimulationState extends State<SiteSimulation> {
     await widget.openNative(
       'openWorld',
       jsonEncode({
-        'inspectionReport': report,
+        'inspectionReport': diagnosis?.reportText,
+        'inspectionSummary': diagnosis?.arrivalSummary,
         'name': site.name,
         'keyControls': _keyControls,
         'obstacleDemo': _obstacleDemo && _route.isNotEmpty,

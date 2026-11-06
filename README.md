@@ -121,7 +121,9 @@ gold service marker in the 3D viewer. Walk with the phone or enable **Forward an
 move with arrows and turn by rotating the phone. **Show camera** switches to
 the camera feed, and **Reset alignment** lets you align again. Arrival uses
 horizontal distance to the service point, separately from target recognition.
-The viewer lists up to three nearby catalog objects and their condition. A yellow
+The viewer frames nearby catalog objects within 2.5 m and labels visible frames
+with their synthetic condition. The panel lists the three closest objects.
+The scene includes 17 reviewed frames, of which 11 also have detector classes. A yellow
 box marks a visual detection after two consecutive frames agree with its mapped
 3D bounds. At the service point, open **Inspection evidence** for the target.
 
