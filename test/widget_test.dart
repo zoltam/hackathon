@@ -1,4 +1,7 @@
+import 'dart:convert';
 import 'dart:io';
+
+import 'package:flutter/services.dart';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:valmet_field_app/main.dart';
@@ -15,7 +18,22 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Walk inside the 3D model'), findsOneWidget);
-    expect(find.text('Simulate walk'), findsNothing);
-    expect(find.text('Record or replay a camera route'), findsNothing);
+    const channel = MethodChannel('valmet/field');
+    final messages = <bool>[];
+    final messenger = tester.binding.defaultBinaryMessenger;
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      expect(call.method, 'openWorld');
+      final request =
+          jsonDecode(call.arguments as String) as Map<String, dynamic>;
+      messages.add(request['keyControls'] as bool);
+      return null;
+    });
+    addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+    final open = find.text('Walk inside the 3D model');
+    await tester.tap(open);
+    await tester.tap(find.text('Keyboard and screen controls'));
+    await tester.pumpAndSettle();
+    await tester.tap(open);
+    expect(messages, [false, true]);
   });
 }

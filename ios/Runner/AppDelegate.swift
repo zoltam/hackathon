@@ -10,9 +10,6 @@ import UIKit
     let channel = FlutterMethodChannel(name: "valmet/field", binaryMessenger: registrar.messenger())
     channel.setMethodCallHandler { call, result in
       guard call.method == "openWorld" else { return result(FlutterMethodNotImplemented) }
-      guard ARWorldTrackingConfiguration.isSupported else {
-        return result(FlutterError(code: "unsupported", message: "AR needs a compatible physical iPhone.", details: nil))
-      }
       guard let host = UIApplication.shared.connectedScenes
         .compactMap({ $0 as? UIWindowScene }).flatMap({ $0.windows })
         .first(where: { $0.isKeyWindow })?.rootViewController,
@@ -22,6 +19,9 @@ import UIKit
       guard let payload = call.arguments as? String,
             let model = try? JSONDecoder().decode(WalkSite.self, from: Data(payload.utf8)) else {
         return result(FlutterError(code: "invalid_model", message: "Could not open this 3D model.", details: nil))
+      }
+      guard model.keyControls || ARWorldTrackingConfiguration.isSupported else {
+        return result(FlutterError(code: "unsupported", message: "AR needs a compatible physical iPhone.", details: nil))
       }
       let key = registrar.lookupKey(forAsset: "assets/valmet/boiler-room.splats")
       guard let path = Bundle.main.path(forResource: key, ofType: nil),
