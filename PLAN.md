@@ -28,6 +28,22 @@ P-005 is the primary demo. Demonstrate the five other service targets in verific
 | P-005 | Red circulation pump | `[69,65]` | 2.0 m |
 | CV-003 | Blue inline valve | `[88,67]` | 0.9 m |
 
+## Render quality
+
+The app now starts with an 1,800 px long edge and steps down through 1,440,
+1,200 and 900 when completed frames stay slow. Sustained fast frames recover
+quality. The previous cap was 1,200 and could fall permanently to 900.
+Detection captures the clean render before drawing route guidance. The model
+keeps its existing 384 × 384 input contract.
+
+On iOS 26.5 simulator, all 20 approved RF-DETR fixed views confirmed with
+828 × 1,800 source frames and the negative view stayed empty. The 2.0 m
+P-005 route passed with 54 confirmed samples and the correct report. A
+15-second moving-view benchmark measured 27.60 GPU FPS and 4.00 Hz RF-DETR
+with 53 current and seven stale results. R3 remained unavailable there.
+The generic iOS release build passed. Visual improvement varies by the
+detail and visibility captured in the source scan.
+
 ## Orange-actuator model comparison
 
 The 259-view validation set contains 26 A and 25 B annotations. At the locked
