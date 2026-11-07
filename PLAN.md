@@ -507,10 +507,23 @@ workbook report, with no confirmed target. All 19 native simulator tests
 passed, and the generic iOS release build compiled. The normal iOS app still
 uses R3 for its primary detections.
 
-The same simulator build reached the correct workbook report for all six
-service targets. The RF-DETR journey gate passed for P-001 (3.4 m), P-002
-(2.9 m), P-005 (2.0 m) and CV-003 (0.9 m). P-003 (6.0 m) and P-004
-(2.3 m) arrived with the correct report but did not confirm the target.
+The same simulator build passed the RF-DETR journey gate at least once
+for every service target. Each passing run confirmed the target, arrived,
+and showed the matching workbook report and nearby mapped objects.
+
+| Workbook target | Start cell | Distance |
+| --- | --- | ---: |
+| P-001 | `[69,65]` | 3.4 m |
+| P-002 | `[69,65]` | 2.9 m |
+| P-003 | `[94,66]` | 0.8 m |
+| P-004 | `[87,44]` | 4.8 m |
+| P-005 | `[69,65]` | 2.0 m |
+| CV-003 | `[88,67]` | 0.9 m |
+
+The 6.0 m P-003, 2.3 m P-004 and 3.0 m CV-003 attempts also arrived
+with the correct reports. Target recognition remained unconfirmed on
+those approaches. The simulator tests exercise RF-DETR. The normal app's
+R3 path still has the simulator inference-context error.
 
 - The supplied DOCX names the original Industrial Boiler Room PLY. In that
   archive 502,482 of 1,506,136 records pass the structural guard. The team uses
