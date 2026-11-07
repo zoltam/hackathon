@@ -298,12 +298,21 @@ class SiteSimulation extends StatefulWidget {
   State<SiteSimulation> createState() => _SiteSimulationState();
 }
 
+typedef _ServiceSelection = ({SiteObject target, Cell? start});
+
 class _SiteSimulationState extends State<SiteSimulation> {
+  static const _demoStart = (50, 80);
+  static const _demoTargetId = 'boiler-room:far-circulation-pump';
+
   late final _assetData = _loadAssetData(widget.site, widget.loadAssetData);
   late final _devices = widget.site.objects
       .where((o) => o.service != null && !o.geometryOnly)
       .toList();
-  late SiteObject? _target = _devices.firstOrNull;
+  late _ServiceSelection? _selection = _devices.isEmpty
+      ? null
+      : (target: _devices.first, start: null);
+  SiteObject? get _target => _selection?.target;
+  Cell get _start => _selection?.start ?? widget.site.start;
   late NavigationJourney? _journey = _createJourney();
   List<Cell> get _route => _journey?.route ?? [];
   bool _moved = false;
@@ -321,13 +330,15 @@ class _SiteSimulationState extends State<SiteSimulation> {
         : NavigationJourney(
             site: widget.site,
             target: target,
+            start: _start,
             moved: _moved,
             clearanceMetres: _clearanceMetres,
           );
   }
 
   Future<void> _openWorld({bool simulate = false}) async {
-    final selectedTarget = _target;
+    final selection = _selection;
+    final selectedTarget = selection?.target;
     final data = await _assetData;
     final diagnosis = selectedTarget == null
         ? null
@@ -335,7 +346,7 @@ class _SiteSimulationState extends State<SiteSimulation> {
             selectedTarget.objectId,
             equipmentType: selectedTarget.equipmentType,
           );
-    if (!mounted || selectedTarget != _target || (simulate && _route.isEmpty)) {
+    if (!mounted || selection != _selection || (simulate && _route.isEmpty)) {
       return;
     }
     final site = widget.site;
@@ -361,7 +372,7 @@ class _SiteSimulationState extends State<SiteSimulation> {
         'cellSize': site.cellSize,
         'originShift': site.originShift,
         'shRotation': site.shRotation,
-        'start': pair(site.start),
+        'start': pair(_start),
         'route': _route.map(pair).toList(),
         'clearanceMetres': _clearanceMetres,
         if (person != null) 'eyeHeightMetres': person.eyeHeightMetres,
@@ -413,26 +424,33 @@ class _SiteSimulationState extends State<SiteSimulation> {
         const SizedBox(height: 12),
         FutureBuilder<SpatialAssetData?>(
           future: _assetData,
-          builder: (context, snapshot) => DropdownButtonFormField<SiteObject>(
-            initialValue: _target,
-            decoration: const InputDecoration(labelText: 'Service target'),
-            items: [
-              for (final device in _devices)
-                DropdownMenuItem(
-                  value: device,
-                  child: Text(switch (_workbookTag(device, snapshot.data)) {
-                    final String tag => '$tag · ${device.name}',
-                    null => device.name,
-                  }),
-                ),
-            ],
-            onChanged: _devices.isEmpty
-                ? null
-                : (target) => setState(() {
-                    _target = target;
-                    _journey = _createJourney();
-                  }),
-          ),
+          builder: (context, snapshot) =>
+              DropdownButtonFormField<_ServiceSelection>(
+                initialValue: _selection,
+                decoration: const InputDecoration(labelText: 'Service target'),
+                items: [
+                  for (final device in _devices)
+                    DropdownMenuItem(
+                      value: (target: device, start: null),
+                      child: Text(switch (_workbookTag(device, snapshot.data)) {
+                        final String tag => '$tag · ${device.name}',
+                        null => device.name,
+                      }),
+                    ),
+                  for (final device in _devices)
+                    if (device.objectId == _demoTargetId)
+                      DropdownMenuItem(
+                        value: (target: device, start: _demoStart),
+                        child: const Text('Long-route demo · P-001 pump'),
+                      ),
+                ],
+                onChanged: _devices.isEmpty
+                    ? null
+                    : (selection) => setState(() {
+                        _selection = selection;
+                        _journey = _createJourney();
+                      }),
+              ),
         ),
         const SizedBox(height: 12),
         Text('Settings', style: Theme.of(context).textTheme.titleMedium),
@@ -502,7 +520,7 @@ class _SiteSimulationState extends State<SiteSimulation> {
             '${person.headMarginMetres.toStringAsFixed(2)} m overhead margin',
           ),
         if (!site.isWalkable(
-          site.start,
+          _start,
           moved: _moved,
           clearanceMetres: _clearanceMetres,
         ))

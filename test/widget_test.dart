@@ -9,6 +9,75 @@ import 'package:valmet_field_app/main.dart';
 import 'package:valmet_field_app/site.dart';
 
 void main() {
+  testWidgets('starts the long-route demo at the far end of the room', (
+    tester,
+  ) async {
+    final site = Site.fromJson(
+      File('assets/valmet/site.json').readAsStringSync(),
+    );
+    final requests = <Map<String, dynamic>>[];
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SiteSimulation(
+            site: site,
+            loadAssetData: () async => null,
+            openNative: (method, [data]) async {
+              expect(method, 'openServiceSimulation');
+              requests.add(jsonDecode(data!) as Map<String, dynamic>);
+            },
+          ),
+        ),
+      ),
+    );
+
+    final dropdown = find.ancestor(
+      of: find.text('Service target'),
+      matching: find.byWidgetPredicate(
+        (widget) => widget is DropdownButtonFormField,
+      ),
+    );
+    for (final option in [
+      'Long-route demo · P-001 pump',
+      'Far circulation pump',
+    ]) {
+      await tester.scrollUntilVisible(dropdown, -200);
+      await tester.tap(dropdown);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(option).last);
+      await tester.pumpAndSettle();
+      final simulate = find.text('Simulate service visit');
+      await tester.scrollUntilVisible(simulate, 200);
+      await tester.tap(simulate);
+      await tester.pumpAndSettle();
+    }
+
+    expect(requests, hasLength(2));
+    final [demo, regular] = requests;
+    final route = (demo['route'] as List)
+        .cast<List>()
+        .map((cell) => (cell[0] as int, cell[1] as int))
+        .toList();
+    final pump = site.objects.singleWhere(
+      (object) => object.objectId == 'boiler-room:far-circulation-pump',
+    );
+    expect(demo['start'], [50, 80]);
+    expect(route.first, (50, 80));
+    expect(route.last, pump.service);
+    expect(site.metres(route), closeTo(6.4, 0.001));
+    final directions = [
+      for (var i = 1; i < route.length; i++)
+        (route[i].$1 - route[i - 1].$1, route[i].$2 - route[i - 1].$2),
+    ];
+    final turns = [
+      for (var i = 1; i < directions.length; i++)
+        if (directions[i] != directions[i - 1]) i,
+    ];
+    expect(turns.length, greaterThanOrEqualTo(3));
+    expect(regular['start'], [site.start.$1, site.start.$2]);
+    expect(demo['target'], regular['target']);
+  });
+
   testWidgets('passes the selected frame rate to the 3D viewer', (
     tester,
   ) async {

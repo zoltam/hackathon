@@ -10,10 +10,11 @@ class NavigationJourney {
   NavigationJourney({
     required this.site,
     required this.target,
+    Cell? start,
     this.clearanceMetres = 0.2,
     this.speedMetresPerSecond = 0.7,
     this.moved = false,
-  }) {
+  }) : start = start ?? site.start {
     if (!speedMetresPerSecond.isFinite || speedMetresPerSecond <= 0) {
       throw ArgumentError.value(speedMetresPerSecond, 'speedMetresPerSecond');
     }
@@ -22,6 +23,7 @@ class NavigationJourney {
 
   final Site site;
   final SiteObject target;
+  final Cell start;
   final double clearanceMetres;
   final double speedMetresPerSecond;
   final bool moved;
@@ -34,7 +36,7 @@ class NavigationJourney {
   double get remainingMetres => max(0, lengthMetres - _travelled);
 
   Point<double> get position {
-    if (_route.isEmpty) return _center(site.start);
+    if (_route.isEmpty) return _center(start);
     final step = _travelled / site.cellSize;
     final index = min(step.floor(), _route.length - 1);
     final a = _center(_route[index]);
@@ -52,7 +54,7 @@ class NavigationJourney {
     _route = goal == null
         ? []
         : site.route(
-            site.start,
+            start,
             goal,
             moved: moved,
             clearanceMetres: clearanceMetres,
