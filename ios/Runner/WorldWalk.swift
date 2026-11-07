@@ -378,7 +378,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
   private var journeyConfirmedTarget = false
   #if targetEnvironment(simulator)
   private var journeyVision = (fresh: 0, stale: 0, qualified: 0, associated: 0, confirmed: 0)
-  private var journeyVisionClears = (age: 0, pose: 0)
+  private var journeyVisionExpiry = (hidden: 0, poseReset: 0)
   private var usesSimulatorJourneyDetector: Bool {
     visionMode == .journey && ProcessInfo.processInfo.arguments.contains("--simulator-rf16-journey")
   }
@@ -549,8 +549,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
         }
         return true
       }
-      self.lastDetection = detections.isEmpty ? nil : prediction.frame
-      let confirmedIDs = self.drawDetections(detections)
+      let confirmedIDs = self.drawDetections(detections, frame: prediction.frame)
       if self.visionMode == .benchmark, self.inBenchmarkWindow(CACurrentMediaTime()) {
         self.benchmarkOverlayAges.append(Int((CACurrentMediaTime() - prediction.frame.timestamp) * 1000))
         if !confirmedIDs.isEmpty { self.benchmarkConfirmedFrames += 1 }
@@ -616,8 +615,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
               let bounds = object.bounds else { return false }
         return RenderedVision.matches(detection, to: bounds, viewProjection: viewProjection)
       }
-      self.lastSupplementalDetection = detections.isEmpty ? nil : prediction.frame
-      let confirmed = self.drawDetections(detections, supplemental: true)
+      let confirmed = self.drawDetections(detections, frame: prediction.frame, supplemental: true)
       #if targetEnvironment(simulator)
       if self.usesSimulatorJourneyDetector, self.journeyStart != nil {
         // This test stream contains only the selected service target.
@@ -1135,7 +1133,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     if usesSimulatorJourneyDetector {
       print("VALMET_JOURNEY rf16_frames fresh=\(journeyVision.fresh) stale=\(journeyVision.stale) " +
             "qualified=\(journeyVision.qualified) associated=\(journeyVision.associated) confirmed=\(journeyVision.confirmed) " +
-            "history_clears_age=\(journeyVisionClears.age) history_clears_pose=\(journeyVisionClears.pose)")
+            "overlay_hides_age=\(journeyVisionExpiry.hidden) history_clears_pose=\(journeyVisionExpiry.poseReset)")
     }
     #endif
     print("VALMET_JOURNEY nearby_frames_max=\(journeyNearbyMax.frames) mapped_nearby_frames_max=\(journeyNearbyMax.mapped)")
@@ -1529,19 +1527,23 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
 
   private func isCurrent(_ frame: RenderedVision.Frame, comparedWith pose: simd_float4x4) -> Bool {
     // Avoid drawing boxes from an older view after the camera moves.
-    CACurrentMediaTime() - frame.timestamp < Self.detectionMaxAge &&
-      simd_distance(frame.pose.columns.3, pose.columns.3) <= 0.16 &&
-      simd_dot(frame.pose.columns.2, pose.columns.2) >= 0.99 &&
-      simd_dot(frame.pose.columns.0, pose.columns.0) >= 0.99
+    CACurrentMediaTime() - frame.timestamp < Self.detectionMaxAge && frame.matchesPose(pose)
   }
 
   @discardableResult private func drawDetections(_ detections: [RenderedVision.Detection],
+                                                  frame: RenderedVision.Frame? = nil,
                                                   supplemental: Bool = false) -> [String] {
     let bounds = virtual.bounds
     let path = UIBezierPath()
     let current = RenderedVision.strongestDetections(detections, supplemental: supplemental)
       .mapValues(\.bounds)
-    let previousBoxes = supplemental ? previousSupplementalBoxes : previousDetectionBoxes
+    let previousFrame = supplemental ? lastSupplementalDetection : lastDetection
+    let previousBoxes: [String: CGRect]
+    if let frame, let previousFrame, frame.follows(previousFrame, within: Self.detectionMaxAge) {
+      previousBoxes = supplemental ? previousSupplementalBoxes : previousDetectionBoxes
+    } else {
+      previousBoxes = [:]
+    }
     var confirmedIDs: [String] = []
     for (id, rawBox) in current {
       // Retain RF history while the last R3 box is still visible.
@@ -1558,20 +1560,31 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
       ), cornerRadius: 6))
     }
     // Average adjacent raw observations, without feeding the result back.
-    if supplemental { previousSupplementalBoxes = current } else { previousDetectionBoxes = current }
+    if supplemental {
+      previousSupplementalBoxes = current
+      lastSupplementalDetection = current.isEmpty ? nil : frame
+    } else {
+      previousDetectionBoxes = current
+      lastDetection = current.isEmpty ? nil : frame
+    }
+    setDetectionOverlay(path: path.isEmpty ? nil : path.cgPath,
+                        confirmed: Set(confirmedIDs), supplemental: supplemental)
+    return confirmedIDs
+  }
+
+  private func setDetectionOverlay(path: CGPath?, confirmed: Set<String>, supplemental: Bool) {
     let layer = supplemental ? supplementalLayer : detectionLayer
     CATransaction.begin()
     CATransaction.setDisableActions(true)
-    layer.frame = bounds
-    layer.path = path.cgPath
+    layer.frame = virtual.bounds
+    layer.path = path
     CATransaction.commit()
     if supplemental {
-      confirmedVisionIDs.supplemental = Set(confirmedIDs)
+      confirmedVisionIDs.supplemental = confirmed
     } else {
-      confirmedVisionIDs.primary = Set(confirmedIDs)
+      confirmedVisionIDs.primary = confirmed
     }
     updateVisionStatus()
-    return confirmedIDs
   }
 
   private func updateVisionStatus() {
@@ -1583,30 +1596,34 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
 
   private func clearDetections() {
     drawDetections([])
-    lastDetection = nil
   }
 
   private func clearSupplementalDetections() {
     drawDetections([], supplemental: true)
-    lastSupplementalDetection = nil
   }
 
   private func updateDetectionPose(_ pose: simd_float4x4) {
     currentPose = pose
-    if let lastDetection, !isCurrent(lastDetection, comparedWith: pose) {
-      clearDetections()
-    }
-    if let lastSupplementalDetection, !isCurrent(lastSupplementalDetection, comparedWith: pose) {
-      #if targetEnvironment(simulator)
-      if usesSimulatorJourneyDetector, journeyStart != nil {
-        if CACurrentMediaTime() - lastSupplementalDetection.timestamp >= Self.detectionMaxAge {
-          journeyVisionClears.age += 1
-        } else {
-          journeyVisionClears.pose += 1
-        }
+    if let lastDetection {
+      if !lastDetection.matchesPose(pose) {
+        clearDetections()
+      } else if detectionLayer.path != nil, !isCurrent(lastDetection, comparedWith: pose) {
+        // Hide aged boxes while keeping the prior raw sample for the next capture.
+        setDetectionOverlay(path: nil, confirmed: [], supplemental: false)
       }
-      #endif
-      clearSupplementalDetections()
+    }
+    if let lastSupplementalDetection {
+      if !lastSupplementalDetection.matchesPose(pose) {
+        #if targetEnvironment(simulator)
+        if usesSimulatorJourneyDetector, journeyStart != nil { journeyVisionExpiry.poseReset += 1 }
+        #endif
+        clearSupplementalDetections()
+      } else if supplementalLayer.path != nil, !isCurrent(lastSupplementalDetection, comparedWith: pose) {
+        #if targetEnvironment(simulator)
+        if usesSimulatorJourneyDetector, journeyStart != nil { journeyVisionExpiry.hidden += 1 }
+        #endif
+        setDetectionOverlay(path: nil, confirmed: [], supplemental: true)
+      }
     }
   }
 

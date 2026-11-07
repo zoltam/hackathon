@@ -46,6 +46,17 @@ final class RenderedVision {
     let pose: simd_float4x4
     let projection: simd_float4x4
     let timestamp: CFTimeInterval
+
+    func matchesPose(_ other: simd_float4x4) -> Bool {
+      simd_distance(pose.columns.3, other.columns.3) <= 0.16 &&
+        simd_dot(pose.columns.2, other.columns.2) >= 0.99 &&
+        simd_dot(pose.columns.0, other.columns.0) >= 0.99
+    }
+
+    func follows(_ previous: Frame, within interval: CFTimeInterval) -> Bool {
+      let gap = timestamp - previous.timestamp
+      return gap > 0 && gap < interval && previous.matchesPose(pose)
+    }
   }
 
   struct Detection {

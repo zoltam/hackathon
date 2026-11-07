@@ -145,6 +145,20 @@ class RunnerTests: XCTestCase {
     XCTAssertFalse(site.isAtServicePosition(SIMD2(0.15, 0.45), on: []))
   }
 
+  func testDetectionPairUsesCaptureGapAndMatchingPose() {
+    func frame(_ timestamp: CFTimeInterval, x: Float = 0) -> RenderedVision.Frame {
+      var pose = matrix_identity_float4x4
+      pose.columns.3.x = x
+      return .init(pose: pose, projection: matrix_identity_float4x4, timestamp: timestamp)
+    }
+    let previous = frame(10)
+    XCTAssertTrue(frame(10.25).follows(previous, within: 0.4))
+    XCTAssertFalse(frame(10.45).follows(previous, within: 0.4))
+    XCTAssertFalse(frame(10).follows(previous, within: 0.4))
+    XCTAssertFalse(frame(9.9).follows(previous, within: 0.4))
+    XCTAssertFalse(frame(10.25, x: 0.17).follows(previous, within: 0.4))
+  }
+
   func testSupplementalChairVetoUsesStrongestOverlappingHandTruck() {
     // Recorded projected detections in release-right-control-cabinet-03.png.
     let chair = RenderedVision.Detection(
