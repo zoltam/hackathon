@@ -78,6 +78,10 @@ None of the three views showed both actuator housings and their own
 connectors clearly. The same four-crop replay for the rear vessel at the
 locked 0.76 threshold retained 25 true positives and added one false
 positive. It was rejected.
+A later held-out-from-training A/B pilot used two previously archived
+test cells with fresh views. Both full-frame and four-crop replays
+found 3/3 of each ID with no false positives. It had no usable reverse
+pair and did not qualify either ID.
 
 ## Additional approaches and continuous clearance
 
@@ -95,18 +99,33 @@ reachable. Minimum modeled clearance was 0.15 m at a required 0.10 m.
 This covers the static camera grid, separate from the simulator vision
 and arrival checks.
 
-## Blue inline valve handoff candidate
+## Blue inline valve handoff
 
-At the validation-locked RF-DETR threshold 0.814663589, the projected and
-deduplicated archival comparison improved room results from 61/2/1 to
-62/0/0 (TP/FP/FN). The walking archive was unchanged at 7/0/0 and falls
-one positive below the eight-positive release gate. A separately frozen
-four-view walking-endpoint sample improved from 0/0/4 to 3/0/1, with no
-detections in two target-absent controls. This is supplementary static
-evidence. The app still uses R3 for this valve and for P-005. The right blue actuator was also checked at its
-locked threshold. Its walking result improved from 19/1/10 to 23/0/6,
-but the room archive gained one false positive in a target-absent view.
-R3 remains assigned to that actuator.
+At the locked 0.814663589 threshold, RF-DETR improved the projected room
+archive from 61/2/1 to 62/0/0 (TP/FP/FN). The original walking archive
+remained 7/0/0, one positive below the old support minimum. In ten new
+views from archived test cells disjoint from audited training and
+validation, RF-DETR improved from 4/2/6 to 10/0/0 and stayed empty in
+both target-absent controls.
+
+A separately frozen walking extension in nine of those test cells
+supplied 72 moving frames. At the planned 125 ms cadence, RF-DETR
+confirmed all nine clips using two consecutive observations. The overlay
+scored 63/0/9, with each missed frame the first in its clip. R3 confirmed
+four clips. These share the static test cells and the replay measures
+capture-time pairing, separate from real-time simulator inference.
+
+The app now uses RF-DETR for CV-003 with the existing R3 fallback.
+The regular simulator pipeline confirmed CV-003, arrived on the 3.0 m
+route and showed its workbook report. The 21 enabled RF-DETR IDs passed
+their fixed views and the entrance stayed empty. P-005 stays assigned
+to R3 and passed the simulator RF-DETR journey regression separately.
+The total enabled catalog stays at 30 of 33.
+
+The right blue actuator remains assigned to R3. RF-DETR improved its
+walking result from 19/1/10 to 23/0/6, but the room archive gained one
+false positive in a target-absent view.
+
 
 ## Ownership
 

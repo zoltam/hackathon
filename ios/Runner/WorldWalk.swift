@@ -617,6 +617,10 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
         return RenderedVision.matches(detection, to: bounds, viewProjection: viewProjection)
       }
       let confirmed = self.drawDetections(detections, frame: prediction.frame, supplemental: true)
+      if self.journeyStart != nil, let target = self.serviceTarget?.objectId,
+         replacements.contains(target) {
+        self.confirmJourneyTarget(confirmed)
+      }
       #if targetEnvironment(simulator)
       if self.usesSimulatorJourneyDetector, self.journeyStart != nil {
         // This test stream contains only the selected service target.

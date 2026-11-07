@@ -181,7 +181,7 @@ final class RenderedVision {
         topK > 0 && !approvedObjectIDs.isEmpty &&
         approvedObjectIDs.isSubset(of: labels) &&
         primaryReplacements.count == (replacesPrimaryObjectIDs?.count ?? 0) &&
-        primaryReplacements.isSubset(of: ["boiler-room:middle-blue-actuator"]) &&
+        primaryReplacements.isSubset(of: ["boiler-room:middle-blue-actuator", "boiler-room:blue-inline-valve"]) &&
         approvedObjectIDs.intersection(primaryIDs) == primaryReplacements
     }
 
