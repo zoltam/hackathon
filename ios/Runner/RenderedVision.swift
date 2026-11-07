@@ -61,6 +61,29 @@ final class RenderedVision {
     let inferenceMilliseconds: Int
   }
 
+  static func strongestDetections(_ detections: [Detection], supplemental: Bool) -> [String: Detection] {
+    // Each catalog ID names one object. Keep its strongest projected observation.
+    var strongest = Dictionary(detections.map { ($0.objectID, $0) }, uniquingKeysWith: {
+      $0.confidence >= $1.confidence ? $0 : $1
+    })
+    let chairID = "boiler-room:rolling-chair"
+    guard supplemental, let chair = strongest[chairID] else { return strongest }
+    for id in ["red-wheel-hand-truck", "yellow-wheel-hand-truck", "black-hand-truck"] {
+      guard let truck = strongest["boiler-room:" + id],
+            truck.confidence >= chair.confidence + 0.20 else { continue }
+      let overlap = chair.bounds.intersection(truck.bounds)
+      guard !overlap.isEmpty else { continue }
+      let intersection = overlap.width * overlap.height
+      let union = chair.bounds.width * chair.bounds.height +
+        truck.bounds.width * truck.bounds.height - intersection
+      if intersection >= 0.60 * union {
+        strongest.removeValue(forKey: chairID)
+        break
+      }
+    }
+    return strongest
+  }
+
   static func matches(_ detection: Detection, to bounds: [[Float]],
                       viewProjection: simd_float4x4) -> Bool {
     guard bounds.count == 2, bounds.allSatisfy({ $0.count == 3 && $0.allSatisfy(\.isFinite) }),
@@ -169,10 +192,23 @@ final class RenderedVision {
   private let supplementalQueue = DispatchQueue(label: "valmet.rendered-vision.supplemental", qos: .utility)
   private let supplementalReadback = Readback()
 
-  func loadSupplementalModel(at compiledURL: URL) {
+  #if targetEnvironment(simulator)
+  var simulatorJourneyTarget: String?
+  #endif
+
+  func loadSupplementalModel(at compiledURL: URL, completion: ((Bool) -> Void)? = nil) {
     dispatchPrecondition(condition: .onQueue(.main))
     stopSupplementalModel()
     let generation = supplementalGeneration
+    #if targetEnvironment(simulator)
+    let simulatorTarget = simulatorJourneyTarget
+    #endif
+    func reportFailure() {
+      guard let completion else { return }
+      DispatchQueue.main.async {
+        if self.supplementalGeneration == generation { completion(false) }
+      }
+    }
     supplementalQueue.async {
       do {
         let configuration = MLModelConfiguration()
@@ -187,8 +223,15 @@ final class RenderedVision {
               let contract = try? JSONDecoder().decode(SupplementalContract.self, from: Data(contractJSON.utf8)),
               contract.accepts(model.modelDescription) else {
           NSLog("Supplemental detector has an invalid contract")
+          reportFailure()
           return
         }
+        #if targetEnvironment(simulator)
+        if let simulatorTarget, !contract.classes.contains(simulatorTarget) {
+          reportFailure()
+          return
+        }
+        #endif
         let request = VNCoreMLRequest(model: try VNCoreMLModel(for: model))
         request.imageCropAndScaleOption = .scaleFill
         DispatchQueue.main.async {
@@ -196,9 +239,11 @@ final class RenderedVision {
           self.supplemental = (request, contract, generation)
           print("VALMET_SUPPLEMENTAL loaded=\(contract.approvedObjectIDs.count)")
           fflush(stdout)
+          completion?(true)
         }
       } catch {
         NSLog("Supplemental detector failed to load: %@", error.localizedDescription)
+        reportFailure()
       }
     }
   }
@@ -248,11 +293,21 @@ final class RenderedVision {
   // Use two slots for GPU readbacks. Skip frames if the model is busy.
   func capture(_ texture: MTLTexture, command: MTLCommandBuffer, frame: Frame) {
     let scheduled = nextSample ?? frame.timestamp
-    guard let request = detector?.request, frame.timestamp >= scheduled,
+    guard frame.timestamp >= scheduled else { return }
+    let stride = ((texture.width * 4 + 255) / 256) * 256
+    #if targetEnvironment(simulator)
+    if simulatorJourneyTarget != nil {
+      guard supplemental != nil, let blit = command.makeBlitCommandEncoder() else { return }
+      nextSample = max(scheduled + Self.sampleInterval, frame.timestamp + Self.sampleInterval / 2)
+      captureSupplemental(texture, command: command, blit: blit, frame: frame, stride: stride)
+      blit.endEncoding()
+      return
+    }
+    #endif
+    guard let request = detector?.request,
           let readback = readbacks.first(where: { $0.available.wait(timeout: .now()) == .success }) else { return }
     let width = texture.width, height = texture.height
     let readsObstacleTag = detectsObstacleTag
-    let stride = ((width * 4 + 255) / 256) * 256
     let length = stride * height
     if readback.buffer?.length != length {
       readback.buffer = texture.device.makeBuffer(length: length, options: .storageModeShared)
@@ -321,6 +376,11 @@ final class RenderedVision {
     guard let (request, contract, generation) = supplemental,
           readback.available.wait(timeout: .now()) == .success else { return }
     let width = texture.width, height = texture.height, length = stride * texture.height
+    #if targetEnvironment(simulator)
+    let approved = simulatorJourneyTarget.map { Set([$0]) } ?? contract.approvedObjectIDs
+    #else
+    let approved = contract.approvedObjectIDs
+    #endif
     if readback.buffer?.length != length {
       readback.buffer = texture.device.makeBuffer(length: length, options: .storageModeShared)
     }
@@ -356,7 +416,7 @@ final class RenderedVision {
             }
             let detections = try RFDETRDecoder.decode(features, classes: contract.classes,
                                                       thresholds: contract.thresholds, topK: contract.topK)
-              .filter { contract.approvedObjectIDs.contains($0.objectID) }
+              .filter { approved.contains($0.objectID) }
               .map { Detection(objectID: $0.objectID, confidence: $0.confidence, bounds: $0.bounds) }
             let prediction = Prediction(frame: frame, detections: detections, obstacleCenter: nil,
                                         inferenceMilliseconds: Int((CACurrentMediaTime() - started) * 1000))

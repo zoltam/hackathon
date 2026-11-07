@@ -376,6 +376,11 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
   private var verificationFrames = 0
   private var journeyStart: CFTimeInterval?
   private var journeyConfirmedTarget = false
+  #if targetEnvironment(simulator)
+  private var usesSimulatorJourneyDetector: Bool {
+    visionMode == .journey && ProcessInfo.processInfo.arguments.contains("--simulator-rf16-journey")
+  }
+  #endif
   private var journeyNearbyMax = (frames: 0, mapped: 0)
   var replanRoute: (([String: Any], @escaping (Any?) -> Void) -> Void)?
   private lazy var activeRoute = model.route {
@@ -548,12 +553,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
         self.benchmarkOverlayAges.append(Int((CACurrentMediaTime() - prediction.frame.timestamp) * 1000))
         if !confirmedIDs.isEmpty { self.benchmarkConfirmedFrames += 1 }
       }
-      if self.journeyStart != nil, !self.journeyConfirmedTarget,
-         let id = self.serviceTarget?.objectId, confirmedIDs.contains(id) {
-        self.journeyConfirmedTarget = true
-        print("VALMET_JOURNEY phase=target_confirmed id=\(id)")
-        fflush(stdout)
-      }
+      self.confirmJourneyTarget(confirmedIDs)
       if self.verificationPoses != nil {
         self.verificationSamples?.count += 1
         self.verificationSamples?.raw.formUnion(prediction.detections.map(\.objectID))
@@ -575,6 +575,9 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
       guard let self else { return }
       self.supplementalReplacement = nil
       self.clearSupplementalDetections()
+      #if targetEnvironment(simulator)
+      if self.usesSimulatorJourneyDetector { self.stopJourney(error: "simulator_rf16_stopped") }
+      #endif
       if self.benchmarkWarmupStart != nil { self.abortBenchmark(reason: "supplemental_stopped_during_warmup") }
     }
     renderer.vision.onSupplementalPrediction = { [weak self] prediction, replacements in
@@ -608,6 +611,9 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
       }
       self.lastSupplementalDetection = detections.isEmpty ? nil : prediction.frame
       let confirmed = self.drawDetections(detections, supplemental: true)
+      #if targetEnvironment(simulator)
+      if self.usesSimulatorJourneyDetector { self.confirmJourneyTarget(confirmed) }
+      #endif
       self.verificationSamples?.supplementalSamples += 1
       self.verificationSamples?.supplementalConfirmed.formUnion(confirmed)
       if self.verificationPoses != nil, !replacements.isEmpty {
@@ -684,6 +690,12 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     guard !started else { return }
     started = true
     if model.keyControls { becomeFirstResponder() }
+    #if targetEnvironment(simulator)
+    if usesSimulatorJourneyDetector {
+      startSimulatorJourneyDetector()
+      return
+    }
+    #endif
     renderer.vision.detectsObstacleTag = visionMode == .obstacle || model.obstacleDemo == true
     renderer.vision.loadModel(at: detectorURL) { [weak self] loaded in
       guard let self, !self.closed, self.view.window != nil else { return }
@@ -992,6 +1004,39 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     } else {
       print("VALMET_OBSTACLE result=passed observations=3 recovered=true")
     }
+    fflush(stdout)
+  }
+
+  #if targetEnvironment(simulator)
+  private func startSimulatorJourneyDetector() {
+    print("VALMET_JOURNEY vision_source=simulator-rf16")
+    fflush(stdout)
+    guard supplementalEnabled, let target = serviceTarget?.objectId,
+          let url = Bundle.main.url(forResource: "RFDETRSupplemental", withExtension: "mlmodelc") else {
+      print("VALMET_JOURNEY result=failed error=simulator_rf16_unavailable")
+      fflush(stdout)
+      return
+    }
+    renderer.vision.simulatorJourneyTarget = target
+    renderer.vision.loadSupplementalModel(at: url) { [weak self] loaded in
+      guard let self, !self.closed, self.view.window != nil else { return }
+      guard loaded else {
+        print("VALMET_JOURNEY result=failed error=simulator_rf16_unavailable")
+        fflush(stdout)
+        return
+      }
+      self.visionIdleText = "Vision · No equipment detected"
+      self.clearDetections()
+      self.startJourney()
+    }
+  }
+  #endif
+
+  private func confirmJourneyTarget(_ confirmedIDs: [String]) {
+    guard journeyStart != nil, !journeyConfirmedTarget,
+          let id = serviceTarget?.objectId, confirmedIDs.contains(id) else { return }
+    journeyConfirmedTarget = true
+    print("VALMET_JOURNEY phase=target_confirmed id=\(id)")
     fflush(stdout)
   }
 
@@ -1473,10 +1518,8 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
                                                   supplemental: Bool = false) -> [String] {
     let bounds = virtual.bounds
     let path = UIBezierPath()
-    // Each catalog ID names one physical object. Keep its strongest observation.
-    let current = Dictionary(detections.map { ($0.objectID, $0) }, uniquingKeysWith: {
-      $0.confidence >= $1.confidence ? $0 : $1
-    }).mapValues { $0.bounds }
+    let current = RenderedVision.strongestDetections(detections, supplemental: supplemental)
+      .mapValues(\.bounds)
     let previousBoxes = supplemental ? previousSupplementalBoxes : previousDetectionBoxes
     var confirmedIDs: [String] = []
     for (id, rawBox) in current {

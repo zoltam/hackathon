@@ -26,6 +26,9 @@ For this phase the obstacle map is static. A mapped target position is required 
 
 ## Phase 2 — detect changed obstacles and reroute
 
+New unexpected-obstacle detection and avoidance are deferred by the current
+project scope. The existing tagged demo is retained.
+
 After phase 1 works, demonstrate an object moved or introduced into the route **inside the simulated boiler room**.
 
 1. Change an obstacle's position in the rendered simulation. Keep the planner's initial map unchanged so the system must detect the discrepancy.
@@ -477,6 +480,29 @@ and loaded the matching report. The journey's new check line records
 arrival, Vision confirmation and workbook evidence independently while
 the overall journey still requires all of them.
 
+The rolling chair was enabled with the frozen 384 px RF-DETR weights and
+a 0.44 score threshold. It scored 77 true positives, zero false positives and
+16 misses on the archived 292 views and 9/0/0 on nine newly reviewed views
+with a co-visible hand truck. After capture-pose association, the app drops a
+chair box if a single-frame hand-truck detection overlaps it at IoU 0.60 or
+higher and scores at least 0.20 higher. On the already-seen
+48-view regression set this removed one truck false positive, changing the
+chair tally from 15/1/6 to 15/0/6. The new nine-view set had no veto triggers.
+The chair was confirmed in a rendered simulator view, and the entrance
+negative view showed no supplemental boxes. Three earlier fixtures missed
+on the chair-first run. All five previous positive fixtures confirmed again
+when run in their original order on the same build, and the entrance stayed
+empty. Simulator capture remains sensitive to run conditions.
+
+The simulator-only `--simulator-rf16-journey` flag runs the same render,
+two-frame confirmation, arrival and workbook checks with RF-DETR for the
+selected target. It is used with `--verify-service-journey` and an optimized
+Swift build. The alternate 2.0 m P-005 and 0.9 m CV-003 routes passed.
+The 3.0 m CV-003 route reached the service cell and showed the correct
+workbook report, with no confirmed target. All 19 native simulator tests
+passed, and the generic iOS release build compiled. The normal iOS app still
+uses R3 for its primary detections.
+
 - The supplied DOCX names the original Industrial Boiler Room PLY. In that
   archive 502,482 of 1,506,136 records pass the structural guard. The team uses
   the complete registered Equipment Room replacement. The scene scale remains
@@ -549,7 +575,7 @@ the overall journey still requires all of them.
 ## Known gaps and decisions
 
 - The full brief favours lightweight UI and backend intelligence. iOS with live on-phone recognition is our chosen product requirement; keep it focused so the scored spatial/data/diagnostic work is delivered.
-- The scene builder uses 33 visually reviewed seed volumes. The enabled detectors cover 29 identities. Rolling chair, rear red vessel and both orange actuators remain below release criteria. Fixed views still expose a wall-pump miss, despite successful scripted service journeys.
+- The scene builder uses 33 visually reviewed seed volumes. The enabled detectors cover 30 identities. The rear red vessel and both orange actuators remain below release criteria. Fixed views still expose a wall-pump miss, despite successful scripted service journeys.
 - The replacement PLY passed structural validation. Recheck registered equipment bounds in the complete scene before publishing detection metrics.
 - Workbook scene coordinates are placeholders. Remap them to extracted objects; the brief explicitly allows procedural/random metadata association.
 - The local workbook contains 4,320 telemetry samples. Its referenced `telemetry_full_14d_30min.csv` is not in the supplied ZIP. Use the included sample unless more data is provided.

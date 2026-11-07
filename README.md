@@ -77,8 +77,9 @@ two orange actuators and the rear red vessel. Validation-only threshold changes
 qualified four more instances on the archived 292-view test. Floor carton,
 black shelf cart and yellow-wheel hand truck also passed on new views. Short
 step ladder qualified on the archive, with 62 positive examples. The new-view
-set had no positive examples of that ladder. The enabled catalog contains 29
-IDs, comprising the original 11 IDs and 18 additions.
+set had no positive examples of that ladder. The rolling chair also qualified.
+The enabled catalog contains 30 IDs, comprising the original 11 IDs and 19
+additions.
 
 The iPhone check found all 14 additional IDs in their respective fixed views
 and showed no supplemental overlay in the negative view. Both baseline and
@@ -175,8 +176,13 @@ xcrun simctl launch --terminate-running-process booted <bundle-id> \
   --verify-service-journey "$(dart tools/verify_service_route.dart)"
 ```
 
-The simulator can render the journey without AR tracking. Use the physical
-iPhone to verify the Core ML detector and the full journey gate.
+The simulator renders the journey without AR tracking. R3 reports an
+inference-context error on the tested iOS 26.5 simulator. To exercise the
+full gate with RF-DETR on rendered simulator frames, append
+`--simulator-rf16-journey` and use an optimized Swift build
+(`SWIFT_OPTIMIZATION_LEVEL=-O` for Debug). This exercises the selected
+target with its existing score threshold. The regular app retains its
+R3 and RF-DETR detector configuration.
 
 ## Navigation and inspection evidence (member 2)
 

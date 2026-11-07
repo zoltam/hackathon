@@ -145,6 +145,30 @@ class RunnerTests: XCTestCase {
     XCTAssertFalse(site.isAtServicePosition(SIMD2(0.15, 0.45), on: []))
   }
 
+  func testSupplementalChairVetoUsesStrongestOverlappingHandTruck() {
+    // Recorded projected detections in release-right-control-cabinet-03.png.
+    let chair = RenderedVision.Detection(
+      objectID: "boiler-room:rolling-chair", confidence: 0.5795194,
+      bounds: CGRect(x: 0, y: 0, width: 0.1529541015625, height: 0.347412109375))
+    let truck = RenderedVision.Detection(
+      objectID: "boiler-room:red-wheel-hand-truck", confidence: 0.8729984,
+      bounds: CGRect(x: 0.00189208984375, y: 0.039306640625,
+                     width: 0.1756591796875, height: 0.32080078125))
+    let blocked = RenderedVision.strongestDetections([chair, truck], supplemental: true)
+    XCTAssertNil(blocked[chair.objectID])
+    XCTAssertEqual(blocked[truck.objectID]?.bounds, truck.bounds)
+
+    let weak = RenderedVision.Detection(objectID: truck.objectID,
+                                         confidence: chair.confidence + 0.19, bounds: truck.bounds)
+    let distant = RenderedVision.Detection(objectID: truck.objectID, confidence: 0.95,
+                                            bounds: truck.bounds.offsetBy(dx: 0.12, dy: 0))
+    for observations in [[chair, weak], [chair, truck, distant]] {
+      XCTAssertEqual(RenderedVision.strongestDetections(observations, supplemental: true)[chair.objectID]?.bounds,
+                     chair.bounds)
+    }
+    XCTAssertNotNil(RenderedVision.strongestDetections([chair, truck], supplemental: false)[chair.objectID])
+  }
+
   func testDetectionMatchesTheMappedAssetAtCapturePose() {
     let bounds: [[Float]] = [[-0.4, 0.2, 0.2], [0.0, 0.6, 0.5]]
     let fragment = RenderedVision.Detection(

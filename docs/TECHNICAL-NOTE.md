@@ -4,7 +4,7 @@
 
 The original Industrial Boiler Room PLY passed structural checks for 502,482 of 1,506,136 records. The demo uses the complete Equipment Room replacement. The Python/NumPy pipeline validates and registers all 1,676,481 Gaussians to the reviewed scene frame. Swift/Metal renders anisotropic splats with opacity and degree-3 view-dependent color. Model distances assume one registered unit equals one metre.
 
-Extraction starts from 33 reviewed 3D seed volumes. The builder selects supporting Gaussians and refines bounds from their coordinates where applicable. It stores a stable object ID, type, 3D bounds and support count for each frame. The enabled detectors cover 29 identities. Coverage is limited to the seeded catalog.
+Extraction starts from 33 reviewed 3D seed volumes. The builder selects supporting Gaussians and refines bounds from their coordinates where applicable. It stores a stable object ID, type, 3D bounds and support count for each frame. The enabled detectors cover 30 identities. Coverage is limited to the seeded catalog.
 
 ## Recognition and 3D association
 
