@@ -591,7 +591,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     virtual.layer.addSublayer(nearbyFrameLayer)
     accessFrameLayer.strokeColor = UIColor.systemOrange.cgColor
     accessFrameLayer.fillColor = UIColor.clear.cgColor
-    accessFrameLayer.lineWidth = 3
+    accessFrameLayer.lineWidth = 4
     accessFrameLayer.lineJoin = .round
     virtual.layer.addSublayer(accessFrameLayer)
     targetFrameLayer.strokeColor = UIColor.systemTeal.cgColor
@@ -1695,7 +1695,9 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     guard (visionMode == .normal || visionMode == .preview), !accessBlockers.isEmpty,
           let service = serviceTarget?.service, service.count == 2, !activeRoute.isEmpty else { return false }
     let approach = model.center(service)
-    return simd_distance_squared(SIMD2(position.x, position.z), SIMD2(approach.x, approach.z)) <= 1
+    let warningRadius: Float = model.serviceAccessDemo == true ? 1.5 : 1
+    return simd_distance_squared(SIMD2(position.x, position.z), SIMD2(approach.x, approach.z)) <=
+      warningRadius * warningRadius
   }
 
   private func updateAccessPulse() {
