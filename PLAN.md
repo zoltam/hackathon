@@ -26,6 +26,24 @@ P-005 is the primary demo. Demonstrate the five other service targets in verific
 | P-005 | Red circulation pump | `[69,65]` | 2.0 m |
 | CV-003 | Blue inline valve | `[88,67]` | 0.9 m |
 
+## Orange-actuator model comparison
+
+The 259-view validation set contains 26 A and 25 B annotations. At the locked
+RGB thresholds (0.79 A, 0.72 B), the current typed RF-DETR export scored
+11/0/15 for A and 13/0/12 for B (TP/FP/FN). The official tensor export of the
+same fine-tuned checkpoint scored 10/0/16 and 12/1/13. DINOv2 with a trained
+linear head and frozen backbone, and pretrained DISK + LightGlue, re-ranked
+the same 1,662 archived proposals. Neither produced a usable RGB threshold
+at 95% precision. This compares the tested pipelines, including their
+preprocessing and adaptation choices.
+
+Keep the current app export. A validation-only follow-up with the same
+detector and four fixed overlapping RGB crops improved to 13/0/13 and
+16/0/9 at the locked thresholds. Both remain below 70% recall, and the
+extra inference cost has not been verified in the app. No candidate was
+promoted. Evaluate model fine-tuning only against frozen splits and require
+new independent views before release.
+
 ## Ownership
 
 Each worker has three implementation or delivery packages. Mac owns everything that requires Xcode and iOS verification. Windows owns the cross-platform backend and submission assembly. One writer per file. Review the other worker's handoff without editing their files.
