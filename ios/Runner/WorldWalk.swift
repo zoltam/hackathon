@@ -89,6 +89,7 @@ struct WalkSite: Decodable {
   let walkingSpeedMetresPerSecond: Float?
   let inspectionReport: String?
   let inspectionSummary: String?
+  let motorCurrentSamples: [Double]?
 
   var isRedPumpService: Bool {
     guard let target, objects.indices.contains(target) else { return false }
@@ -2052,7 +2053,37 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     let text = UITextView()
     text.isEditable = false
     text.font = .preferredFont(forTextStyle: .body)
-    text.text = model.inspectionReport ?? "No workbook evidence is available for this target."
+    let evidence = model.inspectionReport ?? "No workbook evidence is available for this target."
+    if model.isRedPumpService {
+      let sections: Set<String> = [
+        "Next check", "Why this check", "Open workbook event",
+        "Telemetry · first vs last 12-hour medians", "Interpretation",
+        "Review required", "Verification workflow", "Full workbook evidence"
+      ]
+      let styled = NSMutableAttributedString()
+      let lines = evidence.components(separatedBy: "\n")
+      let chartLine = lines.firstIndex(of: "Next check").map { $0 + 1 } ?? 2
+      for (index, line) in lines.enumerated() {
+        let style: UIFont.TextStyle = index == 0 ? .title2 :
+          sections.contains(line) ? .headline : .body
+        styled.append(NSAttributedString(string: (index == 0 ? "" : "\n") + line, attributes: [
+          .font: UIFont.preferredFont(forTextStyle: style),
+          .foregroundColor: style == .body ? UIColor.label : UIColor.systemTeal,
+        ]))
+        if index == chartLine, let chart = motorCurrentChart(width: min(560, view.bounds.width - 48)) {
+          let attachment = NSTextAttachment()
+          attachment.image = chart
+          styled.append(NSAttributedString(string: "\n\nMotor current · \(model.motorCurrentSamples?.count ?? 0) workbook samples\n",
+            attributes: [.font: UIFont.preferredFont(forTextStyle: .headline), .foregroundColor: UIColor.label]))
+          styled.append(NSAttributedString(attachment: attachment))
+          styled.append(NSAttributedString(string: "\nTelemetry_Sample_3d · chronological sample order",
+            attributes: [.font: UIFont.preferredFont(forTextStyle: .caption1), .foregroundColor: UIColor.secondaryLabel]))
+        }
+      }
+      text.attributedText = styled
+    } else {
+      text.text = evidence
+    }
     text.translatesAutoresizingMaskIntoConstraints = false
     report.view.addSubview(text)
     NSLayoutConstraint.activate([
@@ -2062,6 +2093,50 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
       text.bottomAnchor.constraint(equalTo: report.view.safeAreaLayoutGuide.bottomAnchor, constant: -16),
     ])
     present(UINavigationController(rootViewController: report), animated: true)
+  }
+
+  private func motorCurrentChart(width: CGFloat) -> UIImage? {
+    guard width > 120, let samples = model.motorCurrentSamples,
+          samples.count > 1, samples.allSatisfy({ $0.isFinite && $0 >= 0 && $0 < 100_000 }),
+          let minValue = samples.min(), let maxValue = samples.max() else { return nil }
+    let low = floor(minValue / 5) * 5
+    let high = max(low + 5, ceil(maxValue / 5) * 5)
+    let size = CGSize(width: width, height: 158)
+    let plot = CGRect(x: 42, y: 14, width: width - 55, height: 130)
+    return UIGraphicsImageRenderer(size: size).image { _ in
+      UIColor.secondarySystemBackground.setFill()
+      UIBezierPath(roundedRect: CGRect(origin: .zero, size: size), cornerRadius: 12).fill()
+      let label: [NSAttributedString.Key: Any] = [
+        .font: UIFont.monospacedDigitSystemFont(ofSize: 10, weight: .medium),
+        .foregroundColor: UIColor.secondaryLabel,
+      ]
+      UIColor.separator.setStroke()
+      for fraction in [0.0, 0.5, 1.0] {
+        let y = plot.maxY - fraction * plot.height
+        let grid = UIBezierPath()
+        grid.move(to: CGPoint(x: plot.minX, y: y))
+        grid.addLine(to: CGPoint(x: plot.maxX, y: y))
+        grid.stroke()
+        (String(format: "%g A", low + fraction * (high - low)) as NSString)
+          .draw(at: CGPoint(x: 6, y: y - 6), withAttributes: label)
+      }
+      let line = UIBezierPath()
+      for (index, amps) in samples.enumerated() {
+        let point = CGPoint(x: plot.minX + CGFloat(index) / CGFloat(samples.count - 1) * plot.width,
+                            y: plot.maxY - (amps - low) / (high - low) * plot.height)
+        if index == 0 { line.move(to: point) } else { line.addLine(to: point) }
+      }
+      let fill = line.copy() as! UIBezierPath
+      fill.addLine(to: CGPoint(x: plot.maxX, y: plot.maxY))
+      fill.addLine(to: CGPoint(x: plot.minX, y: plot.maxY))
+      fill.close()
+      UIColor.systemTeal.withAlphaComponent(0.15).setFill()
+      fill.fill()
+      line.lineWidth = 2
+      line.lineJoinStyle = .round
+      UIColor.systemTeal.setStroke()
+      line.stroke()
+    }
   }
 
   private func updateMap(_ pose: simd_float4x4?) {

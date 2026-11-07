@@ -22,6 +22,7 @@ class AssetDiagnosis {
     required this.hypotheses,
     required this.qualityIssues,
     required this.mappingNotice,
+    this.motorCurrentSamples = const [],
   });
 
   final String assetId, tag, condition, updatedAt, nextCheck;
@@ -30,6 +31,7 @@ class AssetDiagnosis {
   final Evidence stateEvidence;
   final Evidence? matchingOpenEvidence;
   final List<Evidence> evidence, hypotheses, qualityIssues;
+  final List<double> motorCurrentSamples;
 
   Evidence? get _fieldSafety => evidence
       .where((e) => e.reference.startsWith('DOC-FIELD-SAFETY · '))
@@ -304,6 +306,14 @@ class AssetData {
       stateEvidence: stateEvidence,
       matchingOpenEvidence: matchingOpenEvidence,
       mappingNotice: '${_json['mappingNotice']}',
+      motorCurrentSamples: asset['tag'] == 'P-005'
+          ? [
+              for (final row in telemetry.reversed)
+                if (row['motor_current_a'] case final num amps
+                    when amps.isFinite)
+                  amps.toDouble(),
+            ]
+          : const [],
       evidence: evidence,
       hypotheses: [
         for (final r in cases)

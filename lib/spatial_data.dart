@@ -10,9 +10,11 @@ class SpatialDiagnosis {
     required this.arrivalSummary,
     required this.reportText,
     required this.engine,
+    this.motorCurrentSamples = const [],
   });
 
   final String tag, condition, arrivalSummary, reportText, engine;
+  final List<double> motorCurrentSamples;
 }
 
 class SpatialAssetData {
@@ -172,21 +174,32 @@ class SpatialAssetData {
           ? report['llmSummary'] as String
           : report['summary'] as String;
       final disclosure = report['mappingNotice'] as String;
-      final legacyGuidance = _legacy
-          .forObject(objectId, equipmentType: equipmentType)
-          ?.arrivalSummary;
-      final evidence = legacyGuidance ?? report['reportText'] as String;
+      final legacy = _legacy.forObject(objectId, equipmentType: equipmentType);
+      final evidence = legacy?.arrivalSummary ?? report['reportText'] as String;
+      final redPump =
+          objectId == 'boiler-room:red-circulation-pump' &&
+          legacy?.tag == 'P-005' &&
+          legacy?.assetId == 'ASSET-017';
+      final brief = redPump ? _redPumpBrief(legacy!, report) : null;
+      final aiEvidence = report['engine'] == 'ollama'
+          ? 'Local AI explanation · Precomputed\n$explanation\n'
+                '[${(report['llmReferences'] as List).join(', ')}]\n\n'
+          : '';
       return SpatialDiagnosis(
         tag: report['tag'] as String,
         condition: report['condition'] as String,
-        arrivalSummary:
-            '${report['tag']} · ${report['condition']}\n'
-            '$disclosure\n$explanation\n$evidence\nEngine: ${report['engine']}',
+        arrivalSummary: brief != null
+            ? '${legacy!.condition == 'attention_required' ? 'Needs attention' : legacy.condition} · Synthetic workbook\n'
+                  'Next check: ${legacy.nextCheck} [${legacy.stateEvidence.reference}]'
+            : '${report['tag']} · ${report['condition']}\n'
+                  '$disclosure\n$explanation\n$evidence\nEngine: ${report['engine']}',
         reportText:
+            '${brief == null ? '' : '$brief\n\n${aiEvidence}Full workbook evidence\n\n'}'
             '$disclosure\n\n'
-            '${report['engine'] == 'ollama' ? 'Local AI explanation: $explanation\n\n' : ''}'
+            '${brief == null ? aiEvidence : ''}'
             '${report['reportText']}\n\nEngine: ${report['engine']}',
         engine: report['engine'] as String,
+        motorCurrentSamples: redPump ? legacy!.motorCurrentSamples : const [],
       );
     }
     final legacy = _legacy.forObject(objectId, equipmentType: equipmentType);
@@ -198,6 +211,93 @@ class SpatialAssetData {
             arrivalSummary: legacy.arrivalSummary,
             reportText: legacy.reportText,
             engine: 'legacy-deterministic',
+            motorCurrentSamples: legacy.motorCurrentSamples,
           );
+  }
+
+  static String _redPumpBrief(AssetDiagnosis pump, RecordData report) {
+    const metrics = {
+      'motor_current_a': ('Motor current', 'A', 1),
+      'speed_rpm': ('Speed', 'rpm', 0),
+      'bearing_temp_c': ('Bearing temperature', '°C', 1),
+      'process_flow_pct': ('Flow', '%', 1),
+      'process_pressure_bar': ('Process pressure', 'bar', 2),
+      'vibration_mm_s': ('Vibration', 'mm/s', 2),
+    };
+    final allowed = {
+      for (final citation in report['citations'] as List)
+        _map(citation)['reference'],
+    };
+    final trends = <String, String>{};
+    final observations = report['observations'];
+    if (observations is List) {
+      for (final row in observations.whereType<RecordData>()) {
+        final metric = row['metric'];
+        final format = metrics[metric];
+        final before = row['baselineMedian'];
+        final after = row['recentMedian'];
+        final sources = row['references'];
+        if (metric is! String ||
+            format == null ||
+            before is! num ||
+            !before.isFinite ||
+            after is! num ||
+            !after.isFinite ||
+            sources is! List ||
+            sources.isEmpty ||
+            !sources.every((ref) => ref is String && allowed.contains(ref))) {
+          continue;
+        }
+        final (label, unit, precision) = format;
+        trends[metric] =
+            '$label · ${before.toStringAsFixed(precision)} → '
+            '${after.toStringAsFixed(precision)} $unit';
+      }
+    }
+    String? firstCitedItem(String field, {String? contains}) {
+      final entries = report[field];
+      if (entries is! List) return null;
+      for (final entry in entries.whereType<RecordData>()) {
+        final references = entry['references'];
+        final text = entry['text'];
+        if (text is String &&
+            (contains == null || text.contains(contains)) &&
+            references is List &&
+            references.isNotEmpty &&
+            references.every((ref) => ref is String && allowed.contains(ref))) {
+          return '$text [${references.join(', ')}]';
+        }
+      }
+      return null;
+    }
+
+    final conflictingEvent = firstCitedItem('contradictions');
+    final qualityNote = firstCitedItem(
+      'qualityIssues',
+      contains: 'in Telemetry',
+    );
+    final caseWorkflow = pump.evidence
+        .where((item) => item.reference.contains('Historical_Service_Cases!'))
+        .firstOrNull;
+    return [
+      'P-005 · Red circulation pump',
+      'Synthetic workbook snapshot · ${pump.updatedAt}',
+      'Next check\n${pump.nextCheck} [${pump.stateEvidence.reference}]',
+      'Why this check\n${pump.stateEvidence.text} [${pump.stateEvidence.reference}]',
+      if (pump.matchingOpenEvidence case final event?)
+        'Open workbook event\n${event.text} [${event.reference}]',
+      if (trends.isNotEmpty)
+        'Telemetry · first vs last 12-hour medians\n'
+            '${metrics.keys.map((key) => trends[key]).nonNulls.join('\n')}\n'
+            'Exact sample rows are listed in the full evidence below.',
+      'Interpretation\nThe workbook flags possible efficiency loss or fouling. '
+          'The cause is unconfirmed. Check that the operating points are comparable '
+          'before interpreting changes across time. [${pump.stateEvidence.reference}]',
+      if (conflictingEvent != null || qualityNote != null)
+        'Review required\n${[?conflictingEvent, ?qualityNote].join('\n')}',
+      if (caseWorkflow != null)
+        'Verification workflow\n${caseWorkflow.text} [${caseWorkflow.reference}]',
+      'Site procedures and qualified personnel govern physical inspection.',
+    ].join('\n\n');
   }
 }

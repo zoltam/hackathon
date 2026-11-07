@@ -345,6 +345,9 @@ def explain_report(report, model='qwen3.5:9b', endpoint='http://127.0.0.1:11434'
             text = entry.get('text', '')
             if 'metric' in entry:
                 direction = 'increased' if entry['absoluteChange'] > 0 else 'decreased' if entry['absoluteChange'] < 0 else 'was unchanged'
+                relative = entry.get('percentChange')
+                if relative is not None and abs(relative) < 1:
+                    direction = 'changed by less than one percent'
                 text = (f"{METRIC_LABELS.get(entry['metric'], entry['metric'])} median {direction} "
                         'between first and last 12-hour windows. This is not proof of a cause.')
             compact[field].append({'text': text, 'references': selected_refs})
@@ -363,8 +366,11 @@ def explain_report(report, model='qwen3.5:9b', endpoint='http://127.0.0.1:11434'
                     'Include the words synthetic and unconfirmed. '
                     'Do not discuss prompts, instructions or data strings. Recorded observations are evidence; '
                     'only causal interpretations and historical cases are hypotheses. '
+                   'Attribute any issue hypothesis to the workbook or historical case. '
+                   'Do not claim that the observed trends support a specific cause. '
+                   'Describe changes below one percent as nearly flat, without implying a safety threshold. '
                     'Do not assert a confirmed root cause or prescribe physical actions. Do not invent numbers, '
-                    'thresholds or citations. Cite only exact source references in the references field. '
+                   'thresholds or citations. Cite only exact source references for evidence used. '
                     'Describe metric directions in words; include no numbers other than the exact asset tag. '
                     'The deterministic report already provides exact numerical evidence. '
                     'State that site procedures and qualified personnel govern physical inspection.'},

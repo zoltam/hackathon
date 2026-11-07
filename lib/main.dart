@@ -157,6 +157,7 @@ class _FieldScreenState extends State<FieldScreen> {
       return {
         'inspectionReport': target?.reportText,
         'inspectionSummary': target?.arrivalSummary,
+        'motorCurrentSamples': target?.motorCurrentSamples,
         'hasWorkbook': data != null,
         'tags': {
           for (final object in site.objects)
@@ -359,6 +360,7 @@ class _SiteSimulationState extends State<SiteSimulation> {
       jsonEncode({
         'inspectionReport': diagnosis?.reportText,
         'inspectionSummary': diagnosis?.arrivalSummary,
+        'motorCurrentSamples': diagnosis?.motorCurrentSamples,
         'hasWorkbook': data != null,
         'name': site.name,
         'sourceSha256': site.sourceSha256,
