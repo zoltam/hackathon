@@ -263,12 +263,12 @@ struct RouteReturnGuidance {
     if let last = trail.last, simd_distance_squared(position, last) >= 0.35 * 0.35 {
       trail.append(position)
     }
-    guard distanceSquared >= 1.5 * 1.5 else {
+    guard distanceSquared >= 2.0 * 2.0 else {
       departedAt = nil
       return []
     }
     if departedAt == nil { departedAt = time }
-    guard let departedAt, time - departedAt >= 1.2 else { return [] }
+    guard let departedAt, time - departedAt >= 1.0 else { return [] }
     isActive = true
     if trail.count > 1 { trail.removeLast() }
     return Array(trail.reversed())
