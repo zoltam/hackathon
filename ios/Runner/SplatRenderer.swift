@@ -532,7 +532,7 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
     float2 offset = local * extent;
     const bool arrow = marker.w == 0.0;
     if (arrow) { offset.x *= 1.08; }
-    float brightness = arrow && wavePhase >= 0.0 ? .5 + .5 * sin(float(index) * 1.70 - wavePhase) : -1.0;
+    float brightness = arrow && wavePhase >= 0.0 ? .5 + .5 * sin(float(index) * .85 - wavePhase) : -1.0;
     float scale = marker.w > 0 ? cellSize : max(cellSize, .18);
     float2 p = marker.xy + (right * offset.x + forward * offset.y) * scale;
     return { u.viewProjection * float4(p.x, .035, p.y, 1),
