@@ -249,9 +249,12 @@ class SpatialAssetData {
           continue;
         }
         final (label, unit, precision) = format;
+        final change = metric == 'motor_current_a' && before > 0
+            ? ' (${after >= before ? '+' : ''}${((after - before) / before * 100).toStringAsFixed(1)}%)'
+            : '';
         trends[metric] =
             '$label · ${before.toStringAsFixed(precision)} → '
-            '${after.toStringAsFixed(precision)} $unit';
+            '${after.toStringAsFixed(precision)} $unit$change';
       }
     }
     String? firstCitedItem(String field, {String? contains}) {
@@ -279,24 +282,41 @@ class SpatialAssetData {
     final caseWorkflow = pump.evidence
         .where((item) => item.reference.contains('Historical_Service_Cases!'))
         .firstOrNull;
+    final maintenance = firstCitedItem(
+      'observations',
+      contains: 'Maintenance ',
+    );
+    final pumpGuide = firstCitedItem(
+      'observations',
+      contains: 'DOC-PROCESS_PUMP-CORE',
+    );
+    final supportingTrends = metrics.keys
+        .where((key) => key != 'motor_current_a')
+        .map((key) => trends[key])
+        .nonNulls
+        .join('\n');
     return [
       'P-005 · Red circulation pump',
       'Synthetic workbook snapshot · ${pump.updatedAt}',
       'Next check\n${pump.nextCheck} [${pump.stateEvidence.reference}]',
+      if (trends['motor_current_a'] case final current?)
+        'Key signal\n$current · First vs last 12-hour medians',
       'Why this check\n${pump.stateEvidence.text} [${pump.stateEvidence.reference}]',
       if (pump.matchingOpenEvidence case final event?)
         'Open workbook event\n${event.text} [${event.reference}]',
-      if (trends.isNotEmpty)
+      if (supportingTrends.isNotEmpty)
         'Telemetry · first vs last 12-hour medians\n'
-            '${metrics.keys.map((key) => trends[key]).nonNulls.join('\n')}\n'
+            '$supportingTrends\n'
             'Exact sample rows are listed in the full evidence below.',
       'Interpretation\nThe workbook flags possible efficiency loss or fouling. '
-          'The cause is unconfirmed. Check that the operating points are comparable '
-          'before interpreting changes across time. [${pump.stateEvidence.reference}]',
+          'The cause is unconfirmed. Compare flow, pressure and motor current '
+          'at comparable operating points before interpreting the change. [${pump.stateEvidence.reference}]',
       if (conflictingEvent != null || qualityNote != null)
         'Review required\n${[?conflictingEvent, ?qualityNote].join('\n')}',
       if (caseWorkflow != null)
         'Verification workflow\n${caseWorkflow.text} [${caseWorkflow.reference}]',
+      if (maintenance != null) 'Recent maintenance\n$maintenance',
+      if (pumpGuide != null) 'Pump guidance\n$pumpGuide',
       'Site procedures and qualified personnel govern physical inspection.',
     ].join('\n\n');
   }

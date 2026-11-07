@@ -2234,16 +2234,19 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     let evidence = model.inspectionReport ?? "No workbook evidence is available for this target."
     if model.isRedPumpService {
       let sections: Set<String> = [
-        "Next check", "Why this check", "Open workbook event",
+        "Next check", "Key signal", "Why this check", "Open workbook event",
         "Telemetry · first vs last 12-hour medians", "Interpretation",
-        "Review required", "Verification workflow", "Full workbook evidence"
+        "Review required", "Verification workflow", "Recent maintenance", "Pump guidance",
+        "Local AI explanation · Precomputed", "Full workbook evidence"
       ]
       let styled = NSMutableAttributedString()
       let lines = evidence.components(separatedBy: "\n")
-      let chartLine = lines.firstIndex(of: "Next check").map { $0 + 1 } ?? 2
+      let chartLine = (lines.firstIndex(of: "Key signal") ?? lines.firstIndex(of: "Next check"))
+        .map { $0 + 1 } ?? 2
+      let nextCheckLine = lines.firstIndex(of: "Next check").map { $0 + 1 }
       for (index, line) in lines.enumerated() {
         let style: UIFont.TextStyle = index == 0 ? .title2 :
-          sections.contains(line) ? .headline : .body
+          sections.contains(line) || index == nextCheckLine ? .headline : .body
         styled.append(NSAttributedString(string: (index == 0 ? "" : "\n") + line, attributes: [
           .font: UIFont.preferredFont(forTextStyle: style),
           .foregroundColor: style == .body ? UIColor.label : UIColor.systemTeal,
@@ -2254,7 +2257,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
           styled.append(NSAttributedString(string: "\n\nMotor current · \(model.motorCurrentSamples?.count ?? 0) workbook samples\n",
             attributes: [.font: UIFont.preferredFont(forTextStyle: .headline), .foregroundColor: UIColor.label]))
           styled.append(NSAttributedString(attachment: attachment))
-          styled.append(NSAttributedString(string: "\nTelemetry_Sample_3d · chronological sample order",
+          styled.append(NSAttributedString(string: "\nSource: Telemetry_Sample_3d · sample number on horizontal axis",
             attributes: [.font: UIFont.preferredFont(forTextStyle: .caption1), .foregroundColor: UIColor.secondaryLabel]))
         }
       }
@@ -2279,7 +2282,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
           let minValue = samples.min(), let maxValue = samples.max() else { return nil }
     let low = floor(minValue / 5) * 5
     let high = max(low + 5, ceil(maxValue / 5) * 5)
-    let size = CGSize(width: width, height: 158)
+    let size = CGSize(width: width, height: 171)
     let plot = CGRect(x: 42, y: 14, width: width - 55, height: 130)
     return UIGraphicsImageRenderer(size: size).image { _ in
       UIColor.secondarySystemBackground.setFill()
@@ -2297,6 +2300,14 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
         grid.stroke()
         (String(format: "%g A", low + fraction * (high - low)) as NSString)
           .draw(at: CGPoint(x: 6, y: y - 6), withAttributes: label)
+      }
+      let lastSample = samples.count - 1
+      for sample in Set([0, lastSample / 2, lastSample]).sorted() {
+        let x = plot.minX + CGFloat(sample) / CGFloat(lastSample) * plot.width
+        let tick = "\(sample + 1)" as NSString
+        let tickWidth = tick.size(withAttributes: label).width
+        tick.draw(at: CGPoint(x: min(x - tickWidth / 2, width - tickWidth - 3),
+                             y: plot.maxY + 9), withAttributes: label)
       }
       let line = UIBezierPath()
       for (index, amps) in samples.enumerated() {
