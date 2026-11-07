@@ -1692,7 +1692,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     guard (visionMode == .normal || visionMode == .preview), !accessBlockers.isEmpty,
           let service = serviceTarget?.service, service.count == 2, !activeRoute.isEmpty else { return false }
     let approach = model.center(service)
-    let warningRadius: Float = model.serviceAccessDemo == true ? 1.8 : 1
+    let warningRadius: Float = model.serviceAccessDemo == true ? 2.0 : 1
     return simd_distance_squared(SIMD2(position.x, position.z), SIMD2(approach.x, approach.z)) <=
       warningRadius * warningRadius
   }
