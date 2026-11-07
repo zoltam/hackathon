@@ -90,8 +90,13 @@ struct WalkSite: Decodable {
   let inspectionReport: String?
   let inspectionSummary: String?
 
+  var isRedPumpService: Bool {
+    guard let target, objects.indices.contains(target) else { return false }
+    return objects[target].objectId == "boiler-room:red-circulation-pump"
+  }
+
   var serviceAccessBlockers: Set<Int> {
-    guard let target, objects.indices.contains(target) else { return [] }
+    guard let target, objects.indices.contains(target), !isRedPumpService else { return [] }
     if serviceAccessDemo == true {
       let demoObjects: Set<String> = ["boiler-room:silver-platform-cart", "boiler-room:floor-carton"]
       return Set(objects.indices.filter { demoObjects.contains(objects[$0].objectId ?? "") })
@@ -1233,7 +1238,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     let frameStart = DispatchTime.now()
     let end = Float(model.route.count - 1)
     let speed: Float = visionMode == .preview ? model.walkingSpeedMetresPerSecond ?? 0.45 : 0.15
-    let eyeHeight = model.eyeHeightMetres ?? assumedPhoneHeight
+    let eyeHeight = (model.eyeHeightMetres ?? assumedPhoneHeight) + (model.isRedPumpService ? 0.10 : 0)
     let elapsed = Float(CACurrentMediaTime() - start)
     let elapsedWalking = end * model.cellSize / speed
     let step = min(end, elapsed * speed / model.cellSize)
@@ -1988,6 +1993,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
       pose.columns.3 = SIMD4(manualPosition.x, manualPosition.y, manualPosition.z, 1)
       displayPose.columns.3 = pose.columns.3
     }
+    if model.isRedPumpService { displayPose.columns.3.y += 0.10 }
     let size = virtual.bounds.size
     if showModel, size.width > 0, size.height > 0 {
       virtual.isHidden = false
