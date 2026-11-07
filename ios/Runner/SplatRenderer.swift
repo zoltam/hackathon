@@ -60,9 +60,12 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
   static let bytesPerSplat = 160
   private let count: Int
   private static let binCount = 2048
+  private static let groupSize = 64
   private var bins: [Int]
   private var bucket: [Int16]
-  private var positions: [SIMD4<Float>]
+  private let positions: [SIMD4<Float>]
+  private let groups: [(center: SIMD4<Float>, extent: SIMD4<Float>)]
+  private var visibleGroups: [Int]
   private var pendingFrame: (pose: simd_float4x4, projection: simd_float4x4, timestamp: CFTimeInterval)?
   private var lastDraw: CFTimeInterval = 0
   private let framesPerSecond: Int
@@ -113,9 +116,21 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
       sortBuffers.append(buffer)
     }
     let source = splats.contents()
-    positions = (0..<count).map {
-      source.load(fromByteOffset: $0 * Self.bytesPerSplat, as: SIMD4<Float>.self)
+    let positions = (0..<count).map {
+      var position = source.load(fromByteOffset: $0 * Self.bytesPerSplat, as: SIMD4<Float>.self)
+      position.w = 1
+      return position
     }
+    self.positions = positions
+    groups = stride(from: 0, to: count, by: Self.groupSize).map { start in
+      var low = positions[start], high = low
+      for i in (start + 1)..<min(start + Self.groupSize, count) {
+        low = simd_min(low, positions[i])
+        high = simd_max(high, positions[i])
+      }
+      return ((low + high) * 0.5, (high - low) * 0.5)
+    }
+    visibleGroups = .init(repeating: 0, count: groups.count)
     bins = .init(repeating: 0, count: Self.binCount)
     bucket = .init(repeating: -1, count: count)
     self.count = count
@@ -228,27 +243,38 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
     if sorted > 0 {
       encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4, instanceCount: sorted)
     }
-    encoder.endEncoding()
-    vision.capture(drawable.texture, command: command,
-                   frame: RenderedVision.Frame(pose: pose, projection: projection, timestamp: frame.timestamp,
-                                               sourceSize: SIMD2(drawable.texture.width, drawable.texture.height)))
+    let captureEndedScene = vision.capture(
+      drawable.texture, command: command,
+      frame: RenderedVision.Frame(pose: pose, projection: projection, timestamp: frame.timestamp,
+                                  sourceSize: SIMD2(drawable.texture.width, drawable.texture.height)),
+      endScene: encoder.endEncoding
+    )
+    let separateGuide = captureEndedScene || obstacleRendering != nil
+    if separateGuide && !captureEndedScene { encoder.endEncoding() }
     if let routeBuffer {
-      // Draw guidance after the vision readback, using the same camera and drawable.
-      let guidePass = MTLRenderPassDescriptor()
-      let color = guidePass.colorAttachments[0]!
-      color.texture = drawable.texture
-      color.loadAction = .load
-      color.storeAction = .store
-      if let guide = command.makeRenderCommandEncoder(descriptor: guidePass) {
+      // Vision needs the scene without the guide. Other frames can share one pass.
+      let guide: MTLRenderCommandEncoder?
+      if separateGuide {
+        let guidePass = MTLRenderPassDescriptor()
+        let color = guidePass.colorAttachments[0]!
+        color.texture = drawable.texture
+        color.loadAction = .load
+        color.storeAction = .store
+        guide = command.makeRenderCommandEncoder(descriptor: guidePass)
+      } else {
+        guide = encoder
+      }
+      if let guide {
         var cellSize = routeCellSize
         guide.setRenderPipelineState(routePipeline)
         guide.setVertexBuffer(routeBuffer, offset: 0, index: 0)
         guide.setVertexBytes(&cellSize, length: MemoryLayout<Float>.size, index: 1)
         guide.setVertexBytes(&uniforms, length: MemoryLayout<Uniforms>.stride, index: 2)
         guide.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4, instanceCount: routeCount)
-        guide.endEncoding()
+        if separateGuide { guide.endEncoding() }
       }
     }
+    if !separateGuide { encoder.endEncoding() }
     command.present(drawable)
     command.addCompletedHandler { [weak self, inFlight, frameCounter] completed in
       inFlight.signal()
@@ -360,20 +386,34 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
     // Match the shader's largest projected footprint when culling before sorting.
     let maxSigma = max(screen.x, screen.y) * 0.06
     let frustum = 1 + 6 * maxSigma / screen
+    let x = rows.3 * frustum.x, y = rows.3 * frustum.y
+    let planes = [rows.3 - SIMD4(0, 0, 0, 0.04), x + rows.0, x - rows.0, y + rows.1, y - rows.1]
+      .map { (normal: $0, absolute: abs($0)) }
     let destination = buffer.contents().bindMemory(to: UInt32.self, capacity: count)
     for i in bins.indices { bins[i] = 0 }
-    for i in positions.indices {
-      var point = positions[i]
-      point.w = 1
-      let depth = simd_dot(rows.3, point)
-      if depth <= 0.04 ||
-         abs(simd_dot(rows.0, point)) > depth * frustum.x ||
-         abs(simd_dot(rows.1, point)) > depth * frustum.y {
-        bucket[i] = -1
-      } else {
-        let bin = min(Self.binCount - 1, Int(depth * 128))
-        bucket[i] = Int16(bin)
-        bins[bin] += 1
+    var groupCount = 0
+    for index in groups.indices {
+      let (center, extent) = groups[index]
+      // Keep file order for stable depth-bin ties. The margin leaves boundary
+      // points to the per-splat test when float arithmetic differs slightly.
+      if planes.contains(where: {
+        simd_dot($0.normal, center) + simd_dot($0.absolute, extent) < -0.0001
+      }) { continue }
+      let start = index * Self.groupSize
+      visibleGroups[groupCount] = start
+      groupCount += 1
+      for i in start..<min(start + Self.groupSize, count) {
+        let point = positions[i]
+        let depth = simd_dot(rows.3, point)
+        if depth <= 0.04 ||
+           abs(simd_dot(rows.0, point)) > depth * frustum.x ||
+           abs(simd_dot(rows.1, point)) > depth * frustum.y {
+          bucket[i] = -1
+        } else {
+          let bin = min(Self.binCount - 1, Int(depth * 128))
+          bucket[i] = Int16(bin)
+          bins[bin] += 1
+        }
       }
     }
     var offset = 0
@@ -382,10 +422,12 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
       bins[i] = offset
       offset = end
     }
-    for i in bucket.indices where bucket[i] >= 0 {
-      let bin = Int(bucket[i])
-      destination[bins[bin]] = UInt32(i)
-      bins[bin] += 1
+    for start in visibleGroups.prefix(groupCount) {
+      for i in start..<min(start + Self.groupSize, count) where bucket[i] >= 0 {
+        let bin = Int(bucket[i])
+        destination[bins[bin]] = UInt32(i)
+        bins[bin] += 1
+      }
     }
     return offset
   }

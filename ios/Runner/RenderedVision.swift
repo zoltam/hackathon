@@ -306,33 +306,40 @@ final class RenderedVision {
     if let directory = detector?.directory { try? FileManager.default.removeItem(at: directory) }
   }
 
-  // Called on the main thread after rendering, before presentation.
+  // Called on the main thread after encoding the scene. Return whether its pass ended.
   // Use two slots for GPU readbacks. Skip frames if the model is busy.
-  func capture(_ texture: MTLTexture, command: MTLCommandBuffer, frame: Frame) {
+  func capture(_ texture: MTLTexture, command: MTLCommandBuffer, frame: Frame, endScene: () -> Void) -> Bool {
     let scheduled = nextSample ?? frame.timestamp
-    guard frame.timestamp >= scheduled else { return }
+    guard frame.timestamp >= scheduled else { return false }
     let stride = ((texture.width * 4 + 255) / 256) * 256
     #if targetEnvironment(simulator)
     if simulatorJourneyTarget != nil {
-      guard supplemental != nil, let blit = command.makeBlitCommandEncoder() else { return }
+      guard supplemental != nil else { return false }
+      endScene()
+      guard let blit = command.makeBlitCommandEncoder() else { return true }
       nextSample = max(scheduled + Self.sampleInterval, frame.timestamp + Self.sampleInterval / 2)
       captureSupplemental(texture, command: command, blit: blit, frame: frame, stride: stride)
       blit.endEncoding()
-      return
+      return true
     }
     #endif
     let request = detector?.request
     let readsObstacleTag = detectsObstacleTag
     guard request != nil || readsObstacleTag,
-          let readback = readbacks.first(where: { $0.available.wait(timeout: .now()) == .success }) else { return }
+          let readback = readbacks.first(where: { $0.available.wait(timeout: .now()) == .success }) else { return false }
     let width = texture.width, height = texture.height
     let length = stride * height
     if readback.buffer?.length != length {
       readback.buffer = texture.device.makeBuffer(length: length, options: .storageModeShared)
     }
-    guard let staging = readback.buffer, let blit = command.makeBlitCommandEncoder() else {
+    guard let staging = readback.buffer else {
       readback.available.signal()
-      return
+      return false
+    }
+    endScene()
+    guard let blit = command.makeBlitCommandEncoder() else {
+      readback.available.signal()
+      return true
     }
     // Keep the sampling cadence across render jitter without catching up after a stall.
     nextSample = max(scheduled + Self.sampleInterval, frame.timestamp + Self.sampleInterval / 2)
@@ -389,6 +396,7 @@ final class RenderedVision {
         }
       }
     }
+    return true
   }
 
   private func captureSupplemental(_ texture: MTLTexture, command: MTLCommandBuffer,
