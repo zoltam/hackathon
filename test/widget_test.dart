@@ -76,6 +76,8 @@ void main() {
     expect(turns.length, greaterThanOrEqualTo(3));
     expect(regular['start'], [site.start.$1, site.start.$2]);
     expect(demo['target'], regular['target']);
+    expect(demo['serviceAccessDemo'], isTrue);
+    expect(regular['serviceAccessDemo'], isFalse);
   });
 
   testWidgets('passes the selected frame rate to the 3D viewer', (

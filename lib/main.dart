@@ -366,6 +366,7 @@ class _SiteSimulationState extends State<SiteSimulation> {
         'keyControls': !simulate && _keyControls,
         'framesPerSecond': _framesPerSecond,
         'obstacleDemo': !simulate && _obstacleDemo && _route.isNotEmpty,
+        'serviceAccessDemo': selection?.start != null,
         'moved': _moved,
         'width': site.width,
         'depth': site.depth,

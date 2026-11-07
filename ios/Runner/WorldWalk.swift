@@ -72,6 +72,7 @@ struct WalkSite: Decodable {
   }
   let keyControls: Bool
   let obstacleDemo: Bool?
+  let serviceAccessDemo: Bool?
   let moved: Bool?
   let width, depth: Int
   let cellSize: Float
@@ -94,6 +95,12 @@ struct WalkSite: Decodable {
   let walkingSpeedMetresPerSecond: Float?
   let inspectionReport: String?
   let inspectionSummary: String?
+
+  var serviceAccessBlockers: Set<Int> {
+    guard serviceAccessDemo == true else { return [] }
+    let demoObjects: Set<String> = ["boiler-room:silver-platform-cart", "boiler-room:floor-carton"]
+    return Set(objects.indices.filter { demoObjects.contains(objects[$0].objectId ?? "") })
+  }
 
   func center(_ cell: [Int], height: Float = 0) -> SIMD3<Float> {
     SIMD3((Float(cell[0]) + 0.5) * cellSize, height, (Float(cell[1]) + 0.5) * cellSize)
@@ -410,6 +417,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
   private let detectionLayer = CAShapeLayer()
   private let supplementalLayer = CAShapeLayer()
   private let nearbyFrameLayer = CAShapeLayer()
+  private let accessFrameLayer = CAShapeLayer()
   private let targetFrameLayer = CAShapeLayer()
   private let serviceMarker = UILabel()
   private var nearbyLabels: [Int: UILabel] = [:]
@@ -419,6 +427,9 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
   private let message = UILabel()
   private let visionStatus = UILabel()
   private let nearbyStatus = UILabel()
+  private let accessStatus = UILabel()
+  private let accessBanner = UIStackView()
+  private lazy var accessBlockers = model.serviceAccessBlockers
   private let visionMode: VisionMode
   private let detectorURL: URL?
   private let mapImage: UIImage?
@@ -543,6 +554,11 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     nearbyFrameLayer.lineWidth = 1.25
     nearbyFrameLayer.lineJoin = .round
     virtual.layer.addSublayer(nearbyFrameLayer)
+    accessFrameLayer.strokeColor = UIColor.systemOrange.cgColor
+    accessFrameLayer.fillColor = UIColor.clear.cgColor
+    accessFrameLayer.lineWidth = 3
+    accessFrameLayer.lineJoin = .round
+    virtual.layer.addSublayer(accessFrameLayer)
     targetFrameLayer.strokeColor = UIColor.systemTeal.cgColor
     targetFrameLayer.fillColor = UIColor.clear.cgColor
     targetFrameLayer.lineWidth = 1.75
@@ -574,6 +590,23 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     message.font = Self.readableFont(.subheadline)
     message.textColor = .white
     message.numberOfLines = visionMode.isLiveWalk ? 5 : 0
+    accessStatus.font = Self.readableFont(.subheadline, extraSize: 1)
+    accessStatus.textColor = .systemOrange
+    accessStatus.numberOfLines = 0
+    let accessIcon = UIImageView(image: UIImage(systemName: "exclamationmark.triangle.fill"))
+    accessIcon.tintColor = .systemOrange
+    accessIcon.setContentHuggingPriority(.required, for: .horizontal)
+    accessBanner.addArrangedSubview(accessIcon)
+    accessBanner.addArrangedSubview(accessStatus)
+    accessBanner.alignment = .center
+    accessBanner.spacing = 8
+    accessBanner.isLayoutMarginsRelativeArrangement = true
+    accessBanner.layoutMargins = UIEdgeInsets(top: 8, left: 10, bottom: 8, right: 10)
+    accessBanner.backgroundColor = .black.withAlphaComponent(0.90)
+    accessBanner.layer.cornerRadius = 10
+    accessBanner.layer.borderColor = UIColor.systemOrange.cgColor
+    accessBanner.layer.borderWidth = 1
+    accessBanner.isHidden = true
     visionStatus.font = Self.readableFont(.caption1)
     visionStatus.textColor = .white
     visionStatus.numberOfLines = 2
@@ -750,7 +783,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     row.distribution = .fillEqually
     row.spacing = 6
     movementControls = model.keyControls ? makeControls() : nil
-    let panel = UIStackView(arrangedSubviews: [message, inspect, visionStatus, nearbyStatus, movementControls, align, moveCrate, row].compactMap { $0 })
+    let panel = UIStackView(arrangedSubviews: [accessBanner, message, inspect, visionStatus, nearbyStatus, movementControls, align, moveCrate, row].compactMap { $0 })
     panel.axis = .vertical
     panel.spacing = 5
     panel.isLayoutMarginsRelativeArrangement = true
@@ -1189,7 +1222,8 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     }
     let bounds = target.floorBounds(cellSize: model.cellSize)
     let targetCenter = (bounds.min + bounds.max) / 2
-    let lookAtTarget = SIMD3(targetCenter.x, Float(target.height) * 0.9, targetCenter.y)
+    let focusHeight: Float = model.serviceAccessDemo == true ? 0.73 : 0.9
+    let lookAtTarget = SIMD3(targetCenter.x, Float(target.height) * focusHeight, targetCenter.y)
     let lookAhead = point(at: min(end, step + 4)) - SIMD3(0, 0.20, 0)
     let remaining = (end - step) * model.cellSize
     let aim = min(1, max(0, (0.9 - remaining) / 0.5))
@@ -1507,6 +1541,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
 
   private func updateNearbyEquipment(at position: SIMD4<Float>, viewProjection: simd_float4x4) {
     let point = SIMD2(position.x, position.z)
+    let warnAboutAccess = isNearBlockedAccess(at: position)
     let radius: Float = 2.5
     let nearby = model.objects.indices.compactMap { index -> (index: Int, distance: Float)? in
       let bounds = model.objects[index].floorBounds(cellSize: model.cellSize)
@@ -1519,7 +1554,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     }
     let text = lines.isEmpty ? nil : (["Nearby equipment"] + lines).joined(separator: "\n")
     if nearbyStatus.text != text { Self.setOutlinedText(text, on: nearbyStatus) }
-    nearbyStatus.isHidden = text == nil
+    nearbyStatus.isHidden = text == nil || (model.serviceAccessDemo == true && warnAboutAccess)
 
     let viewport = virtual.bounds
     var labelArea = viewport.insetBy(dx: 6, dy: 6)
@@ -1527,6 +1562,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
       labelArea.size.height = max(0, min(labelArea.maxY, virtual.convert(panel.bounds, from: panel).minY - 6) - labelArea.minY)
     }
     let frames = UIBezierPath()
+    let accessFrames = UIBezierPath()
     let targetFrame = UIBezierPath()
     let displayScale = max(1, view.traitCollection.displayScale)
     let labelWidth = labelArea.width * 0.65
@@ -1563,11 +1599,18 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
         }
       }
       guard !frame.isEmpty else { continue }
-      let path = entry.index == model.target ? targetFrame : frames
+      let needsMove = warnAboutAccess && accessBlockers.contains(entry.index)
+      let path = needsMove ? accessFrames :
+        entry.index == model.target ? targetFrame : frames
       path.append(frame)
       frameCount += 1
       if object.syntheticCondition != nil { mappedFrameCount += 1 }
-      let label = nearbyLabel(at: entry.index, text: object.displayName + "\n" + conditionText(for: object))
+      let labelText = object.displayName + "\n" + (needsMove ? "Move to clear access" : conditionText(for: object))
+      let label = nearbyLabel(at: entry.index, text: labelText)
+      if label.text != labelText {
+        Self.setOutlinedText(labelText, on: label)
+        nearbyLabelSizes[entry.index] = nil
+      }
       let projected = frame.bounds
       let size = nearbyLabelSizes[entry.index] ??
         label.sizeThatFits(CGSize(width: labelWidth, height: .greatestFiniteMagnitude))
@@ -1599,14 +1642,40 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     for (index, label) in nearbyLabels where !visibleLabels.contains(index) { label.isHidden = true }
     nearbyFrameLayer.frame = viewport
     nearbyFrameLayer.path = frames.cgPath
+    accessFrameLayer.frame = viewport
+    accessFrameLayer.path = accessFrames.isEmpty ? nil : accessFrames.cgPath
     targetFrameLayer.frame = viewport
     targetFrameLayer.path = targetFrame.cgPath
     CATransaction.commit()
+    updateAccessPulse()
     updateServiceMarker(at: markerPosition)
     if journeyStart != nil {
       journeyNearbyMax.frames = max(journeyNearbyMax.frames, frameCount)
       journeyNearbyMax.mapped = max(journeyNearbyMax.mapped, mappedFrameCount)
     }
+  }
+
+  private func isNearBlockedAccess(at position: SIMD4<Float>) -> Bool {
+    guard (visionMode == .normal || visionMode == .preview), !accessBlockers.isEmpty,
+          let service = serviceTarget?.service, service.count == 2, !activeRoute.isEmpty else { return false }
+    let approach = model.center(service)
+    return simd_distance_squared(SIMD2(position.x, position.z), SIMD2(approach.x, approach.z)) <= 1
+  }
+
+  private func updateAccessPulse() {
+    let key = "access-pulse"
+    guard accessFrameLayer.path != nil, !UIAccessibility.isReduceMotionEnabled else {
+      accessFrameLayer.removeAnimation(forKey: key)
+      return
+    }
+    guard accessFrameLayer.animation(forKey: key) == nil else { return }
+    let pulse = CABasicAnimation(keyPath: "opacity")
+    pulse.fromValue = 1
+    pulse.toValue = 0.25
+    pulse.duration = 0.5
+    pulse.autoreverses = true
+    pulse.repeatCount = .infinity
+    accessFrameLayer.add(pulse, forKey: key)
   }
 
   private func updateServiceMarker(at position: CGPoint?) {
@@ -1895,6 +1964,9 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
   }
 
   private func updateWalkStatus(at position: SIMD4<Float>) {
+    let accessWarning = isNearBlockedAccess(at: position)
+      ? "Move the cart and carton to reach P-001 for repair." : nil
+    if accessStatus.text != accessWarning { accessStatus.text = accessWarning }
     let cell = cellAt(x: position.x, z: position.z)
     let walkable = isWalkablePosition(x: position.x, z: position.z)
     if replanAfterRetreat, !replanPending, walkable,
@@ -1913,7 +1985,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
       }
     } else if let arrival = arrivalText(at: position) {
       arrived = true
-      let summary = model.inspectionSummary.map { "\n\($0)" } ?? ""
+      let summary = accessWarning == nil ? model.inspectionSummary.map { "\n\($0)" } ?? "" : ""
       updateDisplay(arrival + summary)
     } else {
       let guidance = activeRoute.isEmpty ? "No route to target" : "Follow the green route"
@@ -2016,8 +2088,10 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     virtual.isHidden = !visible
     movementControls?.isHidden = !visible
     inspect.isHidden = !visible || !arrived
+    accessBanner.isHidden = !visible || accessStatus.text == nil
     visionStatus.isHidden = !visible || visionMode.isLiveWalk
-    nearbyStatus.isHidden = !visible || nearbyStatus.text == nil
+    nearbyStatus.isHidden = !visible || nearbyStatus.text == nil ||
+      (model.serviceAccessDemo == true && !accessBanner.isHidden)
     moveCrate.isHidden = !visible || model.obstacleDemo != true
     moveCrate.isEnabled = !replanPending
 
@@ -2026,6 +2100,8 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
       updateServiceMarker(at: nil)
       clearDetections()
       clearSupplementalDetections()
+      accessFrameLayer.path = nil
+      updateAccessPulse()
       if nearbyFrameLayer.path != nil {
         nearbyFrameLayer.path = nil
         targetFrameLayer.path = nil
