@@ -505,6 +505,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
   private var movementControls: UIView?
   private var manualPosition = SIMD3<Float>.zero
   private var lastFrame: CFTimeInterval?
+  private var stabilizedCamera: (pose: simd_float4x4, orientation: UIInterfaceOrientation)?
 
   override var canBecomeFirstResponder: Bool { model.keyControls }
 
@@ -1858,19 +1859,30 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     guard let alignment else { return }
     let orientation = view.window?.windowScene?.interfaceOrientation ?? .portrait
     var pose = alignment.modelPose(frame.camera.viewMatrix(for: orientation).inverse)
+    let elapsed = frame.timestamp - (lastFrame ?? frame.timestamp)
+    lastFrame = frame.timestamp
+    var displayPose = pose
+    if let previous = stabilizedCamera, previous.orientation == orientation,
+       elapsed > 0, elapsed < 0.12 {
+      // A short time constant damps hand tremor without making turns feel sluggish.
+      let weight = Float(1 - exp(-elapsed / 0.03))
+      displayPose = simd_float4x4(simd_slerp(simd_quatf(previous.pose), simd_quatf(pose), weight))
+      displayPose.columns.3 = previous.pose.columns.3 + (pose.columns.3 - previous.pose.columns.3) * weight
+    }
+    stabilizedCamera = (displayPose, orientation)
     if model.keyControls {
-      let seconds = Float(min(0.05, max(0, frame.timestamp - (lastFrame ?? frame.timestamp))))
-      lastFrame = frame.timestamp
+      let seconds = Float(min(0.05, max(0, elapsed)))
       if showModel { move(motions: buttons.union(keys.values), seconds: seconds, pose: pose) }
       pose.columns.3 = SIMD4(manualPosition.x, manualPosition.y, manualPosition.z, 1)
+      displayPose.columns.3 = pose.columns.3
     }
     let size = virtual.bounds.size
     if showModel, size.width > 0, size.height > 0 {
       virtual.isHidden = false
       let projection = frame.camera.projectionMatrix(for: orientation, viewportSize: size, zNear: 0.04, zFar: 40)
-      renderer.render(pose: pose, projection: projection)
+      renderer.render(pose: displayPose, projection: projection)
     }
-    updateMap(pose)
+    updateMap(displayPose)
     updateWalkStatus(at: pose.columns.3)
   }
 
@@ -1977,6 +1989,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
 
   func sessionWasInterrupted(_ session: ARSession) {
     ready = false
+    lastFrame = nil
     updateDisplay("Tracking interrupted. Return to the original area.")
   }
 
