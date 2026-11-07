@@ -1251,11 +1251,13 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     }
     let bounds = target.floorBounds(cellSize: model.cellSize)
     let targetCenter = (bounds.min + bounds.max) / 2
-    let focusHeight: Float = model.serviceAccessDemo == true ? 0.73 : 0.9
+    let isDemo = model.serviceAccessDemo == true
+    let focusHeight: Float = isDemo ? 0.73 : 0.9
     let lookAtTarget = SIMD3(targetCenter.x, Float(target.height) * focusHeight, targetCenter.y)
     let lookAhead = point(at: min(end, step + 4)) - SIMD3(0, 0.20, 0)
     let remaining = (end - step) * model.cellSize
-    let aim = min(1, max(0, (0.9 - remaining) / 0.5))
+    let aimStart: Float = isDemo ? 1.2 : 0.9
+    let aim = min(1, max(0, (aimStart - remaining) / (aimStart - 0.4)))
     let look = lookAhead + (lookAtTarget - lookAhead) * aim
 
     let hadArrived = arrived
@@ -1571,13 +1573,15 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     let point = SIMD2(position.x, position.z)
     let warnAboutAccess = isNearBlockedAccess(at: position)
     let accessLabel = model.serviceAccessDemo == true ? "Move to clear access" : "Check access"
-    let radius: Float = 2.5
-    let nearby = model.objects.indices.compactMap { index -> (index: Int, distance: Float)? in
+    let nearbyRadiusSquared: Float = 2.5 * 2.5
+    let targetRadiusSquared: Float = 2.8 * 2.8
+    let inRange = model.objects.indices.compactMap { index -> (index: Int, distance: Float)? in
       let bounds = model.objects[index].floorBounds(cellSize: model.cellSize)
       let distance = simd_distance_squared(point, simd_clamp(point, bounds.min, bounds.max))
-      return distance <= radius * radius ? (index, distance) : nil
+      let limit = index == model.target ? targetRadiusSquared : nearbyRadiusSquared
+      return distance <= limit ? (index, distance) : nil
     }.sorted { $0.distance == $1.distance ? $0.index < $1.index : $0.distance < $1.distance }
-    let lines = nearby.prefix(3).map { entry in
+    let lines = inRange.prefix(while: { $0.distance <= nearbyRadiusSquared }).prefix(3).map { entry in
       let object = model.objects[entry.index]
       return "\(object.displayName) · \(conditionText(for: object))"
     }
@@ -1606,7 +1610,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     var mappedFrameCount = 0
     CATransaction.begin()
     CATransaction.setDisableActions(true)
-    for entry in nearby {
+    for entry in inRange {
       let object = model.objects[entry.index]
       if entry.index == model.target, let marker = object.markerBounds {
         let top = viewProjection * SIMD4((marker[0][0] + marker[1][0]) / 2, marker[1][1],
