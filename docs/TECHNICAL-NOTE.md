@@ -32,6 +32,8 @@ At arrival, Dart retrieves current state, newest telemetry, endpoints of the inc
 
 The report distinguishes workbook observations, supplied confidence, unconfirmed hypotheses and next verification. P-005's default synthetic assignment is ASSET-017, with current-state evidence at `Current_State!18`. The included telemetry has 4,320 samples over three days. The separate fourteen-day CSV is unavailable. Missing context or telemetry must remain visible.
 
+Malformed bundle containers, evidence rows and invalid probability values are rejected with `FormatException`, so the existing loader can show unavailable workbook data instead of an uncaught type or numeric error. Valid workbook reports remain unchanged.
+
 The working offline fallback is deterministic local retrieval, requiring no network or generative model. No optional LLM/RAG service is deployed by this revision. A local diagnostic model must not be claimed merely because retrieved case text appears in the report.
 
 ## Product evidence status
@@ -60,11 +62,53 @@ generated scene/workbook assets and detailed expected-result fixtures stay local
 
 ### Verified backend checkpoint
 
-On source baseline `2014f82` plus the current Linux changes, all 20 Python tests
-and all 29 Flutter tests passed. Full Flutter analysis was clean. The exhaustive route
+At Linux checkpoint `4b412e8`, all 20 Python tests and all 29 Flutter tests
+passed. The subsequent malformed-bundle fallback fix passes all 31 Flutter
+tests; full Flutter analysis is clean. The exhaustive route
 audit verified 12,636 shortest routes (2,106 connected starts × six targets),
 144 unreachable pairs (24 disconnected starts × six targets), 12 blocked-endpoint
 cases and 3,888 cardinal edges with exact swept-clearance checks. These checks
 exercise the represented grid and camera radius, not physical industrial safety.
 Record `git rev-parse HEAD` when reproducing this checkpoint; private audit output stays in ignored `build/`.
 Combined iOS simulator runtime verification remains pending with Mac.
+
+### Open product gap: automatic travel is verification-only
+
+Read-only inspection at revision `4b412e8` confirms that normal app launch does
+not expose automatic route playback. The Flutter button in `lib/main.dart:386`
+calls `_openWorld` (`:224`), which sends the existing route, floor mask, target
+and clearance through `openWorld` (`:240`). The native handler always opens
+`.normal` mode (`ios/Runner/AppDelegate.swift:56`). In
+`ios/Runner/WorldWalk.swift:723`, the detector-load callback returns for
+`.normal` before its `startJourney()` call (`:744`). The only other caller
+(`:1042`) belongs to the simulator journey detector. The complete normal
+control panel (`:641–666`) provides alignment, camera toggle, report, optional
+crate and optional movement controls; `makeControls()` (`:1286`) supplies only
+forward/backward movement. There is no automatic-travel or replay button.
+Passing command-line simulator journeys therefore do not prove this normal
+product requirement.
+
+The smallest Mac-owned integration can retain the current payload and planner:
+expose an explicit automatic-travel action for a nonempty validated route, and
+reuse the existing centre-to-centre playback and arrival/report pipeline. Keep
+playback state separate from the verification mode. The normal AR pose callback
+(`WorldWalk.swift:1680`) must not overwrite scripted playback; normal display
+gating (`:1800`) and map updates (`:512`) must accept the scripted pose without
+requiring manual AR alignment. Provide a way to stop or restart travel, stop
+scheduled playback on dismissal/backgrounding, and preserve manual phone
+navigation and the existing detector confirmation rule. Adding only a call to
+`startJourney()` would leave these normal-mode lifecycle conflicts unresolved.
+
+Mac acceptance must use the normal user-facing action, with no
+`--verify-service-journey` flag, for all six targets. Verify movement, arrival,
+matching maintenance evidence and nearby overlays, plus an unreachable route
+and dismissal/restart. Run the three difficult start fixtures separately and
+retain simulator-only testing. No new route schema or obstacle behavior is
+required.
+
+No shared Dart planner defect was demonstrated by this comparison. The payload
+uses the same 0.10 m clearance and mask as its route; native grid centres,
+observed floor and equipment occupancy agree. A targeted Linux Float32
+reproduction of native position checks passed 5,445 sampled positions across
+the fifteen existing journey fixtures, including the difficult approaches.
+That arithmetic check is not Swift runtime or simulator evidence.

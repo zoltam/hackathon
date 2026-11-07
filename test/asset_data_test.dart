@@ -120,6 +120,55 @@ void main() {
     expect('Alarms_Events!3'.allMatches(diagnosis.reportText), hasLength(1));
   });
 
+  test('malformed bundle shapes use the unavailable-data fallback error', () {
+    for (final source in ['null', '[]', 'true', '"bundle"']) {
+      expect(() => AssetData.fromJson(source), throwsFormatException);
+    }
+    for (final field in ['tables', 'mappings']) {
+      for (final value in [null, [], 'invalid']) {
+        final source = bundle()..[field] = value;
+        expect(
+          () => AssetData.fromJson(jsonEncode(source)),
+          throwsFormatException,
+          reason: '$field=$value must reach the existing loader fallback',
+        );
+      }
+    }
+    final source = bundle();
+    for (final name in (source['tables'] as Map).keys) {
+      final invalid = bundle();
+      invalid['tables'][name] = ['invalid row'];
+      expect(
+        () => AssetData.fromJson(jsonEncode(invalid)),
+        throwsFormatException,
+        reason: '$name rows must be safe for retrieval',
+      );
+    }
+    source['tables']['Current_State'][0]['model_confidence'] = 'invalid';
+    expect(() => AssetData.fromJson(jsonEncode(source)), throwsFormatException);
+  });
+
+  test(
+    'confidence cannot overflow report formatting or exceed probability bounds',
+    () {
+      for (final value in ['1e308', '1e999', '-0.1', '1.1']) {
+        final source = jsonEncode(
+          bundle(),
+        ).replaceFirst('"model_confidence":0.7', '"model_confidence":$value');
+        expect(() => AssetData.fromJson(source), throwsFormatException);
+      }
+      for (final value in [null, 0, 1]) {
+        final source = jsonDecode(jsonEncode(bundle()));
+        source['tables']['Current_State'][0]['model_confidence'] = value;
+        final diagnosis = AssetData.fromJson(
+          jsonEncode(source),
+        ).forObject('object-1')!;
+        expect(diagnosis.confidence, value);
+        expect(diagnosis.reportText, contains('Workbook model confidence:'));
+      }
+    },
+  );
+
   test('retrieves only mapped asset evidence with source references', () {
     final data = AssetData.fromJson(jsonEncode(bundle()));
     final diagnosis = data.forObject('object-1')!;

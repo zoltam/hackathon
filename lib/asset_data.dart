@@ -71,8 +71,11 @@ class AssetDiagnosis {
 
 /// Offline diagnostic guidance from workbook records and matching cases.
 class AssetData {
-  AssetData.fromJson(String source) : _json = jsonDecode(source) {
-    if (_json['schemaVersion'] != 1 || _json['synthetic'] != true) {
+  AssetData.fromJson(String source) : _json = _decodeBundle(source) {
+    if (_json['schemaVersion'] != 1 ||
+        _json['synthetic'] != true ||
+        _json['tables'] is! RecordData ||
+        _json['mappings'] is! RecordData) {
       throw const FormatException('Unsupported asset data bundle');
     }
     for (final name in [
@@ -85,10 +88,32 @@ class AssetData {
       'Knowledge_Docs',
       'Data_Quality',
     ]) {
-      if (_tables[name] is! List) {
+      final rows = _tables[name];
+      if (rows is! List) {
         throw FormatException('Missing evidence table: $name');
       }
+      if (rows.any((row) => row is! RecordData)) {
+        throw FormatException('Invalid evidence row: $name');
+      }
     }
+    for (final state in _rows('Current_State')) {
+      final confidence = state['model_confidence'];
+      if (confidence != null &&
+          (confidence is! num ||
+              !confidence.isFinite ||
+              confidence < 0 ||
+              confidence > 1)) {
+        throw const FormatException('Invalid workbook model confidence');
+      }
+    }
+  }
+
+  static RecordData _decodeBundle(String source) {
+    final decoded = jsonDecode(source);
+    if (decoded is! RecordData) {
+      throw const FormatException('Unsupported asset data bundle');
+    }
+    return decoded;
   }
 
   final RecordData _json;
