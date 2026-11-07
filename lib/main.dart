@@ -221,7 +221,7 @@ class _SiteSimulationState extends State<SiteSimulation> {
           );
   }
 
-  Future<void> _openWorld() async {
+  Future<void> _openWorld({bool simulate = false}) async {
     final selectedTarget = _target;
     final data = await _assetData;
     final diagnosis = selectedTarget == null
@@ -230,23 +230,25 @@ class _SiteSimulationState extends State<SiteSimulation> {
             selectedTarget.objectId,
             equipmentType: selectedTarget.equipmentType,
           );
-    if (!mounted || selectedTarget != _target) return;
+    if (!mounted || selectedTarget != _target || (simulate && _route.isEmpty)) {
+      return;
+    }
     final site = widget.site;
     final visible = site.visibleObjects(_moved).toList();
     final target = visible.indexWhere((object) => object == _target);
     List<int> pair(Cell cell) => [cell.$1, cell.$2];
 
     await widget.openNative(
-      'openWorld',
+      simulate ? 'openServiceSimulation' : 'openWorld',
       jsonEncode({
         'inspectionReport': diagnosis?.reportText,
         'inspectionSummary': diagnosis?.arrivalSummary,
         'hasWorkbook': data != null,
         'name': site.name,
         'sourceSha256': site.sourceSha256,
-        'keyControls': _keyControls,
+        'keyControls': !simulate && _keyControls,
         'framesPerSecond': _framesPerSecond,
-        'obstacleDemo': _obstacleDemo && _route.isNotEmpty,
+        'obstacleDemo': !simulate && _obstacleDemo && _route.isNotEmpty,
         'moved': _moved,
         'width': site.width,
         'depth': site.depth,
@@ -387,6 +389,12 @@ class _SiteSimulationState extends State<SiteSimulation> {
           icon: const Icon(Icons.directions_walk),
           label: const Text('Walk inside the 3D model'),
         ),
+        if (_target != null)
+          OutlinedButton.icon(
+            onPressed: _route.isEmpty ? null : () => _openWorld(simulate: true),
+            icon: const Icon(Icons.play_arrow),
+            label: const Text('Simulate service visit'),
+          ),
         if (site.objects.any((object) => object.movable))
           SwitchListTile(
             contentPadding: EdgeInsets.zero,

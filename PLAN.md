@@ -38,7 +38,7 @@ Current `zoltam` scope is product behavior, Linux validation and the Mac integra
 
 Use the complete Equipment Room replacement scan to extract and frame equipment, calculate and automatically travel a collision-free route to a preselected faulty device, show nearby assets and their synthetic Excel metadata, and open grounded inspection guidance at arrival. Keep the iOS viewer focused on that workflow. The brief weights extraction and framing 30%, navigation and proximity 25%, diagnostics 20%, backend 15%, and demo 10%.
 
-P-005 is the primary demo. Demonstrate the five other service targets in verification. The top release priorities are accurate in-app recognition of all 33 catalog objects and working in-app routes to all six service targets from every supported start. Offline detector and planner results support this gate. Verify the integrated app with rendered-frame recognition and actual route playback in the simulator. Keep the existing tagged crate demo separate. New unexpected-obstacle avoidance is deferred.
+P-005 is the primary demo. The app can automatically simulate the visit to any of its six selectable service targets. The 3D view marks the selected device with a yellow exclamation above its projected bounds when it is nearby and in view. At arrival, the report presents the mapped workbook evidence. Demonstrate the five other service targets in verification. The top release priorities are accurate in-app recognition of all 33 catalog objects and working in-app routes to all six service targets from every supported start. Offline detector and planner results support this gate. Verify the integrated app with rendered-frame recognition and actual route playback in the simulator. Keep the existing tagged crate demo separate. New unexpected-obstacle avoidance is deferred.
 
 ## Scene and equipment handoff
 
@@ -134,6 +134,11 @@ The suite contains positives only and is exploratory. Keep the rear
 vessel disabled pending train-label repair and independent hard negatives
 with only the front vessel visible. Scene bounds and detector annotation
 memberships are separate contracts.
+A candidate with 283 added points was rejected after replaying 230
+training positives and 16 controls. The visible lower shell remained
+incomplete and five controls gained edge fragments. Blind validation QA
+also found 16 clear truncations in 44 existing positives. Do not train
+on the incomplete repair.
 
 ## Additional approaches and continuous clearance
 

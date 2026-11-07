@@ -19,6 +19,14 @@ import UIKit
       guard let model = try? JSONDecoder().decode(WalkSite.self, from: Data(payload.utf8)) else {
         return result(FlutterError(code: "invalid_model", message: "Could not open this 3D model.", details: nil))
       }
+      if visionMode == .preview {
+        guard let target = model.target, model.objects.indices.contains(target),
+              let service = model.objects[target].service,
+              let floor = model.walkableFloor, model.route.first == model.start,
+              WalkSite.isClearanceSafeRoute(model.route, to: service, walkableFloor: floor) else {
+          return result(FlutterError(code: "invalid_route", message: "No safe route to this device.", details: nil))
+        }
+      }
       guard visionMode != .normal || ARWorldTrackingConfiguration.isSupported else {
         return result(FlutterError(code: "unsupported", message: "AR needs a compatible physical iPhone.", details: nil))
       }
@@ -46,14 +54,16 @@ import UIKit
         channel.invokeMethod("replanServiceRoute", arguments: request, result: completion)
       }
       camera.modalPresentationStyle = .fullScreen
-      host.present(camera, animated: visionMode == .normal) { result(nil) }
+      host.present(camera, animated: visionMode == .normal || visionMode == .preview) { result(nil) }
     }
     channel.setMethodCallHandler { call, result in
-      guard call.method == "openWorld" else { return result(FlutterMethodNotImplemented) }
+      guard call.method == "openWorld" || call.method == "openServiceSimulation" else {
+        return result(FlutterMethodNotImplemented)
+      }
       guard let payload = call.arguments as? String else {
         return result(FlutterError(code: "invalid_model", message: "Missing 3D model.", details: nil))
       }
-      open(payload, .normal, nil, result)
+      open(payload, call.method == "openWorld" ? .normal : .preview, nil, result)
     }
     let arguments = ProcessInfo.processInfo.arguments
     let obstacleArgument = arguments.firstIndex(of: "--verify-obstacle-reroute")

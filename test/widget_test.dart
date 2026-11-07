@@ -162,8 +162,9 @@ void main() {
       return const StringCodec().encodeMessage(workbook);
     });
     Map<String, dynamic>? payload;
+    String? openedMethod;
     messenger.setMockMethodCallHandler(channel, (call) async {
-      expect(call.method, 'openWorld');
+      openedMethod = call.method;
       payload = jsonDecode(call.arguments as String) as Map<String, dynamic>;
       return null;
     });
@@ -183,6 +184,7 @@ void main() {
     await tester.ensureVisible(open);
     await tester.tap(open);
     await tester.pumpAndSettle();
+    expect(openedMethod, 'openWorld');
     expect(payload!['hasWorkbook'], isTrue);
     expect(payload!['inspectionSummary'], contains('Inspect coupling'));
     expect(payload!['inspectionReport'], contains('Current_State!2'));
@@ -208,6 +210,17 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Inlet valve'), findsOneWidget);
     expect(find.textContaining('P-006'), findsNothing);
+    await tester.tap(find.text('Inlet valve'));
+    await tester.pumpAndSettle();
+    final simulate = find.text('Simulate service visit');
+    await tester.scrollUntilVisible(simulate, 200);
+    await tester.tap(simulate);
+    await tester.pumpAndSettle();
+    expect(openedMethod, 'openServiceSimulation');
+    expect(payload!['target'], 1);
+    expect((payload!['route'] as List).last, [2, 2]);
+    expect(payload!['keyControls'], isFalse);
+    expect(payload!['obstacleDemo'], isFalse);
   });
 
   testWidgets('blocked start stays explicit and clearance can be reduced', (

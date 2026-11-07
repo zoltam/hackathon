@@ -325,7 +325,7 @@ final class RouteMapView: UIControl {
 }
 
 final class WorldWalk: UIViewController, ARSessionDelegate {
-  enum VisionMode { case normal, verify, benchmark, journey, obstacle }
+  enum VisionMode { case normal, preview, verify, benchmark, journey, obstacle }
 
   struct VerificationPose: Decodable {
     let id: String
@@ -360,6 +360,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
   private let detectionLayer = CAShapeLayer()
   private let supplementalLayer = CAShapeLayer()
   private let nearbyFrameLayer = CAShapeLayer()
+  private let serviceMarker = UILabel()
   private var nearbyLabels: [Int: UILabel] = [:]
   private weak var controlPanel: UIStackView?
   private let message = UILabel()
@@ -498,6 +499,18 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     supplementalLayer.lineJoin = detectionLayer.lineJoin
     virtual.layer.addSublayer(supplementalLayer)
     virtual.layer.addSublayer(detectionLayer)
+    serviceMarker.bounds = CGRect(x: 0, y: 0, width: 44, height: 44)
+    serviceMarker.text = "!"
+    serviceMarker.textColor = .systemYellow
+    serviceMarker.font = .systemFont(ofSize: 34, weight: .heavy)
+    serviceMarker.textAlignment = .center
+    serviceMarker.backgroundColor = .black.withAlphaComponent(0.85)
+    serviceMarker.layer.cornerRadius = 22
+    serviceMarker.layer.masksToBounds = true
+    serviceMarker.layer.zPosition = 1
+    serviceMarker.accessibilityLabel = "Service target"
+    serviceMarker.isHidden = true
+    virtual.addSubview(serviceMarker)
 
     message.font = .preferredFont(forTextStyle: .callout)
     message.textColor = .white
@@ -650,9 +663,11 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     align.configuration = .filled()
     align.setTitle("Set start and direction", for: .normal)
     align.addTarget(self, action: #selector(calibrate), for: .touchUpInside)
+    align.isHidden = visionMode == .preview
     toggle.configuration = .tinted()
     toggle.setTitle("Show camera", for: .normal)
     toggle.addTarget(self, action: #selector(toggleView), for: .touchUpInside)
+    toggle.isHidden = visionMode == .preview
     let close = UIButton(type: .system)
     close.configuration = .tinted()
     close.setTitle("Close", for: .normal)
@@ -717,6 +732,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
       return
     }
     #endif
+    if visionMode == .preview { startJourney() }
     renderer.vision.detectsObstacleTag = visionMode == .obstacle || model.obstacleDemo == true
     renderer.vision.loadModel(at: detectorURL) { [weak self] loaded in
       guard let self, !self.closed, self.view.window != nil else { return }
@@ -729,7 +745,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
           NSLog("Supplemental detector resource unavailable")
         }
       }
-      guard self.visionMode != .normal else { return }
+      guard self.visionMode != .normal, self.visionMode != .preview else { return }
       if !loaded {
         self.visionStatus.isHidden = false
         let log = self.visionMode == .obstacle ? "VALMET_OBSTACLE error=detector_unavailable" :
@@ -1087,7 +1103,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
       return
     }
     let end = Float(model.route.count - 1)
-    let speed: Float = 0.15
+    let speed: Float = visionMode == .preview ? 0.45 : 0.15
     let elapsed = Float(CACurrentMediaTime() - start)
     let elapsedWalking = end * model.cellSize / speed
     let step = min(end, elapsed * speed / model.cellSize)
@@ -1115,6 +1131,10 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
       fflush(stdout)
     }
     if elapsed >= elapsedWalking + 4 {
+      if visionMode == .preview {
+        stopJourney(error: nil)
+        return
+      }
       let error: String?
       if !arrived || !journeyConfirmedTarget {
         error = "missing_arrival_or_target"
@@ -1137,6 +1157,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     guard let start = journeyStart else { return }
     journeyStart = nil
     restoreVerificationIdleTimer()
+    guard visionMode != .preview else { return }
     let elapsed = CACurrentMediaTime() - start
     #if targetEnvironment(simulator)
     if usesSimulatorJourneyDetector {
@@ -1420,6 +1441,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     let frames = UIBezierPath()
     var placedLabels: [CGRect] = []
     var visibleLabels = Set<Int>()
+    var markerPosition: CGPoint?
     var frameCount = 0
     var mappedFrameCount = 0
     CATransaction.begin()
@@ -1444,6 +1466,17 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
       }
       guard !frame.isEmpty else { continue }
       frames.append(frame)
+      if entry.index == model.target {
+        let top = (corners[2] + corners[3] + corners[6] + corners[7]) * 0.25
+        if top.w > 0, top.z >= 0, top.z <= top.w {
+          let x = (CGFloat(top.x / top.w) + 1) * viewport.width * 0.5
+          let y = (1 - CGFloat(top.y / top.w)) * viewport.height * 0.5 - 25
+          let position = CGPoint(x: x, y: y)
+          if labelArea.insetBy(dx: 22, dy: 28).contains(position) {
+            markerPosition = position
+          }
+        }
+      }
       frameCount += 1
       if object.syntheticCondition != nil { mappedFrameCount += 1 }
       let label = nearbyLabel(at: entry.index, text: object.displayName + "\n" + conditionText(for: object))
@@ -1475,10 +1508,29 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     nearbyFrameLayer.frame = viewport
     nearbyFrameLayer.path = frames.cgPath
     CATransaction.commit()
+    updateServiceMarker(at: markerPosition)
     if journeyStart != nil {
       journeyNearbyMax.frames = max(journeyNearbyMax.frames, frameCount)
       journeyNearbyMax.mapped = max(journeyNearbyMax.mapped, mappedFrameCount)
     }
+  }
+
+  private func updateServiceMarker(at position: CGPoint?) {
+    serviceMarker.isHidden = position == nil
+    if let position { serviceMarker.center = position }
+    let key = "service-bob"
+    guard position != nil, !UIAccessibility.isReduceMotionEnabled else {
+      serviceMarker.layer.removeAnimation(forKey: key)
+      return
+    }
+    guard serviceMarker.layer.animation(forKey: key) == nil else { return }
+    let bob = CABasicAnimation(keyPath: "transform.translation.y")
+    bob.toValue = -6
+    bob.duration = 0.6
+    bob.autoreverses = true
+    bob.repeatCount = .infinity
+    bob.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+    serviceMarker.layer.add(bob, forKey: key)
   }
 
   private func conditionText(for object: WalkSite.Block) -> String {
@@ -1808,7 +1860,8 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
 
   private func updateDisplay(_ text: String) {
     if visionMode == .normal && (!ready || alignment == nil) { updateMap(nil) }
-    let visible = showModel && (visionMode == .journey || visionMode == .obstacle || (ready && alignment != nil))
+    let visible = showModel && (visionMode == .journey || visionMode == .preview ||
+                               visionMode == .obstacle || (ready && alignment != nil))
     virtual.isHidden = !visible
     movementControls?.isHidden = !visible
     inspect.isHidden = !visible || !arrived
@@ -1819,6 +1872,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
 
     if !visible {
       buttons.removeAll()
+      updateServiceMarker(at: nil)
       clearDetections()
       clearSupplementalDetections()
       if nearbyFrameLayer.path != nil {
