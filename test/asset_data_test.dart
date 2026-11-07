@@ -101,9 +101,8 @@ void main() {
         },
     ];
     final data = AssetData.fromJson(jsonEncode(source));
-    final events = data
-        .forObject('object-1')!
-        .evidence
+    final diagnosis = data.forObject('object-1')!;
+    final events = diagnosis.evidence
         .where((e) => e.reference.contains('Alarms_Events!'))
         .map((e) => e.reference);
     expect(events, [
@@ -111,12 +110,33 @@ void main() {
       'evt-5 · Alarms_Events!6',
       'evt-4 · Alarms_Events!5',
     ]);
+    expect(
+      diagnosis.reportText,
+      contains(
+        'Matching open workbook event: 2026-01-02: DRIFT · Event 2 (open)\n'
+        '[evt-2 · Alarms_Events!3]',
+      ),
+    );
+    expect('Alarms_Events!3'.allMatches(diagnosis.reportText), hasLength(1));
   });
 
   test('retrieves only mapped asset evidence with source references', () {
     final data = AssetData.fromJson(jsonEncode(bundle()));
     final diagnosis = data.forObject('object-1')!;
     expect(diagnosis.assetId, 'asset-1');
+    expect(
+      diagnosis.arrivalSummary,
+      contains('Next check · Verify reference [Current_State!2]'),
+    );
+    expect(
+      diagnosis.reportText,
+      contains('Next verification: Verify reference\n[Current_State!2]'),
+    );
+    expect('Current_State!2'.allMatches(diagnosis.reportText), hasLength(1));
+    expect(
+      diagnosis.reportText,
+      isNot(contains('Matching open workbook event')),
+    );
     expect(
       diagnosis.evidence.any((e) => e.text.contains('sensor_bias=2')),
       isTrue,

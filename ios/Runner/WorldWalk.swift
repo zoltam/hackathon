@@ -377,6 +377,8 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
   private var journeyStart: CFTimeInterval?
   private var journeyConfirmedTarget = false
   #if targetEnvironment(simulator)
+  private var journeyVision = (fresh: 0, stale: 0, qualified: 0, associated: 0, confirmed: 0)
+  private var journeyVisionClears = (age: 0, pose: 0)
   private var usesSimulatorJourneyDetector: Bool {
     visionMode == .journey && ProcessInfo.processInfo.arguments.contains("--simulator-rf16-journey")
   }
@@ -592,6 +594,11 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
       }
       guard self.isCurrent(prediction.frame, comparedWith: pose) else {
         if benchmarking { self.supplementalBenchmarkStale += 1 }
+        #if targetEnvironment(simulator)
+        if self.usesSimulatorJourneyDetector, self.journeyStart != nil {
+          self.journeyVision.stale += 1
+        }
+        #endif
         self.verificationSamples?.supplementalStale += 1
         self.clearSupplementalDetections()
         return
@@ -612,7 +619,14 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
       self.lastSupplementalDetection = detections.isEmpty ? nil : prediction.frame
       let confirmed = self.drawDetections(detections, supplemental: true)
       #if targetEnvironment(simulator)
-      if self.usesSimulatorJourneyDetector { self.confirmJourneyTarget(confirmed) }
+      if self.usesSimulatorJourneyDetector, self.journeyStart != nil {
+        // This test stream contains only the selected service target.
+        self.journeyVision.fresh += 1
+        if !prediction.detections.isEmpty { self.journeyVision.qualified += 1 }
+        if !detections.isEmpty { self.journeyVision.associated += 1 }
+        if !confirmed.isEmpty { self.journeyVision.confirmed += 1 }
+        self.confirmJourneyTarget(confirmed)
+      }
       #endif
       self.verificationSamples?.supplementalSamples += 1
       self.verificationSamples?.supplementalConfirmed.formUnion(confirmed)
@@ -1117,6 +1131,13 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     journeyStart = nil
     restoreVerificationIdleTimer()
     let elapsed = CACurrentMediaTime() - start
+    #if targetEnvironment(simulator)
+    if usesSimulatorJourneyDetector {
+      print("VALMET_JOURNEY rf16_frames fresh=\(journeyVision.fresh) stale=\(journeyVision.stale) " +
+            "qualified=\(journeyVision.qualified) associated=\(journeyVision.associated) confirmed=\(journeyVision.confirmed) " +
+            "history_clears_age=\(journeyVisionClears.age) history_clears_pose=\(journeyVisionClears.pose)")
+    }
+    #endif
     print("VALMET_JOURNEY nearby_frames_max=\(journeyNearbyMax.frames) mapped_nearby_frames_max=\(journeyNearbyMax.mapped)")
     let arrivalWorkbook = arrived && hasJourneyWorkbookEvidence
     let tag = arrivalWorkbook ? (serviceTarget?.workbookTag ?? "unavailable") : "unavailable"
@@ -1576,6 +1597,15 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
       clearDetections()
     }
     if let lastSupplementalDetection, !isCurrent(lastSupplementalDetection, comparedWith: pose) {
+      #if targetEnvironment(simulator)
+      if usesSimulatorJourneyDetector, journeyStart != nil {
+        if CACurrentMediaTime() - lastSupplementalDetection.timestamp >= Self.detectionMaxAge {
+          journeyVisionClears.age += 1
+        } else {
+          journeyVisionClears.pose += 1
+        }
+      }
+      #endif
       clearSupplementalDetections()
     }
   }

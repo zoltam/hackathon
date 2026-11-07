@@ -15,33 +15,41 @@ class AssetDiagnosis {
     required this.condition,
     required this.updatedAt,
     required this.confidence,
-    required this.observation,
     required this.nextCheck,
+    required this.stateEvidence,
+    required this.matchingOpenEvidence,
     required this.evidence,
     required this.hypotheses,
     required this.qualityIssues,
     required this.mappingNotice,
   });
 
-  final String assetId, tag, condition, updatedAt, observation, nextCheck;
+  final String assetId, tag, condition, updatedAt, nextCheck;
   final String mappingNotice;
   final double? confidence;
+  final Evidence stateEvidence;
+  final Evidence? matchingOpenEvidence;
   final List<Evidence> evidence, hypotheses, qualityIssues;
 
   String get arrivalSummary =>
-      '$tag · $condition · Synthetic workbook\nNext check · $nextCheck';
+      '$tag · $condition · Synthetic workbook\n'
+      'Next check · $nextCheck [${stateEvidence.reference}]';
 
   String get reportText => [
     '$tag · $condition ($assetId)',
     mappingNotice,
     'Workbook snapshot: $updatedAt',
-    'Observation: $observation',
+    'Observation: ${stateEvidence.text}\n'
+        'Next verification: $nextCheck\n[${stateEvidence.reference}]',
     'Workbook model confidence: ${confidence == null ? 'unavailable' : '${(confidence! * 100).round()}%'} (supplied metadata)',
-    'Next verification: $nextCheck',
+    if (matchingOpenEvidence case final event?)
+      'Matching open workbook event: ${event.text}\n[${event.reference}]',
     'Local evidence summary. A cause has not been confirmed.',
     for (final e in qualityIssues) 'Data quality: ${e.text}\n[${e.reference}]',
     'Evidence:',
-    for (final e in evidence) '${e.text}\n[${e.reference}]',
+    for (final e in evidence)
+      if (e != stateEvidence && e != matchingOpenEvidence)
+        '${e.text}\n[${e.reference}]',
     'Historical hypotheses:',
     if (hypotheses.isEmpty) 'No matching historical case supplied.',
     for (final e in hypotheses) '${e.text}\n[${e.reference}]',
@@ -148,10 +156,18 @@ class AssetData {
               r['status'] == 'open',
         )
         .firstOrNull;
-    final reportEvents = [
-      ?matchingOpenEvent,
-      ...events.where((event) => event != matchingOpenEvent),
-    ].take(3);
+    Evidence eventEvidence(RecordData r) => entry(
+      r,
+      '${r['timestamp']}: ${r['event_code']} · '
+          '${r['description']} (${r['status']})',
+      'event_id',
+    );
+    final matchingOpenEvidence = matchingOpenEvent == null
+        ? null
+        : eventEvidence(matchingOpenEvent);
+    final otherReportEvents = events
+        .where((event) => event != matchingOpenEvent)
+        .take(matchingOpenEvidence == null ? 3 : 2);
     final cases = _rows('Historical_Service_Cases')
         .where(
           (r) =>
@@ -174,12 +190,13 @@ class AssetData {
           r['doc_id'] == state['knowledge_doc_id'] ||
           r['doc_id'] == 'DOC-FIELD-SAFETY',
     );
+    final stateEvidence = entry(
+      state,
+      '${state['issue_summary']}. Health score: '
+      '${state['health_score']}; urgency: ${state['urgency']}.',
+    );
     final evidence = <Evidence>[
-      entry(
-        state,
-        '${state['issue_summary']}. Health score: '
-        '${state['health_score']}; urgency: ${state['urgency']}.',
-      ),
+      stateEvidence,
       if (recent != null)
         entry(
           recent,
@@ -197,13 +214,8 @@ class AssetData {
           'Included telemetry samples from $oldestTime to '
               '$recentTime. ${comparison.join(', ')}.',
         ),
-      for (final r in reportEvents)
-        entry(
-          r,
-          '${r['timestamp']}: ${r['event_code']} · '
-              '${r['description']} (${r['status']})',
-          'event_id',
-        ),
+      ?matchingOpenEvidence,
+      for (final r in otherReportEvents) eventEvidence(r),
       for (final r in latest('Maintenance_History', 'opened_at').take(2))
         entry(
           r,
@@ -240,8 +252,9 @@ class AssetData {
       condition: '${state['condition_state']}',
       updatedAt: '${state['last_updated']}',
       confidence: (state['model_confidence'] as num?)?.toDouble(),
-      observation: '${state['issue_summary']}',
       nextCheck: '${state['recommended_next_check']}',
+      stateEvidence: stateEvidence,
+      matchingOpenEvidence: matchingOpenEvidence,
       mappingNotice: '${_json['mappingNotice']}',
       evidence: evidence,
       hypotheses: [
