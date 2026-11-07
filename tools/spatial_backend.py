@@ -271,6 +271,7 @@ class SpatialViewer:
                 if self.asset_names[self.asset.value] == object_id:
                     self.show_report(object_id)
                 self.open_report(object_id)
+                self.status.content = '**Arrived** · Inspection report ready.'
 
     def show_candidate(self, client=None):
         candidate = self.app.catalog.candidates.get(self.proposal.value)

@@ -1,5 +1,35 @@
 # Valmet two-person delivery plan
 
+## Current backend product checkpoint — 7 November 2026
+
+The current user-directed milestone is the Python spatial backend and browser
+viewer, with exports ready for separate iOS adoption. Demo, presentation and video
+work are out of scope; the historical delivery sections below do not authorize it.
+
+The release preserves the registered 33 assets and adds automatic 4 cm/8 cm
+geometric proposals, persistent review controls, person-sized routes through the
+existing Dart planner, broader disclosed synthetic workbook associations and
+validated local Ollama explanations with deterministic fallback. The local reviewed
+catalog currently has 34 objects, including one display stand inspected from two
+Gaussian-rendered viewpoints; remaining proposals are not approved equipment.
+Fresh outputs start at 33 until the private review decisions are restored.
+
+Validation: 54 Python tests, 35 Flutter tests and Flutter static analysis pass.
+All six routes pass represented-grid shortest-path, continuous-clearance,
+visibility and playback checks. Real local model runs validate for all six targets;
+a loopback-only network namespace also passed routing, model and viewer checks.
+These checks do not establish calibrated physical clearance or new trained image
+recognition. The current iOS recognition pipeline remains separately owned.
+
+For Mac adoption, generate the private `build/spatial/` exports with the README
+commands, retain `catalog/review.json`, and load `site.json`, `asset-data.json`,
+`associations.json` and `diagnostics.json` together. `lib/spatial_data.dart` validates
+the optional metadata/report sidecars and preserves legacy loading without them.
+The adapter is tested; wiring it into the iOS UI and simulator verification remain
+Mac integration work. Source scans, workbooks and derived private exports are not
+published to this public repository.
+
+
 Updated 7 November 2026. Baseline `5dfed35`. Previous experiments and detailed measurements are in the Git history of this file. Read the [challenge notes](challenge-shortlist.md) and [setup](README.md) before changing code.
 
 Current `zoltam` scope is product behavior, Linux validation and the Mac integration handoff. Demo, slide and video assembly is deferred.
