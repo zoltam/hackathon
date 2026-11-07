@@ -1168,6 +1168,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
       stopJourney(error: "scene_inactive")
       return
     }
+    let frameStart = DispatchTime.now()
     let end = Float(model.route.count - 1)
     let speed: Float = visionMode == .preview ? model.walkingSpeedMetresPerSecond ?? 0.45 : 0.15
     let eyeHeight = model.eyeHeightMetres ?? assumedPhoneHeight
@@ -1220,7 +1221,8 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
       stopJourney(error: error)
     } else {
       let fps = visionMode == .preview ? model.renderFramesPerSecond : 30
-      DispatchQueue.main.asyncAfter(deadline: .now() + 1.0 / Double(fps)) { [weak self] in
+      let frameClock = visionMode == .preview ? frameStart : .now()
+      DispatchQueue.main.asyncAfter(deadline: frameClock + 1.0 / Double(fps)) { [weak self] in
         self?.journeyFrame()
       }
     }

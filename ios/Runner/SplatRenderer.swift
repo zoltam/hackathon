@@ -193,7 +193,6 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
     let now = CACurrentMediaTime()
     // Allow 1 ms of frame-clock jitter to avoid skipping every other AR frame.
     guard now - lastDraw >= 1.0 / Double(framesPerSecond) - 0.001 else { return }
-    lastDraw = now
     pendingFrame = (pose, projection, now)
     view.draw()
   }
@@ -215,6 +214,7 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
       inFlight.signal()
       return
     }
+    lastDraw = frame.timestamp
     let buffer = sortBuffers[nextBuffer]
     nextBuffer = (nextBuffer + 1) % sortBuffers.count
     var uniforms = Uniforms(viewProjection: projection * pose.inverse,
@@ -597,10 +597,13 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
     float b = dot(jx, cov * jy);
     float c = dot(jy, cov * jy) + .3;
     float halfTrace = .5 * (a + c);
-    float delta = length(float2(.5 * (a - c), b));
+    float halfDifference = .5 * (a - c);
+    float delta = length(float2(halfDifference, b));
     float l1 = halfTrace + delta, l2 = max(.25, halfTrace - delta);
-    float angle = .5 * atan2(2 * b, a - c);
-    float2 direction = float2(cos(angle), sin(angle));
+    // Choose the eigenvector form that avoids subtracting nearly equal values.
+    float2 axis = halfDifference >= 0 ? float2(delta + halfDifference, b)
+                                     : float2(b, delta - halfDifference);
+    float2 direction = delta > 0 ? normalize(axis) : float2(1, 0);
     float2 major = direction * min(sqrt(l1), maxSigma);
     float2 minor = float2(-direction.y, direction.x) * min(sqrt(l2), maxSigma);
     float2 extent = 6 * sqrt(major * major + minor * minor) / u.screen;
