@@ -79,6 +79,22 @@ connectors clearly. The same four-crop replay for the rear vessel at the
 locked 0.76 threshold retained 25 true positives and added one false
 positive. It was rejected.
 
+## Additional approaches and continuous clearance
+
+The higher-resolution simulator build also passed six alternate journeys:
+P-001 and P-002 from `[96,36]` (4.0 and 3.7 m), P-003 and P-004 from
+`[42,83]` (7.5 and 3.6 m), P-005 from `[66,92]` (1.8 m), and CV-003 from
+`[96,36]` (3.6 m). Each confirmed the target and correct workbook tag,
+arrived, and displayed nearby mapped equipment.
+
+A native audit derived the entrance component from the app's exact
+`site.json` bytes. It checked all 3,860 unique cardinal edges in the
+2,106-cell component against the modeled obstacle rectangles and map
+boundary over the full length of each edge. All six service cells were
+reachable. Minimum modeled clearance was 0.15 m at a required 0.10 m.
+This covers the static camera grid, separate from the simulator vision
+and arrival checks.
+
 ## Blue inline valve handoff candidate
 
 At the validation-locked RF-DETR threshold 0.814663589, the projected and
@@ -87,7 +103,10 @@ deduplicated archival comparison improved room results from 61/2/1 to
 one positive below the eight-positive release gate. A separately frozen
 four-view walking-endpoint sample improved from 0/0/4 to 3/0/1, with no
 detections in two target-absent controls. This is supplementary static
-evidence. The app still uses R3 for this valve and for P-005.
+evidence. The app still uses R3 for this valve and for P-005. The right blue actuator was also checked at its
+locked threshold. Its walking result improved from 19/1/10 to 23/0/6,
+but the room archive gained one false positive in a target-absent view.
+R3 remains assigned to that actuator.
 
 ## Ownership
 
