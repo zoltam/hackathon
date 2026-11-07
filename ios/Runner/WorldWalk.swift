@@ -365,6 +365,8 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
   private var benchmarkConfirmedFrames = 0
   private var lastDetection: RenderedVision.Frame?
   private var lastSupplementalDetection: RenderedVision.Frame?
+  private static let detectionMaxAge: CFTimeInterval = 0.40
+  private var supplementalReplacement: (ids: Set<String>, timestamp: CFTimeInterval)?
   private var confirmedVisionIDs = VisionConfirmedIDs()
   private var previousDetectionBoxes: [String: CGRect] = [:]
   private var previousSupplementalBoxes: [String: CGRect] = [:]
@@ -469,10 +471,18 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
         self.clearDetections()
         return
       }
+      // A stalled supplemental stream returns its replacement to R3.
+      if let replacement = self.supplementalReplacement,
+         CACurrentMediaTime() - replacement.timestamp >= Self.detectionMaxAge {
+        self.supplementalReplacement = nil
+        self.clearSupplementalDetections()
+      }
+      let replaced = self.supplementalReplacement?.ids ?? []
       let viewProjection = prediction.frame.projection * prediction.frame.pose.inverse
       var projectedIDs = Set<String>()
       let detections = prediction.detections.filter { detection in
-        guard let object = self.model.objects.first(where: { $0.objectId == detection.objectID }) else { return false }
+        guard !replaced.contains(detection.objectID),
+              let object = self.model.objects.first(where: { $0.objectId == detection.objectID }) else { return false }
         if let bounds = object.bounds {
           guard RenderedVision.matches(detection, to: bounds, viewProjection: viewProjection) else { return false }
           if self.verificationPoses != nil { projectedIDs.insert(detection.objectID) }
@@ -510,10 +520,11 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     }
     renderer.vision.onSupplementalStopped = { [weak self] in
       guard let self else { return }
+      self.supplementalReplacement = nil
       self.clearSupplementalDetections()
       if self.benchmarkWarmupStart != nil { self.abortBenchmark(reason: "supplemental_stopped_during_warmup") }
     }
-    renderer.vision.onSupplementalPrediction = { [weak self] prediction in
+    renderer.vision.onSupplementalPrediction = { [weak self] prediction, replacements in
       guard let self, !self.closed else { return }
       let benchmarking = self.visionMode == .benchmark && self.inBenchmarkWindow(CACurrentMediaTime())
       if benchmarking {
@@ -528,6 +539,9 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
         self.clearSupplementalDetections()
         return
       }
+      if !replacements.isEmpty {
+        self.supplementalReplacement = (replacements, prediction.frame.timestamp)
+      }
       if self.benchmarkWarmupStart != nil { self.supplementalWarmupFrames += 1 }
       if benchmarking {
         self.supplementalBenchmarkAges.append(Int((CACurrentMediaTime() - prediction.frame.timestamp) * 1000))
@@ -540,6 +554,11 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
       }
       self.lastSupplementalDetection = detections.isEmpty ? nil : prediction.frame
       let confirmed = self.drawDetections(detections, supplemental: true)
+      if self.verificationPoses != nil, !replacements.isEmpty {
+        self.verificationSamples?.raw.formUnion(prediction.detections.map(\.objectID).filter(replacements.contains))
+        self.verificationSamples?.projected.formUnion(detections.map(\.objectID).filter(replacements.contains))
+        self.verificationSamples?.confirmed.formUnion(confirmed.filter(replacements.contains))
+      }
       if self.visionMode == .verify, !confirmed.isEmpty {
         print("VALMET_SUPPLEMENTAL confirmed=\(confirmed.sorted().joined(separator: ","))")
         fflush(stdout)
@@ -1377,7 +1396,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
 
   private func isCurrent(_ frame: RenderedVision.Frame, comparedWith pose: simd_float4x4) -> Bool {
     // Avoid drawing boxes from an older view after the camera moves.
-    CACurrentMediaTime() - frame.timestamp < 0.40 &&
+    CACurrentMediaTime() - frame.timestamp < Self.detectionMaxAge &&
       simd_distance(frame.pose.columns.3, pose.columns.3) <= 0.16 &&
       simd_dot(frame.pose.columns.2, pose.columns.2) >= 0.99 &&
       simd_dot(frame.pose.columns.0, pose.columns.0) >= 0.99
@@ -1394,6 +1413,8 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     let previousBoxes = supplemental ? previousSupplementalBoxes : previousDetectionBoxes
     var confirmedIDs: [String] = []
     for (id, rawBox) in current {
+      // Retain RF history while the last R3 box is still visible.
+      if supplemental, confirmedVisionIDs.primary.contains(id) { continue }
       guard let previous = previousBoxes[id] else { continue }
       let box = CGRect(x: (previous.minX + rawBox.minX) / 2,
                        y: (previous.minY + rawBox.minY) / 2,

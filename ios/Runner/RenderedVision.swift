@@ -109,7 +109,7 @@ final class RenderedVision {
 
   var onPrediction: ((Prediction) -> Void)?
   var onSupplementalStopped: (() -> Void)?
-  var onSupplementalPrediction: ((Prediction) -> Void)?
+  var onSupplementalPrediction: ((Prediction, Set<String>) -> Void)?
   var detectsObstacleTag = false
   private var detector: (request: VNCoreMLRequest, directory: URL)?
   private let queue = DispatchQueue(label: "valmet.rendered-vision", qos: .userInitiated)
@@ -128,7 +128,10 @@ final class RenderedVision {
     let thresholds: [Float]
     let topK: Int
     let approvedObjectIDs: Set<String>
+    let replacesPrimaryObjectIDs: [String]?
     let input, outputBoxes, outputLogits: String
+
+    var primaryReplacements: Set<String> { Set(replacesPrimaryObjectIDs ?? []) }
 
     var isValid: Bool {
       let primaryIDs = Set([
@@ -141,7 +144,10 @@ final class RenderedVision {
       return labels.count == classes.count && !labels.isEmpty &&
         thresholds.count == classes.count && thresholds.allSatisfy { (0...1).contains($0) } &&
         topK > 0 && !approvedObjectIDs.isEmpty &&
-        approvedObjectIDs.isSubset(of: labels) && approvedObjectIDs.isDisjoint(with: primaryIDs)
+        approvedObjectIDs.isSubset(of: labels) &&
+        primaryReplacements.count == (replacesPrimaryObjectIDs?.count ?? 0) &&
+        primaryReplacements.isSubset(of: ["boiler-room:middle-blue-actuator"]) &&
+        approvedObjectIDs.intersection(primaryIDs) == primaryReplacements
     }
 
     func accepts(_ description: MLModelDescription) -> Bool {
@@ -356,7 +362,7 @@ final class RenderedVision {
                                         inferenceMilliseconds: Int((CACurrentMediaTime() - started) * 1000))
             DispatchQueue.main.async {
               guard self.supplemental?.generation == generation else { return }
-              self.onSupplementalPrediction?(prediction)
+              self.onSupplementalPrediction?(prediction, contract.primaryReplacements)
             }
           } catch {
             NSLog("Supplemental detector disabled: %@", error.localizedDescription)

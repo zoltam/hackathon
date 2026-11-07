@@ -62,9 +62,10 @@ The app includes an RF-DETR Nano FP16 Core ML supplement at
 `ios/Runner/RFDETR-LICENSE.txt`. Xcode compiles the source package when building.
 Normal launches run it alongside the existing R3 detector. Use the launch
 argument `--disable-rfdetr-supplemental` for a baseline-only check.
-The supplement has an independent
-bounded inference queue and two-frame confirmation history. Its approved IDs
-exclude all 11 R3 IDs. Capture-time 3D association follows image inference.
+The supplement has an independent bounded inference queue and two-frame
+confirmation history. R3 handles the middle blue actuator until a current
+RF-DETR result arrives. It resumes after a stop or a 0.40 s result gap. Each
+ID has one visible source. Capture-time 3D association follows image inference.
 
 The first epoch-16 release qualified 14 additional instances on both validation
 and test at per-instance precision ≥95% and recall ≥70%, after pose association
@@ -77,7 +78,7 @@ qualified four more instances on the archived 292-view test. Floor carton,
 black shelf cart and yellow-wheel hand truck also passed on new views. Short
 step ladder qualified on the archive, with 62 positive examples. The new-view
 set had no positive examples of that ladder. The enabled catalog contains 29
-IDs, comprising 11 R3 IDs and 18 additional IDs.
+IDs, comprising the original 11 IDs and 18 additions.
 
 The iPhone check found all 14 additional IDs in their respective fixed views
 and showed no supplemental overlay in the negative view. Both baseline and
@@ -86,6 +87,9 @@ passed recognition, arrival and workbook-evidence checks with the supplement.
 A separate 2.0 m alternate P-005 journey also passed.
 With the four new thresholds, iPhone verification confirmed each newly
 enabled object, the empty negative view and the alternate P-005 journey.
+The middle actuator handoff and R3-only fallback both passed on iPhone.
+On the original 69-view walking test, the handoff model found the middle
+actuator in 12 of 14 positive views at score 0.78. R3 found it in two.
 
 After a 12.49 s cold-model warmup, the 90-second combined benchmark produced
 719 supplemental samples at 7.99 Hz, with p95 inference of 27 ms and one stale

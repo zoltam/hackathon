@@ -411,6 +411,25 @@ positives and 137 misses after association, giving 91.8% precision and 67.9%
 recall. These results describe static views and expose substantial misses
 outside the fixed demonstration poses.
 
+### Middle blue actuator handoff
+
+R3 accounted for 110 of the 137 misses in the 48-view replay. The middle blue
+actuator was the only nominated replacement after the original room and
+walking validation comparison required at least eight positives per split,
+precision ≥97%, recall ≥80% and no loss in R3 true positives or increase in
+false positives. The locked score is 0.78. It improved the original room test
+from 59/2/9 to 66/0/2 and the walking test from 2/0/12 to 12/0/2
+(true positives / false positives / misses). The previously examined 48-view
+set improved from 2/5/21 to 20/0/3 for this ID. Across the enabled 29 IDs, this
+changes that diagnostic replay to 308/21/119, with 93.6% precision and 72.1% recall.
+
+The shipped Core ML contract declares the middle actuator as its sole primary
+replacement. A fresh supplemental prediction starts the handoff. A stopped or
+stalled supplemental stream restores R3 after clearing its replacement layer.
+The contract protects all six workbook service IDs. The iPhone check confirmed
+the four new threshold IDs, the middle actuator handoff, P-005, the empty
+view, the alternate P-005 journey and R3-only fallback.
+
 - The supplied DOCX names the original Industrial Boiler Room PLY. In that
   archive 502,482 of 1,506,136 records pass the structural guard. The team uses
   the complete registered Equipment Room replacement. The scene scale remains

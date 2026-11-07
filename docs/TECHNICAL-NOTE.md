@@ -17,6 +17,11 @@ Its bounded queue and confirmation history are independent of R3. Supplemental
 failure clears its overlays while R3 continues. The source package and Apache
 2.0 notice are included. Four of the 33 reviewed IDs remain disabled.
 
+The middle blue actuator transfers to RF-DETR after a current result and falls
+back to R3 if the supplemental stream stops or stalls. The contract restricts
+the handoff to that ID. The original walking test improved from 2 to 12 true
+positives out of 14, with zero false positives in both runs.
+
 On iPhone, Vision/Core ML runs on clean Metal-rendered frames sampled at up to 8 Hz, skipping frames while inference is busy. ARKit tracks physical phone motion for the manual walkthrough. The detector receives only rendered pixels and returns catalog IDs, boxes and scores. Each frame carries its capture-time pose, projection and timestamp. For current results, the app projects the matching catalog volume into the captured frame and checks overlap. It keeps the strongest box per ID and requires two consecutive observations before showing a yellow box. Teal proximity frames and mapped status use the scene geometry within 2.5 m.
 
 ## Route and changing obstacles
@@ -37,6 +42,7 @@ At arrival, Dart retrieves current state, latest sampled telemetry, recent alarm
 - iPhone 15, iOS 26.5, 15-second scripted render benchmark. 29.67 GPU FPS, 29 predictions, 5 ms median and 7 ms p95 inference latency. With class-checked workbook mapping, the scripted journey confirmed `P-005 · Red circulation pump`, showed up to four proximity frames (two with workbook mappings) and arrived after 20.36 s.
 - A warmed-up 90-second combined phone benchmark produced 7.99 Hz supplemental inference, p95 27 ms, and 27.21 rendered FPS versus 28.88 with R3 alone. All 14 additional IDs were confirmed in their fixed views and the negative view remained empty. The same wall-pump approach was missed with and without the supplement. All six scripted service journeys passed recognition, arrival and workbook evidence. Fixed-view confirmation does not measure per-instance phone precision.
 - A threshold-only extension confirmed four more IDs in fixed iPhone views, the empty view and an alternate P-005 journey. On 48 new agent-reviewed views, the enabled 29 IDs reached 91.8% precision and 67.9% recall after association.
+- The middle actuator handoff and R3-only fallback passed on iPhone, including the alternate P-005 journey. The same 48-view diagnostic replay with the handoff policy reached 93.6% precision and 72.1% recall.
 - The stationary-camera crate test localized two placements, blocked the original route and then the active detour, and reopened 27 cells after the move. The user confirmed a physical offline P-005 walkthrough, arrival guidance and report dismissal.
 
 Setup and repeatable checks are in the [README](../README.md). Model selection and device evidence are in the [development plan](../PLAN.md).

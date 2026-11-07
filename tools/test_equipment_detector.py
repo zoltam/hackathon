@@ -84,6 +84,22 @@ class DetectorToolsTest(unittest.TestCase):
         policy.write_text(json.dumps(contract))
         self.cli(*arguments, succeeds=False)
 
+        p005, actuator, novel = 'boiler-room:red-circulation-pump', 'boiler-room:middle-blue-actuator', self.names[1]
+        contract.update(checkpoint_sha256=hashlib.sha256(self.weights.read_bytes()).hexdigest(),
+                        classes=[p005, actuator, novel], thresholds=[.25, .78, .6],
+                        approvedObjectIDs=[actuator, novel], replacesPrimaryObjectIDs=[actuator])
+        arguments[arguments.index('--legacy-count')+1] = 2
+        policy.write_text(json.dumps(contract))
+        self.assertEqual(json.loads(self.cli(*arguments).stdout)['replacesPrimaryObjectIDs'], [actuator])
+        for invalid in [
+            dict(replacesPrimaryObjectIDs=[]),
+            dict(approvedObjectIDs=[p005, novel], replacesPrimaryObjectIDs=[p005]),
+            dict(approvedObjectIDs=[novel]),
+            dict(imageOnlyGateObjectIDs=[actuator]),
+        ]:
+            policy.write_text(json.dumps(contract | invalid))
+            self.cli(*arguments, succeeds=False)
+
     def test_resume_rejects_ema_reordered_classes_and_completed_endpoint(self):
         checkpoint = dict(args=dict(class_names=self.names), epoch=15,
                           optimizer_states=[{'state': {}}], lr_schedulers=[{}])

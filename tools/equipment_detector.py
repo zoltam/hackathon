@@ -202,9 +202,16 @@ def export_contract(args):
         raise ValueError('One finite threshold in [0,1] is required per class')
     if not 0 <= args.legacy_count <= len(names):
         raise ValueError('Invalid legacy class count')
+    legacy = set(names[:args.legacy_count])
     approved = contract['approvedObjectIDs']
-    if not isinstance(approved, list) or not all(isinstance(n, str) for n in approved) or len(approved) != len(set(approved)) or not set(approved) <= set(names[args.legacy_count:]):
-        raise ValueError('Only unique novel IDs may be approved')
+    if not isinstance(approved, list) or not all(isinstance(n, str) for n in approved) or len(approved) != len(set(approved)) or not set(approved) <= set(names):
+        raise ValueError('Approved IDs must be unique model classes')
+    replacements = contract.get('replacesPrimaryObjectIDs', [])
+    if (not isinstance(replacements, list) or not all(isinstance(n, str) for n in replacements)
+            or len(replacements) != len(set(replacements))
+            or not set(replacements) <= {'boiler-room:middle-blue-actuator'}
+            or set(approved) & legacy != set(replacements)):
+        raise ValueError('Only a declared middle-blue-actuator may replace a primary ID')
     image_only = contract.get('imageOnlyGateObjectIDs', [])
     if len(image_only) != len(set(image_only)) or not set(image_only) <= set(names[args.legacy_count:]):
         raise ValueError('Image-only qualified IDs must also be unique novel IDs')
