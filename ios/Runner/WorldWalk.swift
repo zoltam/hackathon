@@ -571,10 +571,10 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     serviceMarker.isHidden = true
     virtual.addSubview(serviceMarker)
 
-    message.font = .preferredFont(forTextStyle: .subheadline)
+    message.font = Self.readableFont(.subheadline)
     message.textColor = .white
     message.numberOfLines = visionMode.isLiveWalk ? 5 : 0
-    visionStatus.font = .preferredFont(forTextStyle: .caption1)
+    visionStatus.font = Self.readableFont(.caption1)
     visionStatus.textColor = .white
     visionStatus.numberOfLines = 2
     visionStatus.isHidden = true
@@ -585,7 +585,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
       if self.visionMode != .normal { self.updateMap(pose) }
       self.updateNearbyEquipment(at: pose.columns.3, viewProjection: projection * pose.inverse)
     }
-    nearbyStatus.font = .preferredFont(forTextStyle: .caption2)
+    nearbyStatus.font = Self.readableFont(.caption2, extraSize: 1)
     nearbyStatus.textColor = .white
     nearbyStatus.numberOfLines = 4
     nearbyStatus.isHidden = true
@@ -1526,6 +1526,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     }
     let frames = UIBezierPath()
     let targetFrame = UIBezierPath()
+    let displayScale = max(1, view.traitCollection.displayScale)
     let labelWidth = labelArea.width * 0.65
     if nearbyLabelWidth != labelWidth {
       nearbyLabelWidth = labelWidth
@@ -1580,7 +1581,9 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
         guard labelArea.contains(candidate),
               !placedLabels.contains(where: { $0.insetBy(dx: -3, dy: -2).intersects(candidate) })
         else { continue }
-        label.frame = candidate
+        label.frame = CGRect(x: (x * displayScale).rounded() / displayScale,
+                             y: (y * displayScale).rounded() / displayScale,
+                             width: width, height: height)
         label.isHidden = false
         placedLabels.append(candidate)
         visibleLabels.insert(entry.index)
@@ -1638,9 +1641,8 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
   private func nearbyLabel(at index: Int, text: String) -> UILabel {
     if let label = nearbyLabels[index] { return label }
     let label = UILabel()
-    let font = UIFont.preferredFont(forTextStyle: .caption2)
     let isTarget = index == model.target
-    label.font = isTarget ? font : font.withSize(font.pointSize * 0.97)
+    label.font = isTarget ? .preferredFont(forTextStyle: .caption2) : Self.readableFont(.caption2, extraSize: 1)
     label.textColor = .white
     label.textAlignment = .center
     label.numberOfLines = 2
@@ -1670,6 +1672,10 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
         .strokeWidth: -2.5,
       ])
     }
+  }
+
+  private static func readableFont(_ style: UIFont.TextStyle, extraSize: CGFloat = 0) -> UIFont {
+    .systemFont(ofSize: UIFont.preferredFont(forTextStyle: style).pointSize + extraSize, weight: .medium)
   }
 
   private static func clipEdge(_ a: SIMD4<Float>, _ b: SIMD4<Float>, to viewport: CGRect) -> (CGPoint, CGPoint)? {
