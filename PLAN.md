@@ -342,14 +342,41 @@ journeys passed with the supplement, including the wall pump during walking,
 arrival and matching workbook evidence. The supplement is enabled by default
 after these checks; `--disable-rfdetr-supplemental` selects R3-only operation.
 
-A separate local experiment continues from the full epoch-16 training
+A separate local experiment continued from the full epoch-16 training
 checkpoint at 512 px with 0.3× learning rates for epochs 17–18. It adds 47
 reviewed 864 × 1872 training views, for 1,829 images and 17,845 complete-label
 boxes. Existing training examples are retained, and validation/test annotation
 files are byte-identical. The new camera cells exclude protected static,
 temporal, device and blind-view cells. Actual restored optimizer groups and
-scheduler rates were checked before training. This candidate is evaluated on
-validation before any export or release decision.
+scheduler rates were checked before training.
+
+A train-only audit found 18 disconnected splats mislabeled as part of the rear
+red vessel. Removing their label membership kept the render pixels identical
+and removed a 1,166-pixel island on a white panel in the verification image.
+The original box was nearly twice the corrected area. A versioned dataset
+reproduced all original rear-vessel boxes before correcting 45 training and
+eight validation boxes. It preserved RGB files, other labels and the original
+test set. The updated validation annotations were locked before model scoring.
+
+Replaying epoch 18 from the same full epoch-17 checkpoint with the repaired
+training labels improved aggregate projected validation counts. It gained one
+true positive across the two orange actuators and rear vessel over the frozen
+512 px baseline. The original epoch-18 checkpoint gained three on the same
+revised validation set, meeting the predeclared selection gate. Resume can
+change batch order and augmentation draws, which limits causal interpretation.
+
+Typed FP16 Vision evaluation qualified 20 novel IDs on revised validation.
+Only nine qualified on both revised validation and the unchanged held-out
+test, using frozen thresholds and per-ID precision ≥95% and recall ≥70%.
+The projected novel test produced 1,394 true positives, 73 false positives
+and 266 misses. The two-frame temporal overlay reached 94.2% precision and
+77.5% recall. Eight of the currently enabled 14 novel IDs missed a held-out
+gate. The app continues to use the validated 384 px supplement.
+
+Among 84 readable, separated orange-actuator training pairs, A appeared to the
+left in 77. The seven genuine reversed pairs came from two camera cells with a
+view of the backs of the actuators. A separate training experiment tests the effect
+of removing default horizontal mirroring while retaining those real views.
 
 - The supplied DOCX names the original Industrial Boiler Room PLY. In that
   archive 502,482 of 1,506,136 records pass the structural guard. The team uses
