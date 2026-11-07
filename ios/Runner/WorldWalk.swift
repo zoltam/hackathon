@@ -3,6 +3,12 @@ import AVFoundation
 import UIKit
 import simd
 
+struct VisionConfirmedIDs {
+  var primary = Set<String>()
+  var supplemental = Set<String>()
+  var visible: [String] { primary.union(supplemental).sorted() }
+}
+
 let assumedPhoneHeight: Float = 1.50
 
 struct WalkSite: Decodable {
@@ -300,6 +306,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
   private let reality = ARSCNView()
   private var virtual: UIView { renderer.view }
   private let detectionLayer = CAShapeLayer()
+  private let supplementalLayer = CAShapeLayer()
   private let nearbyFrameLayer = CAShapeLayer()
   private var nearbyLabels: [Int: UILabel] = [:]
   private weak var controlPanel: UIStackView?
@@ -345,14 +352,23 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     return CFTimeInterval(min(180, max(15, seconds)))
   }()
   private var benchmarkStart: CFTimeInterval?
+  private var benchmarkWarmupStart: CFTimeInterval?
+  private var supplementalWarmupFrames = 0
   private var nextBenchmarkCheckpoint: CFTimeInterval = 15
   private var verificationIdleTimerWasDisabled: Bool?
   private var benchmarkLink: CADisplayLink?
   private var benchmarkLatencies: [Int] = []
+  private var supplementalBenchmarkLatencies: [Int] = []
+  private var supplementalBenchmarkAges: [Int] = []
+  private var supplementalBenchmarkStale = 0
   private var benchmarkOverlayAges: [Int] = []
   private var benchmarkConfirmedFrames = 0
   private var lastDetection: RenderedVision.Frame?
+  private var lastSupplementalDetection: RenderedVision.Frame?
+  private var confirmedVisionIDs = VisionConfirmedIDs()
   private var previousDetectionBoxes: [String: CGRect] = [:]
+  private var previousSupplementalBoxes: [String: CGRect] = [:]
+  private let supplementalEnabled = !ProcessInfo.processInfo.arguments.contains("--disable-rfdetr-supplemental")
   private var visionIdleText = "Vision · Loading detector"
   private var currentPose: simd_float4x4?
   private let align = UIButton(type: .system)
@@ -362,6 +378,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
   private var alignment: WorldAlignment?
   private var showModel = false
   private var started = false
+  private var closed = false
   private var ready = false
   private var lastMessage: String?
   private var floorCells: Set<SIMD2<Int>>?
@@ -412,6 +429,11 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     detectionLayer.fillColor = UIColor.clear.cgColor
     detectionLayer.lineWidth = 3
     detectionLayer.lineJoin = .round
+    supplementalLayer.strokeColor = detectionLayer.strokeColor
+    supplementalLayer.fillColor = detectionLayer.fillColor
+    supplementalLayer.lineWidth = detectionLayer.lineWidth
+    supplementalLayer.lineJoin = detectionLayer.lineJoin
+    virtual.layer.addSublayer(supplementalLayer)
     virtual.layer.addSublayer(detectionLayer)
 
     message.font = .preferredFont(forTextStyle: .callout)
@@ -433,7 +455,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     nearbyStatus.numberOfLines = 4
     nearbyStatus.isHidden = true
     renderer.vision.onPrediction = { [weak self] prediction in
-      guard let self else { return }
+      guard let self, !self.closed else { return }
       if self.visionMode == .benchmark, self.inBenchmarkWindow(CACurrentMediaTime()) {
         self.benchmarkLatencies.append(prediction.inferenceMilliseconds)
       }
@@ -485,10 +507,43 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
         fflush(stdout)
         self.verificationFrames += 1
       }
-      let names = confirmedIDs.sorted().map { id in
-        self.model.objects.first { $0.objectId == id }?.displayName ?? id
+    }
+    renderer.vision.onSupplementalStopped = { [weak self] in
+      guard let self else { return }
+      self.clearSupplementalDetections()
+      if self.benchmarkWarmupStart != nil { self.abortBenchmark(reason: "supplemental_stopped_during_warmup") }
+    }
+    renderer.vision.onSupplementalPrediction = { [weak self] prediction in
+      guard let self, !self.closed else { return }
+      let benchmarking = self.visionMode == .benchmark && self.inBenchmarkWindow(CACurrentMediaTime())
+      if benchmarking {
+        self.supplementalBenchmarkLatencies.append(prediction.inferenceMilliseconds)
       }
-      self.visionStatus.text = names.isEmpty ? self.visionIdleText : "Vision · " + names.joined(separator: ", ")
+      guard self.view.window != nil, !self.virtual.isHidden, let pose = self.currentPose else { return }
+      if self.verificationPoses != nil {
+        guard let samples = self.verificationSamples, prediction.frame.timestamp >= samples.started else { return }
+      }
+      guard self.isCurrent(prediction.frame, comparedWith: pose) else {
+        if benchmarking { self.supplementalBenchmarkStale += 1 }
+        self.clearSupplementalDetections()
+        return
+      }
+      if self.benchmarkWarmupStart != nil { self.supplementalWarmupFrames += 1 }
+      if benchmarking {
+        self.supplementalBenchmarkAges.append(Int((CACurrentMediaTime() - prediction.frame.timestamp) * 1000))
+      }
+      let viewProjection = prediction.frame.projection * prediction.frame.pose.inverse
+      let detections = prediction.detections.filter { detection in
+        guard let object = self.model.objects.first(where: { $0.objectId == detection.objectID }),
+              let bounds = object.bounds else { return false }
+        return RenderedVision.matches(detection, to: bounds, viewProjection: viewProjection)
+      }
+      self.lastSupplementalDetection = detections.isEmpty ? nil : prediction.frame
+      let confirmed = self.drawDetections(detections, supplemental: true)
+      if self.visionMode == .verify, !confirmed.isEmpty {
+        print("VALMET_SUPPLEMENTAL confirmed=\(confirmed.sorted().joined(separator: ","))")
+        fflush(stdout)
+      }
     }
     align.configuration = .filled()
     align.setTitle("Set start and direction", for: .normal)
@@ -556,9 +611,16 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     if model.keyControls { becomeFirstResponder() }
     renderer.vision.detectsObstacleTag = visionMode == .obstacle || model.obstacleDemo == true
     renderer.vision.loadModel(at: detectorURL) { [weak self] loaded in
-      guard let self, self.view.window != nil else { return }
+      guard let self, !self.closed, self.view.window != nil else { return }
       self.visionIdleText = loaded ? "Vision · No equipment detected" : "Vision · Detector unavailable"
-      self.visionStatus.text = self.visionIdleText
+      self.clearDetections()
+      if loaded, self.supplementalEnabled {
+        if let url = Bundle.main.url(forResource: "RFDETRSupplemental", withExtension: "mlmodelc") {
+          self.renderer.vision.loadSupplementalModel(at: url)
+        } else {
+          NSLog("Supplemental detector resource unavailable")
+        }
+      }
       guard self.visionMode != .normal else { return }
       if !loaded {
         self.visionStatus.isHidden = false
@@ -660,6 +722,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
       }
     } else {
       clearDetections()
+      clearSupplementalDetections()
       verificationSamples = VerificationSamples()
       virtual.isHidden = false
       visionStatus.isHidden = false
@@ -951,14 +1014,26 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     virtual.isHidden = false
     visionStatus.isHidden = false
     let start = CACurrentMediaTime()
-    benchmarkStart = start
     keepVerificationScreenAwake()
-    renderer.frameCounter = SplatRenderer.FrameCounter(window: start..<(start + benchmarkDuration))
+    if supplementalEnabled {
+      benchmarkWarmupStart = start
+      supplementalWarmupFrames = 0
+      print("VALMET_SUPPLEMENTAL_BENCH phase=warmup timeout_s=30")
+      fflush(stdout)
+    } else {
+      beginBenchmarkWindow(at: start)
+    }
     let link = CADisplayLink(target: self, selector: #selector(benchmarkFrame(_:)))
     benchmarkLink = link
     NotificationCenter.default.addObserver(self, selector: #selector(benchmarkSceneDeactivated(_:)),
                                            name: UIScene.willDeactivateNotification, object: scene)
     link.add(to: .main, forMode: .common)
+  }
+
+  private func beginBenchmarkWindow(at start: CFTimeInterval) {
+    benchmarkWarmupStart = nil
+    benchmarkStart = start
+    renderer.frameCounter = SplatRenderer.FrameCounter(window: start..<(start + benchmarkDuration))
   }
 
   @objc private func benchmarkSceneDeactivated(_ notification: Notification) {
@@ -971,6 +1046,21 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
   }
 
   @objc private func benchmarkFrame(_ link: CADisplayLink) {
+    if let warmup = benchmarkWarmupStart {
+      let elapsed = CACurrentMediaTime() - warmup
+      guard elapsed < 30 else {
+        abortBenchmark(reason: "supplemental_warmup_timeout")
+        return
+      }
+      if supplementalWarmupFrames >= 3, elapsed >= 2 {
+        print("VALMET_SUPPLEMENTAL_BENCH phase=ready warmup_s=\(elapsed) current_frames=\(supplementalWarmupFrames)")
+        fflush(stdout)
+        beginBenchmarkWindow(at: CACurrentMediaTime())
+      } else {
+        renderVerificationPose(index: Int(elapsed / 0.72) % 12)
+        return
+      }
+    }
     guard let benchmarkStart else { return }
     let elapsed = CACurrentMediaTime() - benchmarkStart
     if elapsed < benchmarkDuration {
@@ -1018,12 +1108,19 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     let thermal = ProcessInfo.processInfo.thermalState.rawValue
     let timeField = checkpoint ? "checkpoint_s" : "elapsed_s"
     print("VALMET_BENCH \(timeField)=\(seconds) gpu_frames=\(frames) fps=\(fps) inference_samples=\(samples.count) p50_ms=\(percentile(samples, 0.50)) p95_ms=\(percentile(samples, 0.95)) overlay_updates=\(overlayAges.count) confirmed_frames=\(benchmarkConfirmedFrames) overlay_p95_ms=\(percentile(overlayAges, 0.95)) thermal_state=\(thermal)")
+    if supplementalEnabled {
+      let supplemental = supplementalBenchmarkLatencies.sorted()
+      let ages = supplementalBenchmarkAges.sorted()
+      let hz = String(format: "%.2f", Double(supplemental.count) / elapsed)
+      print("VALMET_SUPPLEMENTAL_BENCH \(timeField)=\(seconds) target_hz=8 inference_samples=\(supplemental.count) inference_hz=\(hz) p50_ms=\(percentile(supplemental, 0.50)) p95_ms=\(percentile(supplemental, 0.95)) current_frames=\(ages.count) stale_frames=\(supplementalBenchmarkStale) frame_age_p95_ms=\(percentile(ages, 0.95))")
+    }
     fflush(stdout)
   }
 
   private func abortBenchmark(reason: String) {
-    guard benchmarkStart != nil else { return }
+    guard benchmarkStart != nil || benchmarkWarmupStart != nil else { return }
     benchmarkStart = nil
+    benchmarkWarmupStart = nil
     stopBenchmarkRendering()
     print("VALMET_BENCH error=interrupted reason=\(reason)")
     fflush(stdout)
@@ -1286,16 +1383,18 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
       simd_dot(frame.pose.columns.0, pose.columns.0) >= 0.99
   }
 
-  @discardableResult private func drawDetections(_ detections: [RenderedVision.Detection]) -> [String] {
+  @discardableResult private func drawDetections(_ detections: [RenderedVision.Detection],
+                                                  supplemental: Bool = false) -> [String] {
     let bounds = virtual.bounds
     let path = UIBezierPath()
     // Each catalog ID names one physical object. Keep its strongest observation.
     let current = Dictionary(detections.map { ($0.objectID, $0) }, uniquingKeysWith: {
       $0.confidence >= $1.confidence ? $0 : $1
     }).mapValues { $0.bounds }
+    let previousBoxes = supplemental ? previousSupplementalBoxes : previousDetectionBoxes
     var confirmedIDs: [String] = []
     for (id, rawBox) in current {
-      guard let previous = previousDetectionBoxes[id] else { continue }
+      guard let previous = previousBoxes[id] else { continue }
       let box = CGRect(x: (previous.minX + rawBox.minX) / 2,
                        y: (previous.minY + rawBox.minY) / 2,
                        width: (previous.width + rawBox.width) / 2,
@@ -1307,25 +1406,46 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
       ), cornerRadius: 6))
     }
     // Average adjacent raw observations, without feeding the result back.
-    previousDetectionBoxes = current
+    if supplemental { previousSupplementalBoxes = current } else { previousDetectionBoxes = current }
+    let layer = supplemental ? supplementalLayer : detectionLayer
     CATransaction.begin()
     CATransaction.setDisableActions(true)
-    detectionLayer.frame = bounds
-    detectionLayer.path = path.cgPath
+    layer.frame = bounds
+    layer.path = path.cgPath
     CATransaction.commit()
+    if supplemental {
+      confirmedVisionIDs.supplemental = Set(confirmedIDs)
+    } else {
+      confirmedVisionIDs.primary = Set(confirmedIDs)
+    }
+    updateVisionStatus()
     return confirmedIDs
   }
 
+  private func updateVisionStatus() {
+    let names = confirmedVisionIDs.visible.map { id in
+      model.objects.first { $0.objectId == id }?.displayName ?? id
+    }
+    visionStatus.text = names.isEmpty ? visionIdleText : "Vision · " + names.joined(separator: ", ")
+  }
+
   private func clearDetections() {
-    if lastDetection != nil { drawDetections([]) }
+    drawDetections([])
     lastDetection = nil
-    visionStatus.text = visionIdleText
+  }
+
+  private func clearSupplementalDetections() {
+    drawDetections([], supplemental: true)
+    lastSupplementalDetection = nil
   }
 
   private func updateDetectionPose(_ pose: simd_float4x4) {
     currentPose = pose
     if let lastDetection, !isCurrent(lastDetection, comparedWith: pose) {
       clearDetections()
+    }
+    if let lastSupplementalDetection, !isCurrent(lastSupplementalDetection, comparedWith: pose) {
+      clearSupplementalDetections()
     }
   }
 
@@ -1512,6 +1632,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     if !visible {
       buttons.removeAll()
       clearDetections()
+      clearSupplementalDetections()
       if nearbyFrameLayer.path != nil {
         nearbyFrameLayer.path = nil
         nearbyLabels.values.forEach { $0.isHidden = true }
@@ -1535,6 +1656,10 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
   }
 
   @objc private func closeWalk() {
+    closed = true
+    renderer.vision.stopSupplementalModel()
+    clearDetections()
+    clearSupplementalDetections()
     if verificationPoses != nil { restoreVerificationIdleTimer() }
     reality.session.pause()
     dismiss(animated: true)

@@ -55,6 +55,42 @@ The importer requires the complete Equipment Room scan. It registers the scan ag
 
 The iPhone detector samples the full rendered image locally at up to 8 frames per second. It skips frames while inference is busy. It returns image-space boxes for the catalog objects, without reading coordinates or camera images as recognition input. Routing and arrival use the separately mapped walkable approach.
 
+### Additional-object detector
+
+The app includes an RF-DETR Nano FP16 Core ML supplement at
+`ios/Runner/RFDETRSupplemental.mlpackage`, with its Apache 2.0 notice at
+`ios/Runner/RFDETR-LICENSE.txt`. Xcode compiles the source package when building.
+Normal launches run it alongside the existing R3 detector. Use the launch
+argument `--disable-rfdetr-supplemental` for a baseline-only check.
+The supplement has an independent
+bounded inference queue and two-frame confirmation history. Its approved IDs
+exclude all 11 R3 IDs. Capture-time 3D association follows image inference.
+
+The frozen epoch-16 export qualified 14 additional instances on both validation
+and test at per-instance precision ≥95% and recall ≥70%, after pose association
+and deduplication. The separate image-only policy qualified ten additional
+instances. These are different evaluated policies. Across all 33 candidates,
+the pose-associated test produced 2,243 true positives, 81 false positives and
+392 misses. Three difficult instances still have low recall, particularly the
+two orange actuators and the rear red vessel. The enabled catalog contains 25 IDs,
+comprising 11 R3 IDs and 14 additional IDs.
+
+The iPhone check found all 14 additional IDs in their respective fixed views
+and showed no supplemental overlay in the negative view. Both baseline and
+combined runs missed the same wall-pump approach view. All six service journeys
+passed recognition, arrival and workbook-evidence checks with the supplement.
+A separate 2.0 m alternate P-005 journey also passed.
+
+After a 12.49 s cold-model warmup, the 90-second combined benchmark produced
+719 supplemental samples at 7.99 Hz, with p95 inference of 27 ms and one stale
+sample. Rendering averaged 27.21 FPS versus 28.88 for R3 alone. R3 p95 inference
+was 28 versus 6 ms, and overlay p95 age was 129 versus 110 ms. Both runs were
+thermally constrained. This records the shared-resource cost on the tested
+iPhone 15, iOS 26.5. The extra IDs become available after background model load.
+
+Optional local data conversion, training/resume and typed Core ML export are
+documented in [the detector tooling guide](tools/README-detector.md).
+
 To retrain the detector, use the prepared scan and Python environment from
 the setup above:
 

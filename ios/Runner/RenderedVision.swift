@@ -108,6 +108,8 @@ final class RenderedVision {
   }
 
   var onPrediction: ((Prediction) -> Void)?
+  var onSupplementalStopped: (() -> Void)?
+  var onSupplementalPrediction: ((Prediction) -> Void)?
   var detectsObstacleTag = false
   private var detector: (request: VNCoreMLRequest, directory: URL)?
   private let queue = DispatchQueue(label: "valmet.rendered-vision", qos: .userInitiated)
@@ -119,6 +121,87 @@ final class RenderedVision {
   private final class Readback {
     let available = DispatchSemaphore(value: 1)
     var buffer: MTLBuffer?
+  }
+
+  private struct SupplementalContract: Decodable {
+    let classes: [String]
+    let thresholds: [Float]
+    let topK: Int
+    let approvedObjectIDs: Set<String>
+    let input, outputBoxes, outputLogits: String
+
+    var isValid: Bool {
+      let primaryIDs = Set([
+        "red-circulation-pump", "middle-circulation-pump", "wall-circulation-pump",
+        "far-circulation-pump", "black-circulation-pump", "blue-inline-valve",
+        "left-control-cabinet", "right-control-cabinet", "left-blue-actuator",
+        "middle-blue-actuator", "right-blue-actuator",
+      ].map { "boiler-room:" + $0 })
+      let labels = Set(classes)
+      return labels.count == classes.count && !labels.isEmpty &&
+        thresholds.count == classes.count && thresholds.allSatisfy { (0...1).contains($0) } &&
+        topK > 0 && !approvedObjectIDs.isEmpty &&
+        approvedObjectIDs.isSubset(of: labels) && approvedObjectIDs.isDisjoint(with: primaryIDs)
+    }
+
+    func accepts(_ description: MLModelDescription) -> Bool {
+      guard isValid, input == "image", outputBoxes == "boxes", outputLogits == "logits",
+            let image = description.inputDescriptionsByName[input]?.imageConstraint,
+            image.pixelsWide == 384, image.pixelsHigh == 384,
+            image.pixelFormatType == kCVPixelFormatType_32BGRA,
+            let boxes = description.outputDescriptionsByName[outputBoxes]?.multiArrayConstraint,
+            let logits = description.outputDescriptionsByName[outputLogits]?.multiArrayConstraint else { return false }
+      return boxes.shape.map(\.intValue) == [1, 300, 4] &&
+        logits.shape.map(\.intValue) == [1, 300, classes.count + 1] &&
+        boxes.dataType == .float32 && logits.dataType == .float32 &&
+        topK <= 300 * (classes.count + 1)
+    }
+  }
+
+  private var supplemental: (request: VNCoreMLRequest, contract: SupplementalContract, generation: Int)?
+  private var supplementalGeneration = 0
+  private let supplementalQueue = DispatchQueue(label: "valmet.rendered-vision.supplemental", qos: .utility)
+  private let supplementalReadback = Readback()
+
+  func loadSupplementalModel(at compiledURL: URL) {
+    dispatchPrecondition(condition: .onQueue(.main))
+    stopSupplementalModel()
+    let generation = supplementalGeneration
+    supplementalQueue.async {
+      do {
+        let configuration = MLModelConfiguration()
+        if #available(iOS 16, *) {
+          configuration.computeUnits = .cpuAndNeuralEngine
+        } else {
+          configuration.computeUnits = .cpuOnly
+        }
+        let model = try MLModel(contentsOf: compiledURL, configuration: configuration)
+        guard let metadata = model.modelDescription.metadata[.creatorDefinedKey] as? [String: String],
+              let contractJSON = metadata["valmet_rf_detr_contract"],
+              let contract = try? JSONDecoder().decode(SupplementalContract.self, from: Data(contractJSON.utf8)),
+              contract.accepts(model.modelDescription) else {
+          NSLog("Supplemental detector has an invalid contract")
+          return
+        }
+        let request = VNCoreMLRequest(model: try VNCoreMLModel(for: model))
+        request.imageCropAndScaleOption = .scaleFill
+        DispatchQueue.main.async {
+          guard self.supplementalGeneration == generation else { return }
+          self.supplemental = (request, contract, generation)
+          print("VALMET_SUPPLEMENTAL loaded=\(contract.approvedObjectIDs.count)")
+          fflush(stdout)
+        }
+      } catch {
+        NSLog("Supplemental detector failed to load: %@", error.localizedDescription)
+      }
+    }
+  }
+
+  func stopSupplementalModel() {
+    dispatchPrecondition(condition: .onQueue(.main))
+    supplementalGeneration += 1
+    supplemental = nil
+    onSupplementalStopped?()
   }
 
   private let readbacks = [Readback(), Readback()]
@@ -179,6 +262,7 @@ final class RenderedVision {
               sourceSize: MTLSize(width: width, height: height, depth: 1),
               to: staging, destinationOffset: 0, destinationBytesPerRow: stride,
               destinationBytesPerImage: length)
+    captureSupplemental(texture, command: command, blit: blit, frame: frame, stride: stride)
     blit.endEncoding()
     command.addCompletedHandler { [weak self] completed in
       guard let self, completed.status == .completed,
@@ -219,6 +303,66 @@ final class RenderedVision {
             DispatchQueue.main.async { self.onPrediction?(result) }
           } catch {
             NSLog("Rendered vision failed: %@", error.localizedDescription)
+          }
+        }
+      }
+    }
+  }
+
+  private func captureSupplemental(_ texture: MTLTexture, command: MTLCommandBuffer,
+                                   blit: MTLBlitCommandEncoder, frame: Frame, stride: Int) {
+    let readback = supplementalReadback
+    guard let (request, contract, generation) = supplemental,
+          readback.available.wait(timeout: .now()) == .success else { return }
+    let width = texture.width, height = texture.height, length = stride * texture.height
+    if readback.buffer?.length != length {
+      readback.buffer = texture.device.makeBuffer(length: length, options: .storageModeShared)
+    }
+    guard let staging = readback.buffer else {
+      readback.available.signal()
+      return
+    }
+    blit.copy(from: texture, sourceSlice: 0, sourceLevel: 0,
+              sourceOrigin: MTLOrigin(x: 0, y: 0, z: 0),
+              sourceSize: MTLSize(width: width, height: height, depth: 1),
+              to: staging, destinationOffset: 0, destinationBytesPerRow: stride,
+              destinationBytesPerImage: length)
+    command.addCompletedHandler { [weak self] completed in
+      guard let self, completed.status == .completed else {
+        readback.available.signal()
+        return
+      }
+      self.supplementalQueue.async {
+        defer { readback.available.signal() }
+        autoreleasepool {
+          var pixelBuffer: CVPixelBuffer?
+          let status = CVPixelBufferCreateWithBytes(
+            kCFAllocatorDefault, width, height, kCVPixelFormatType_32BGRA,
+            staging.contents(), stride, nil, nil, nil, &pixelBuffer
+          )
+          guard status == kCVReturnSuccess, let pixelBuffer else { return }
+          let started = CACurrentMediaTime()
+          do {
+            let handler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer, orientation: .up)
+            try withExtendedLifetime(staging) { try handler.perform([request]) }
+            guard let features = request.results as? [VNCoreMLFeatureValueObservation] else {
+              throw RFDETRDecoder.Failure.invalidOutputs
+            }
+            let detections = try RFDETRDecoder.decode(features, classes: contract.classes,
+                                                      thresholds: contract.thresholds, topK: contract.topK)
+              .filter { contract.approvedObjectIDs.contains($0.objectID) }
+              .map { Detection(objectID: $0.objectID, confidence: $0.confidence, bounds: $0.bounds) }
+            let prediction = Prediction(frame: frame, detections: detections, obstacleCenter: nil,
+                                        inferenceMilliseconds: Int((CACurrentMediaTime() - started) * 1000))
+            DispatchQueue.main.async {
+              guard self.supplemental?.generation == generation else { return }
+              self.onSupplementalPrediction?(prediction)
+            }
+          } catch {
+            NSLog("Supplemental detector disabled: %@", error.localizedDescription)
+            DispatchQueue.main.async {
+              if self.supplemental?.generation == generation { self.stopSupplementalModel() }
+            }
           }
         }
       }

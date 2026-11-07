@@ -308,6 +308,49 @@ None of the 16 negative frames showed an overlay. These sequence results
 use simulated timing. The supplemental iOS build keeps R3 active and needs
 an on-device performance and regression check before release.
 
+The epoch-16 typed FP16 candidate improved the 22 novel IDs to 97.0% precision
+and 76.7% recall on the held-out test under the image-only locked policy.
+Ten novel IDs passed both per-instance gates using RGB alone. The separately
+calibrated capture-pose pipeline qualified 14 novel IDs. Across all 33 IDs its
+test counts were 2,243 true positives, 81 false positives and 392 misses.
+The two orange actuators and rear red vessel remain recall gaps. On independent
+8 Hz rendered sequences, the projected two-frame overlay reached 96.6%
+precision and 78.0% recall, with no overlays in the 16 negative frames.
+A predeclared visibility-reviewed subset contained nine usable new views of
+five IDs, all nine correctly detected. That subset complements the original
+test and leaves substantial class coverage gaps.
+
+The app bundles this candidate as a supplement, with 14
+approved additional IDs and the existing R3 model handling its original 11.
+The source Core ML package, upstream license and optional reproducible local
+data/train/export tooling travel with the preview. Phone verification passed
+five poses and the alternate 2.0 m P-005 route with arrival evidence. Initial
+15-second A/B runs measured 30.00 versus 29.87 rendered FPS, 120 R3 samples in
+both runs, and R3 p95 of 6 versus 23 ms. Supplemental p95 was 25 ms with no stale
+frames, but only 22 samples were collected because model startup fell inside
+the window. A warmed-up measurement and sustained check remain release gates.
+The first test restored the published main app afterward.
+
+A subsequent warmed-up 90-second phone run delivered 719 supplemental samples
+at 7.99 Hz, with 27 ms p95 inference and one stale sample. Rendering averaged
+27.21 FPS versus 28.88 for R3 alone. Primary R3 produced 719 versus 720 samples,
+with 28 versus 6 ms p95 inference and 129 versus 110 ms p95 overlay age. Both
+runs reported thermal state 2. All 14 additional IDs were confirmed in their
+respective fixed views, and the negative view remained empty. The same wall
+pump approach was missed in both baseline and combined checks. All six service
+journeys passed with the supplement, including the wall pump during walking,
+arrival and matching workbook evidence. The supplement is enabled by default
+after these checks; `--disable-rfdetr-supplemental` selects R3-only operation.
+
+A separate local experiment continues from the full epoch-16 training
+checkpoint at 512 px with 0.3× learning rates for epochs 17–18. It adds 47
+reviewed 864 × 1872 training views, for 1,829 images and 17,845 complete-label
+boxes. Existing training examples are retained, and validation/test annotation
+files are byte-identical. The new camera cells exclude protected static,
+temporal, device and blind-view cells. Actual restored optimizer groups and
+scheduler rates were checked before training. This candidate is evaluated on
+validation before any export or release decision.
+
 - The supplied DOCX names the original Industrial Boiler Room PLY. In that
   archive 502,482 of 1,506,136 records pass the structural guard. The team uses
   the complete registered Equipment Room replacement. The scene scale remains
@@ -376,7 +419,7 @@ an on-device performance and regression check before release.
 ## Known gaps and decisions
 
 - The full brief favours lightweight UI and backend intelligence. iOS with live on-phone recognition is our chosen product requirement; keep it focused so the scored spatial/data/diagnostic work is delivered.
-- The scene builder uses 33 visually reviewed seed volumes. The shipped detector remains limited to 11 object identities in rendered views until expanded candidates pass the image-only and device checks.
+- The scene builder uses 33 visually reviewed seed volumes. The enabled detectors cover 25 object identities in rendered views. Eight candidate identities remain disabled pending accuracy checks. Fixed views still expose a wall-pump miss, despite successful scripted service journeys.
 - The replacement PLY passed structural validation. Recheck registered equipment bounds in the complete scene before publishing detection metrics.
 - Workbook scene coordinates are placeholders. Remap them to extracted objects; the brief explicitly allows procedural/random metadata association.
 - The local workbook contains 4,320 telemetry samples. Its referenced `telemetry_full_14d_30min.csv` is not in the supplied ZIP. Use the included sample unless more data is provided.

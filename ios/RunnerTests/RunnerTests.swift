@@ -1,10 +1,45 @@
 import Flutter
+import CoreML
 import UIKit
 import XCTest
 import simd
 @testable import Runner
 
 class RunnerTests: XCTestCase {
+  func testSupplementalDecoderRanksBackgroundBeforeDroppingItAndClipsBoxes() throws {
+    let boxes = try MLMultiArray(shape: [1, 2, 4], dataType: .float32)
+    let logits = try MLMultiArray(shape: [1, 2, 3], dataType: .float32)
+    for (index, value) in [0.1, 0.1, 0.4, 0.4, 0.75, 0.5, 0.2, 0.2].enumerated() {
+      boxes[index] = NSNumber(value: value)
+    }
+    for (index, value) in [3.0, -10, 10, -10, 4, -10].enumerated() {
+      logits[index] = NSNumber(value: value)
+    }
+    let topTwo = try RFDETRDecoder.decode(
+      boxes: boxes, logits: logits, classes: ["first", "second"], thresholds: [0.5, 0.5], topK: 2)
+    XCTAssertEqual(topTwo.map(\.objectID), ["second"])
+    let topThree = try RFDETRDecoder.decode(
+      boxes: boxes, logits: logits, classes: ["first", "second"], thresholds: [0.5, 0.5], topK: 3)
+    let clipped = try XCTUnwrap(topThree.first { $0.objectID == "first" })
+    XCTAssertEqual(clipped.bounds.minX, 0, accuracy: 0.00001)
+    XCTAssertEqual(clipped.bounds.minY, 0.7, accuracy: 0.00001)
+    XCTAssertEqual(clipped.bounds.width, 0.3, accuracy: 0.00001)
+    XCTAssertEqual(clipped.bounds.height, 0.3, accuracy: 0.00001)
+    boxes[4] = NSNumber(value: Float.nan)
+    let finite = try RFDETRDecoder.decode(
+      boxes: boxes, logits: logits, classes: ["first", "second"], thresholds: [0.5, 0.5], topK: 3)
+    XCTAssertEqual(finite.map(\.objectID), ["first"])
+  }
+
+  func testSupplementalDecoderRejectsIncompatibleShapesAndThresholds() throws {
+    let boxes = try MLMultiArray(shape: [1, 2, 4], dataType: .float32)
+    let logits = try MLMultiArray(shape: [1, 2, 2], dataType: .float32)
+    XCTAssertThrowsError(try RFDETRDecoder.decode(
+      boxes: boxes, logits: logits, classes: ["first", "second"], thresholds: [0.5, 0.5], topK: 3))
+    XCTAssertThrowsError(try RFDETRDecoder.decode(
+      boxes: boxes, logits: logits, classes: ["first"], thresholds: [Float.nan], topK: 3))
+  }
+
   private func routeSite() throws -> WalkSite {
     let json = #"{"name":"Test","keyControls":false,"width":3,"depth":3,"cellSize":1,"start":[0,0],"route":[[0,0],[1,0],[1,1]],"objects":[]}"#
     return try JSONDecoder().decode(WalkSite.self, from: Data(json.utf8))
