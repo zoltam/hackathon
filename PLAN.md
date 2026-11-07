@@ -43,6 +43,10 @@ P-005 route passed with 54 confirmed samples and the correct report. A
 with 53 current and seven stale results. R3 remained unavailable there.
 The generic iOS release build passed. Visual improvement varies by the
 detail and visibility captured in the source scan.
+All six service targets passed on the same higher-resolution app build.
+The additional runs covered P-001 (3.4 m), P-002 (2.9 m), P-003 (6.0 m),
+P-004 (2.3 m) and CV-003 (3.0 m). Each confirmed the target, arrived
+and displayed the matching workbook report and nearby mapped equipment.
 
 ## Orange-actuator model comparison
 
@@ -63,6 +67,11 @@ detector and four fixed overlapping RGB crops improved to 13/0/13 and
 extra inference cost has not been verified in the app. No candidate was
 promoted. Evaluate model fine-tuning only against frozen splits and require
 new independent views before release.
+A fresh three-cell RGB pilot bypassed the projected-box overlap filter.
+None of the three views showed both actuator housings and their own
+connectors clearly. The same four-crop replay for the rear vessel at the
+locked 0.76 threshold retained 25 true positives and added one false
+positive. It was rejected.
 
 ## Ownership
 
