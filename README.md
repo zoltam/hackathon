@@ -4,6 +4,86 @@ Flutter starter for the Valmet hackathon challenge. See [challenge details](chal
 
 Team coordination: [development plan](PLAN.md) · [full challenge notes and scoring](challenge-shortlist.md).
 
+## Run the spatial backend and browser viewer
+
+This is the backend-first workflow from the original Valmet brief. It uses the
+complete `Equipment Room.ply`, automatic geometric proposals with review,
+person-sized walking routes, explicitly synthetic workbook associations and a
+local AI evidence report. The iOS viewer and image detectors are independent.
+
+From the repository root, with approved local source files and Flutter/Dart on
+PATH:
+
+```sh
+python3 -m venv sources/valmet/.venv
+source sources/valmet/.venv/bin/activate
+python -m pip install -r tools/requirements-spatial.txt
+flutter pub get
+python tools/spatial_backend.py \
+  --scan "sources/valmet/Equipment Room.ply" \
+  --workbook "/path/to/Valmet builder workbook.xlsx"
+```
+
+Open **http://127.0.0.1:8080**. Existing registered assets are read without
+modification. If the packed scene has not been generated, prepare a separate
+input folder and pass `--assets build/spatial-input` to the viewer:
+
+```sh
+python tools/build_boiler_room.py "/path/to/Equipment Room.ply" --output build/spatial-input
+```
+
+The scene starts with a display cutaway above 2.2 m; **Show ceiling and upper
+structure** restores the full scan. This affects display only. Gaussian colour
+uses the stored base RGB; the original app asset retains its view-dependent
+colour coefficients.
+
+Choose a target and start cell, then **Plan route**, **Play**, **Pause** or
+**Reset**. **Follow person** follows travel and faces the equipment at arrival.
+The person envelope is 0.60 m wide and 1.80 m tall with a 0.05 m overhead margin.
+Nearby frames and source conditions update within 2.5 m. Arrival opens a cited
+inspection report; any blocked/disconnected start produces an explicit no-route
+result. The model-space envelope is not an independently calibrated physical
+safety assessment.
+
+For local explanations, run Ollama in another terminal with the already cached
+`qwen3.5:9b` model:
+
+```sh
+OLLAMA_NO_CLOUD=1 ollama serve
+```
+
+The backend calls only loopback Ollama. An absent, timed-out or invalid model
+response leaves the deterministic evidence report usable. Explanations retain
+synthetic disclosure, unconfirmed-cause wording, source citations and the supplied
+next verification. Numeric trends are calculated from first/last 12-hour medians;
+they are not live telemetry or a confirmed fault diagnosis.
+
+In **Extraction review**, choose a proposal, inspect it from two directions at
+least 30 degrees apart and record each view. Accept, reject, rename, merge, split
+or refine its bounds. Geometric proposals are not automatically named or counted
+as equipment. Review records identify the reviewer; the checked local display
+stand addition was reviewed by an agent from two full Gaussian renders.
+
+Generated data stays in ignored `build/spatial/`: the person `site.json`, unchanged
+legacy workbook bundle, association and diagnostic sidecars, and
+`catalog/review.json` plus splat memberships. Keep that review file with approved
+private assets to replay decisions on another machine. A fresh output directory
+starts with the baseline 33 objects and unaccepted proposals.
+
+`lib/spatial_data.dart` loads the optional sidecars through a tested adapter.
+Without them, original tag/report behaviour is preserved. No iOS or Core ML change
+is required to generate these exports; Mac can adopt them separately. Use
+`--prepare-only` to export data without starting a browser server.
+
+```sh
+python -m unittest discover -s tools -p 'test_*.py'
+flutter test
+flutter analyze
+```
+
+Full Gaussian evidence rendering additionally uses `tools/requirements-render.txt`.
+Private scan, workbook, review evidence and generated exports are not published.
+
 ## Linux backend setup and product handoff
 
 Linux owns scene/navigation and workbook/diagnostics on `zoltam`. Mac owns iOS,
