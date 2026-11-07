@@ -48,6 +48,12 @@ The additional runs covered P-001 (3.4 m), P-002 (2.9 m), P-003 (6.0 m),
 P-004 (2.3 m) and CV-003 (3.0 m). Each confirmed the target, arrived
 and displayed the matching workbook report and nearby mapped equipment.
 
+A simulator-only evaluation of an independently scheduled RF-DETR capture
+deadline raised sample rate from 3.93–4.00 Hz to 4.27–4.33 Hz across two
+15-second runs per implementation. The current-result age p95 increased
+from 230–243 ms to 271–281 ms. The experiment was reverted. The app retains
+the original scheduler and higher render quality.
+
 ## Orange-actuator model comparison
 
 The 259-view validation set contains 26 A and 25 B annotations. At the locked
