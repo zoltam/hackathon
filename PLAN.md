@@ -295,6 +295,19 @@ inference. No new ID cleared both release criteria. A local 608 × 608
 Darknet pilot exported to Vision but produced zero true positives at its
 30-step checkpoint, after approximately five minutes on the Mac.
 
+An RF-DETR Nano experiment used the same 33 scene IDs and existing data
+splits. Its tenth epoch was selected on validation. The FP16 Core ML export
+reached 96.1% precision and 71.2% recall on the 22 new IDs using RGB alone.
+Seven new IDs cleared both per-instance gates on validation and test. With
+capture-pose matching, deduplication and thresholds fitted on validation for
+that pipeline, ten new IDs cleared both gates. On separate 8 Hz rendered
+sequences, the two-frame overlay reached 97.2% precision and 71.4% recall.
+All 33 IDs had at least one correct overlay, but the two orange actuators
+were confirmed in only one and two of their seven eligible frame pairs.
+None of the 16 negative frames showed an overlay. These sequence results
+use simulated timing. The supplemental iOS build keeps R3 active and needs
+an on-device performance and regression check before release.
+
 - The supplied DOCX names the original Industrial Boiler Room PLY. In that
   archive 502,482 of 1,506,136 records pass the structural guard. The team uses
   the complete registered Equipment Room replacement. The scene scale remains
