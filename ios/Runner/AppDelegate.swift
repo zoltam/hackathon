@@ -40,8 +40,7 @@ import UIKit
                                          roomSize: SIMD2(Float(model.width), Float(model.depth)) * model.cellSize,
                                          sourceRotation: model.sourceRotation,
                                          route: model.route.map { model.center($0) },
-                                         cellSize: model.cellSize, obstacleEnabled: visionMode == .obstacle || model.obstacleDemo == true,
-                                         framesPerSecond: model.renderFramesPerSecond) else {
+                                         cellSize: model.cellSize, obstacleEnabled: visionMode == .obstacle || model.obstacleDemo == true) else {
         return result(FlutterError(code: "metal", message: "Could not start the 3D renderer.", details: nil))
       }
       let detectorKey = registrar.lookupKey(forAsset: "assets/valmet/equipment-detector.mlmodel")

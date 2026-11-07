@@ -202,8 +202,7 @@ the 3D viewer.
 
 Enable **Forward and backward controls** under **Settings** to move with the two on-screen buttons or ↑/↓. Turn by rotating the phone. This mode still uses ARKit to track orientation.
 
-Choose **3D frame rate** under **Settings** before opening the viewer: 15, 30
-(default), or 60 FPS. This is a target; the device may render more slowly.
+The 3D viewer targets 30 FPS. The device may render more slowly.
 
 The 3D viewer's top-right map shows the room PNG, your blue position/heading,
 the active mint route, and the gold destination. Tap it to enlarge; **Done**

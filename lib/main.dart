@@ -317,7 +317,6 @@ class _SiteSimulationState extends State<SiteSimulation> {
   List<Cell> get _route => _journey?.route ?? [];
   bool _moved = false;
   bool _keyControls = false;
-  int _framesPerSecond = 60;
   bool _obstacleDemo = false;
   late double _clearanceMetres =
       widget.site.personNavigation?.radiusMetres ??
@@ -364,7 +363,6 @@ class _SiteSimulationState extends State<SiteSimulation> {
         'name': site.name,
         'sourceSha256': site.sourceSha256,
         'keyControls': !simulate && _keyControls,
-        'framesPerSecond': _framesPerSecond,
         'obstacleDemo': !simulate && _obstacleDemo && _route.isNotEmpty,
         'serviceAccessDemo': selection?.start != null,
         'moved': _moved,
@@ -453,21 +451,10 @@ class _SiteSimulationState extends State<SiteSimulation> {
                       }),
               ),
         ),
-        const SizedBox(height: 12),
-        Text('Settings', style: Theme.of(context).textTheme.titleMedium),
-        DropdownButtonFormField<int>(
-          initialValue: _framesPerSecond,
-          decoration: const InputDecoration(labelText: '3D frame rate'),
-          items: const [
-            DropdownMenuItem(value: 15, child: Text('15 FPS')),
-            DropdownMenuItem(value: 30, child: Text('30 FPS')),
-            DropdownMenuItem(value: 60, child: Text('60 FPS')),
-          ],
-          onChanged: (fps) {
-            if (fps != null) setState(() => _framesPerSecond = fps);
-          },
-        ),
-        const Text('Target frame rate. Actual FPS depends on the device.'),
+        if (person == null) ...[
+          const SizedBox(height: 12),
+          Text('Settings', style: Theme.of(context).textTheme.titleMedium),
+        ],
         if (person == null)
           SwitchListTile(
             contentPadding: EdgeInsets.zero,

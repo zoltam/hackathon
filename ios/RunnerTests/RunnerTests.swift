@@ -328,15 +328,6 @@ class RunnerTests: XCTestCase {
     XCTAssertNil(RouteMapView(model: try routeSite(), image: image).mapImage)
   }
 
-  func testFrameRateDefaultsAndRejectsUnsupportedValues() throws {
-    XCTAssertEqual(try routeSite().renderFramesPerSecond, 30)
-    for (value, expected) in [(15, 15), (60, 60), (0, 30), (1000, 30)] {
-      let json = "{\"name\":\"Test\",\"keyControls\":false,\"framesPerSecond\":\(value),\"width\":3,\"depth\":3,\"cellSize\":1,\"start\":[0,0],\"route\":[],\"objects\":[]}"
-      let site = try JSONDecoder().decode(WalkSite.self, from: Data(json.utf8))
-      XCTAssertEqual(site.renderFramesPerSecond, expected)
-    }
-  }
-
   func testMapPreservesModelAxesAndScaleWhenExpanded() throws {
     let map = RouteMapView(model: try routeSite())
     for size in [CGSize(width: 160, height: 160), CGSize(width: 360, height: 700)] {

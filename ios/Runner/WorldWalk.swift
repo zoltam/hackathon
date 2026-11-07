@@ -64,12 +64,6 @@ struct WalkSite: Decodable {
   let name: String
   let hasWorkbook: Bool?
   let sourceSha256: String?
-  let framesPerSecond: Int?
-
-  var renderFramesPerSecond: Int {
-    let fps = framesPerSecond ?? 30
-    return [15, 30, 60].contains(fps) ? fps : 30
-  }
   let keyControls: Bool
   let obstacleDemo: Bool?
   let serviceAccessDemo: Bool?
@@ -1289,9 +1283,8 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
       }
       stopJourney(error: error)
     } else {
-      let fps = visionMode == .preview ? model.renderFramesPerSecond : 30
       let frameClock = visionMode == .preview ? frameStart : .now()
-      DispatchQueue.main.asyncAfter(deadline: frameClock + 1.0 / Double(fps)) { [weak self] in
+      DispatchQueue.main.asyncAfter(deadline: frameClock + SplatRenderer.frameInterval) { [weak self] in
         self?.journeyFrame()
       }
     }
