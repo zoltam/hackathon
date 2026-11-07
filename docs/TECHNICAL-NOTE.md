@@ -1,48 +1,70 @@
 # Valmet Field App · Technical note
 
-## Scan preparation and 3D assets
+Revision basis: source baseline `2014f82`, with Linux `zoltam` work under review. Linux backend verification passed on this baseline plus the working changes below; combined iOS runtime verification remains pending. The shared [plan](../PLAN.md) is the source for previously recorded device results, not a record of Linux-reproduced iOS tests.
 
-The original Industrial Boiler Room PLY passed structural checks for 502,482 of 1,506,136 records. The demo uses the complete Equipment Room replacement. The Python/NumPy pipeline validates and registers all 1,676,481 Gaussians to the reviewed scene frame. Swift/Metal renders anisotropic splats with opacity and degree-3 view-dependent color. Model distances assume one registered unit equals one metre.
+## Scene and semantic catalog
 
-Extraction starts from 33 reviewed 3D seed volumes. The builder selects supporting Gaussians and refines bounds from their coordinates where applicable. It stores a stable object ID, type, 3D bounds and support count for each frame. The enabled detectors cover 30 identities. Coverage is limited to the seeded catalog.
+Python/NumPy validates and registers the complete replacement Equipment Room scan containing 1,676,481 Gaussian records. Swift/Metal renders anisotropic splats with opacity and degree-three view-dependent colour. Registered distances assume one unit equals one metre.
 
-## Recognition and 3D association
+The builder starts from 33 reviewed seed volumes, selects supporting Gaussians and refines bounds where applicable. Stable object IDs connect catalog volumes, workbook associations and service approaches. This is seeded, scene-specific extraction. It does not discover arbitrary equipment in an unseen plant. The baseline catalog flags 11 R3 detector IDs. The RF-DETR contract adds supplemental support so the integrated app enables 30 distinct IDs. The rear red vessel and two orange actuators remain below the release gate. All-33 recognition is incomplete.
 
-On macOS, Swift/Metal and Pillow prepare labeled renders and portrait crops. Scene masks produce 2D training boxes from the visible parts of registered volumes. Apple Create ML trains an ObjectPrint transfer-learning detector. The bundled R3 Core ML export used 720 training images from the same simulated room.
+## Recognition and runtime boundaries
 
-An RF-DETR Nano FP16 Core ML supplement adds 18 IDs after validation, held-out
-render and phone checks. Its typed RGB input includes normalization, and its
-metadata stores the ordered classes, frozen thresholds and approved IDs.
-Its bounded queue and confirmation history are independent of R3. Supplemental
-failure clears its overlays while R3 continues. The source package and Apache
-2.0 notice are included. Four of the 33 reviewed IDs remain disabled.
+Mac tooling uses Swift/Metal, Pillow and Apple Create ML to prepare labeled same-scene renders and train the R3 ObjectPrint transfer-learning detector. The RF-DETR Nano FP16 Core ML supplement carries its class ordering, frozen thresholds and approved IDs, with the Apache 2.0 notice included. Training/render provenance and model-selection evidence are Mac-owned.
 
-The middle blue actuator transfers to RF-DETR after a current result and falls
-back to R3 if the supplemental stream stops or stalls. The contract restricts
-the handoff to that ID. The original walking test improved from 2 to 12 true
-positives out of 14, with zero false positives in both runs.
+Vision/Core ML samples clean rendered frames at up to 8 Hz and skips inference while busy. Pixels provide recognition input. Capture-time pose and projection associate image boxes with registered volumes after inference. The viewer deduplicates per ID and requires two consecutive observations. R3 and supplemental inference use independent bounded queues and histories. Middle-actuator handoff falls back to R3 when supplemental results stop or become stale. Teal proximity frames within 2.5 m use catalog geometry and are separate from yellow recognition boxes.
 
-On iPhone, Vision/Core ML runs on clean Metal-rendered frames sampled at up to 8 Hz, skipping frames while inference is busy. ARKit tracks physical phone motion for the manual walkthrough. The detector receives only rendered pixels and returns catalog IDs, boxes and scores. Each frame carries its capture-time pose, projection and timestamp. For current results, the app projects the matching catalog volume into the captured frame and checks overlap. It keeps the strongest box per ID and requires two consecutive observations before showing a yellow box. Teal proximity frames and mapped status use the scene geometry within 2.5 m.
+Previously recorded simulator runs used RF-DETR journey mode because R3 could not create its inference context on the tested iOS 26.5 simulator. The shared plan records at least one passing run per service target, with retries and confirmation expiry on difficult approaches. Those results do not establish repeatable reliability on the combined revision. New verification is simulator-only and belongs to Mac. Historical iPhone measurements must retain their hardware, revision, test policy and caveats if cited.
 
-## Route and changing obstacles
+## Observed floor and shortest routes
 
-Flutter/Dart uses four-neighbour breadth-first search on a 10 cm grid built from observed floor support and obstacle occupancy. The default 10 cm camera radius leaves 2,106 clearance-valid cells connected to the pump approach, covering 21.06 m². The first-person demo follows a computed 3.10 m route. Arrival is based on the separate service cell. The 1.55 m obstacle ceiling models virtual-camera clearance.
+Dart uses four-neighbour breadth-first search on a 10 cm grid. Floor support comes from measured scan observations and bounded Gaussian floor footprints. Unknown space stays unavailable. Obstacles between 0.17 and 1.55 m and radius clearance constrain the virtual camera. The ceiling models its 1.50 m height plus margin and does not establish full-body clearance.
 
-For the opt-in crate demo, Apple Vision reads a QR tag in the rendered view. Capture-time projection and the known tag height locate the crate from its corners. After two consistent observations, the planner replaces the blocked footprint and replans from the current position when needed. It reports an unreachable target if no route remains. The obstacle experiment covers one tagged simulated object.
+The checked-in scene describes 3,213 observed floor cells. At the default 0.10 m radius, 2,130 cells pass clearance and 2,106 form the connected service network. The remaining 24 form separate patches. All six reviewed service approaches lie on that network. Route length depends on target and start. A historical 3.10 m P-005 route is not a universal route length. Larger radii can make targets unreachable. Safe behavior includes explicit blocked starts, absent paths and continuous motion checks that prevent skipping obstacles.
 
-## Workbook and service guidance
+The pre-existing opt-in tagged crate experiment replaces a known simulated footprint after visual tag confirmation. It is separate from the static-route release gate. This work adds no unexpected-obstacle avoidance.
 
-Python/openpyxl imports eight workbook sheets into local JSON, preserving worksheet row references and workbook SHA-256. The demo maps five scene pumps and one inline valve to distinct synthetic workbook records in matching equipment families. It chooses the lowest health score among compatible records for the first service target and considers the remaining nearby objects afterward. The app displays exact workbook tags for these six compatible mappings and scene names for the other detected objects. Geometric proximity frames cover the 33 reviewed volumes. An explicit mapping is also supported.
+## Workbook mapping and grounded guidance
 
-At arrival, Dart retrieves current state, latest sampled telemetry, recent alarms and maintenance, matching historical cases, context documents and quality flags. The red pump maps to synthetic ASSET-017. The workbook describes an efficiency-loss or fouling-like signature and recommends inspecting the hydraulic path (Current_State!18). Guidance is deterministic workbook retrieval. The confidence shown comes from the workbook, and the cause remains unconfirmed. The import includes 4,320 telemetry rows from the supplied three-day sample. The referenced full 14-day CSV was unavailable.
+Python/openpyxl imports eight evidence sheets and retains workbook SHA-256 and original worksheet row references. Compatible synthetic assignments map five scene pumps and one inline valve to distinct records. The inline valve uses the disclosed `CONTROL_VALVE` family mapping. Nearby orange actuators use parent-valve records under their own scene names. These associations do not establish the identities of physical plant equipment.
 
-## Recorded evidence and scope
+At arrival, Dart retrieves current state, newest telemetry, endpoints of the included sample, matching open events, recent maintenance, referenced context documents, matching historical cases and quality issues. Historical retrieval matches both asset class and issue code. Field-safety context and safe evidence workflows preserve qualified-personnel and approved-procedure boundaries. The importer accepts explicit reviewed overrides and rejects incompatible mappings.
 
-- Held-out same-room renders at IoU ≥ 0.50 and score ≥ 0.25. R3 aggregate F1 was 91.54% on 88 original views and 81.43% on 69 walking views. Raw pump detections were 13/18 and 67/69, with two and three false pump detections respectively. Replaying the app's pose-based filter and per-ID deduplication on the walking views raised F1 to 85.21% and removed all three false pump detections. This replay measured independent frames.
-- iPhone 15, iOS 26.5, 15-second scripted render benchmark. 29.67 GPU FPS, 29 predictions, 5 ms median and 7 ms p95 inference latency. With class-checked workbook mapping, the scripted journey confirmed `P-005 · Red circulation pump`, showed up to four proximity frames (two with workbook mappings) and arrived after 20.36 s.
-- A warmed-up 90-second combined phone benchmark produced 7.99 Hz supplemental inference, p95 27 ms, and 27.21 rendered FPS versus 28.88 with R3 alone. All 14 additional IDs were confirmed in their fixed views and the negative view remained empty. The same wall-pump approach was missed with and without the supplement. All six scripted service journeys passed recognition, arrival and workbook evidence. Fixed-view confirmation does not measure per-instance phone precision.
-- A threshold-only extension confirmed four more IDs in fixed iPhone views, the empty view and an alternate P-005 journey. On 48 new agent-reviewed views, the enabled 29 IDs reached 91.8% precision and 67.9% recall after association.
-- The middle actuator handoff and R3-only fallback passed on iPhone, including the alternate P-005 journey. The same 48-view diagnostic replay with the handoff policy reached 93.6% precision and 72.1% recall.
-- The stationary-camera crate test localized two placements, blocked the original route and then the active detour, and reopened 27 cells after the move. The user confirmed a physical offline P-005 walkthrough, arrival guidance and report dismissal.
+The report distinguishes workbook observations, supplied confidence, unconfirmed hypotheses and next verification. P-005's default synthetic assignment is ASSET-017, with current-state evidence at `Current_State!18`. The included telemetry has 4,320 samples over three days. The separate fourteen-day CSV is unavailable. Missing context or telemetry must remain visible.
 
-Setup and repeatable checks are in the [README](../README.md). Model selection and device evidence are in the [development plan](../PLAN.md).
+The working offline fallback is deterministic local retrieval, requiring no network or generative model. No optional LLM/RAG service is deployed by this revision. A local diagnostic model must not be claimed merely because retrieved case text appears in the report.
+
+## Product evidence status
+
+Linux validates Python and Flutter/Dart behavior and supplies reproducible asset-generation commands and fixtures. Backend tests establish only their tested invariants. Mac must verify native compatibility, repeat all six simulator journeys including difficult approaches, record recognition/arrival/report/proximity evidence, test negative views and report dismissal, and supply the tested combined revision with matching logs.
+
+On app revision `87cbaa2`, the Mac summary in `PLAN.md` records one iOS 26.5 simulator run confirming all 20 enabled supplemental IDs at assigned fixed views, with 8–12 fresh samples per view. The entrance negative stayed empty over nine fresh samples. These runtime examples do not measure precision or recall, and the R3 gate failed separately. A capture and matching log are available for private handoff according to that summary, but raw files are not present in the Linux checkout.
+
+## Reproducible Linux asset handoff
+
+The approved source copies regenerate `site.json` and the full splat asset byte
+for byte. Preserve their IDs, registration and model-unit scale for Mac runtime
+checks. SHA-256 values:
+
+| Input or generated asset | SHA-256 |
+| --- | --- |
+| Equipment Room PLY | `83d8c7d99316c08c9719cfc2c5a6b9d1903b89847780e2458adc662c79f32955` |
+| Synthetic workbook | `a0bcb5385fcd5bf4a1f3cf7f79ff3a2fbcb1070e0dec41d716da49357cd4f4da` |
+| Generated `site.json` | `adcc75106e21d0b5f2f71bd88028ebd6ba6c83445080109347065e7cf0c3aad8` |
+| Generated `boiler-room-sh.splats` | `9abfa18d198a50dfa4d25c79f30513a5131aabdac517196da124a652ba5d1210` |
+
+Use the setup and audit commands in [README](../README.md). The default route
+audit covers 2,106 connected supported starts against six targets and checks the
+24 disconnected starts against all six as unreachable. Private source files,
+generated scene/workbook assets and detailed expected-result fixtures stay local.
+
+### Verified backend checkpoint
+
+On source baseline `2014f82` plus the current Linux changes, all 20 Python tests
+and all 29 Flutter tests passed. Full Flutter analysis was clean. The exhaustive route
+audit verified 12,636 shortest routes (2,106 connected starts × six targets),
+144 unreachable pairs (24 disconnected starts × six targets), 12 blocked-endpoint
+cases and 3,888 cardinal edges with exact swept-clearance checks. These checks
+exercise the represented grid and camera radius, not physical industrial safety.
+Record `git rev-parse HEAD` when reproducing this checkpoint; private audit output stays in ignored `build/`.
+Combined iOS simulator runtime verification remains pending with Mac.

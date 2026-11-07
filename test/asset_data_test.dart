@@ -184,6 +184,47 @@ void main() {
     expect(data.conditionForObject('object-1', equipmentType: 'valve'), isNull);
   });
 
+  test('does not retrieve unrelated events, maintenance, quality or cases', () {
+    final source = bundle();
+    final tables = source['tables'] as Map;
+    for (final table in [
+      'Alarms_Events',
+      'Maintenance_History',
+      'Data_Quality',
+    ]) {
+      (tables[table] as List).add({
+        'asset_id': 'other',
+        'timestamp': '2099-01-01',
+        'opened_at': '2099-01-01',
+        'description': 'FOREIGN EVIDENCE',
+        'action': 'FOREIGN EVIDENCE',
+        'recommended_handling': 'FOREIGN EVIDENCE',
+        'event_code': 'DRIFT',
+        'status': 'open',
+        '_source': '$table!999',
+      });
+    }
+    (tables['Historical_Service_Cases'] as List).add({
+      'asset_class': 'TEST',
+      'historical_issue_code': 'DIFFERENT',
+      'historical_interpretation': 'FOREIGN EVIDENCE',
+      'safe_evidence_workflow': 'FOREIGN EVIDENCE',
+      '_source': 'Historical_Service_Cases!999',
+    });
+    (tables['Knowledge_Docs'] as List).add({
+      'doc_id': 'unrelated-document',
+      'content': 'FOREIGN EVIDENCE',
+      '_source': 'Knowledge_Docs!999',
+    });
+    final diagnosis = AssetData.fromJson(
+      jsonEncode(source),
+    ).forObject('object-1')!;
+    expect(diagnosis.reportText, isNot(contains('FOREIGN EVIDENCE')));
+    expect(diagnosis.reportText, isNot(contains('!999')));
+    expect(diagnosis.hypotheses, hasLength(1));
+    expect(diagnosis.matchingOpenEvidence, isNull);
+  });
+
   test('uses a parent valve record for a reviewed valve actuator', () {
     final source = bundle();
     final tables = source['tables'] as Map;
@@ -203,6 +244,32 @@ void main() {
     );
   });
 
+  test('arrival preserves source safety boundaries and exact next check', () {
+    final source = bundle();
+    (source['tables']['Knowledge_Docs'] as List).add({
+      'doc_id': 'DOC-FIELD-SAFETY',
+      'content': 'Use approved procedures and qualified personnel.',
+      '_source': 'Knowledge_Docs!7',
+    });
+    final data = AssetData.fromJson(jsonEncode(source));
+    final diagnosis = data.forObject('object-1')!;
+    expect(diagnosis.nextCheck, 'Verify reference');
+    expect(
+      diagnosis.arrivalSummary,
+      contains(
+        'Use approved procedures and qualified personnel. '
+        '[DOC-FIELD-SAFETY · Knowledge_Docs!7]',
+      ),
+    );
+    expect(diagnosis.reportText, contains('not a confirmed cause'));
+    expect(diagnosis.reportText, isNot(contains('Wrong equipment')));
+    expect(diagnosis.reportText, data.forObject('object-1')!.reportText);
+    expect(
+      diagnosis.arrivalSummary,
+      data.forObject('object-1')!.arrivalSummary,
+    );
+  });
+
   test('missing evidence is explicit and confidence is not manufactured', () {
     final json = jsonDecode(jsonEncode(bundle())) as Map<String, dynamic>;
     final tables = json['tables'] as Map;
@@ -213,5 +280,18 @@ void main() {
     expect(d.confidence, isNull);
     expect(d.evidence.any((e) => e.text.contains('No telemetry')), isTrue);
     expect(d.evidence.any((e) => e.text.contains('unavailable')), isTrue);
+    expect(
+      d.arrivalSummary,
+      contains(
+        'Follow site procedures, permits and qualified personnel before physical inspection.',
+      ),
+    );
+    expect(d.arrivalSummary, isNot(contains('DOC-FIELD-SAFETY')));
+    expect(
+      d.reportText,
+      contains(
+        'Follow site procedures, permits and qualified personnel before physical inspection.',
+      ),
+    );
   });
 }

@@ -4,6 +4,50 @@ Flutter starter for the Valmet hackathon challenge. See [challenge details](chal
 
 Team coordination: [development plan](PLAN.md) · [full challenge notes and scoring](challenge-shortlist.md).
 
+## Linux backend setup and product handoff
+
+Linux owns scene/navigation and workbook/diagnostics on `zoltam`. Mac owns iOS,
+Core ML and simulator integration directly on `main`. Keep stable object IDs,
+registered coordinates, workbook schema and route payload compatible across both.
+The current Linux environment uses Python 3.14.7, Flutter 3.47.9 and Dart 3.13.7.
+
+Run the asset preparation commands below from this repository directory using
+approved local scan and workbook copies. NumPy builds the scene, openpyxl imports
+the workbook, and Pillow is needed for the complete Python test suite:
+
+```sh
+python3 -m venv sources/valmet/.venv
+source sources/valmet/.venv/bin/activate
+python3 -m pip install numpy Pillow -r tools/requirements-data.txt
+```
+
+After generating the assets and running `flutter pub get`, verify the backend:
+
+```sh
+python3 -m unittest discover -s tools -p 'test_*.py'
+flutter analyze
+flutter test
+mkdir -p build
+dart run tools/audit_service_routes.dart > build/service-route-audit.json
+dart run tools/verify_asset_data.dart > build/asset-data-audit.json
+```
+
+The route audit checks shortest paths and continuous clearance for all walkable
+starts to each of six service targets. The workbook audit checks eight compatible
+service/nearby assignments, exact tags, row citations and deterministic offline
+reports. Audit output includes private evidence and stays local in ignored
+`build/`. Reproducible source/generated hashes and evidence limits are in the
+[technical note](docs/TECHNICAL-NOTE.md).
+
+New native runtime verification is simulator-only and belongs to Mac. Historical
+physical iPhone commands and measurements below document existing functionality.
+They are not Linux verification. On revision `87cbaa2`, Mac recorded one simulator
+fixed-view run confirming all 20 enabled supplemental IDs and an empty negative
+view. R3's separate simulator inference-context gate failed. Fixed views do not
+measure precision/recall or establish reliable recognition of all 33 objects.
+The rear red vessel and two orange actuators remain below the release gate.
+Repeated six-target and difficult-approach checks must match the combined revision.
+
 ## Run on iOS
 
 Use macOS with Xcode, Python 3 and Flutter with Dart 3.12.2 or later
@@ -18,7 +62,7 @@ From the repository root, prepare the local assets before building:
 ```sh
 python3 -m venv sources/valmet/.venv
 source sources/valmet/.venv/bin/activate
-python3 -m pip install numpy -r tools/requirements-data.txt
+python3 -m pip install numpy Pillow -r tools/requirements-data.txt
 python3 tools/build_boiler_room.py "/path/to/Equipment Room.ply"
 python3 tools/import_asset_data.py "/path/to/Valmet_SinceAI_2026_Synthetic_Industrial_Metaverse_Builder_Pack (1) (2) (1).xlsx" \
   --site assets/valmet/site.json --include-nearby
@@ -197,7 +241,7 @@ unknown gaps. Strong obstacle observations between
 5 cm margin; this is not standing-person clearance. Real low obstacles stay blocked.
 Radius clearance runs in the planner and the native viewer uses the same mask.
 Manual movement checks substeps no longer than half a cell to prevent skipping
-obstacles. The registered renderer/detector frame and 11 equipment bounds remain
+obstacles. The registered renderer/detector frame and existing equipment bounds remain
 unchanged; the reviewed pump approach moves only 3.5 cm to a finer cell centre.
 
 The repository includes the generated navigation map at `assets/valmet/site.json`
@@ -232,9 +276,12 @@ the camera feed, and **Reset alignment** lets you align again. Arrival uses
 horizontal distance to the service point, separately from target recognition.
 The viewer frames nearby catalog objects within 2.5 m and labels visible frames
 with their synthetic condition. The panel lists the three closest objects.
-The scene includes 17 reviewed frames and the bundled detector has 11 classes.
-When the workbook is loaded, yellow boxes are limited to scene objects with a
-compatible workbook tag. The supplied data maps five pumps and one inline valve.
+The scene includes 33 reviewed frames. The catalog flags 11 baseline R3 IDs;
+the supplemental contract brings the integrated enabled total to 30 distinct IDs.
+The 20 approved supplemental IDs include one baseline handoff, so the union is 30.
+Reviewed frames and enabled IDs do not prove reliable image recognition.
+Workbook metadata appears only for compatible mapped scene objects; recognition
+boxes and geometric proximity frames are separate signals. The supplied data maps five pumps and one inline valve.
 A box requires two consecutive detections that agree with the mapped 3D bounds.
 At the service point, tap **Open maintenance report** below the arrival message.
 
@@ -282,8 +329,9 @@ matching the asset's current issue code, the report includes the newest such
 event alongside the recent evidence. Workbook evidence keeps its row references.
 The snapshot date and supplied model confidence stay visible. This is a local,
 deterministic evidence-retrieval baseline; it does not call a generative AI model
-or establish a confirmed cause. Missing records remain explicit. Vision model
-integration belongs to members 1 and 3; changed-obstacle rerouting remains phase 2.
+or establish a confirmed cause. Missing records remain explicit. Mac owns vision model integration and native
+verification. The existing tagged-crate experiment stays separate; no new
+unexpected-obstacle avoidance is included.
 
 Checks:
 

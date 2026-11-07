@@ -31,9 +31,21 @@ class AssetDiagnosis {
   final Evidence? matchingOpenEvidence;
   final List<Evidence> evidence, hypotheses, qualityIssues;
 
+  Evidence? get _fieldSafety => evidence
+      .where((e) => e.reference.startsWith('DOC-FIELD-SAFETY · '))
+      .firstOrNull;
+
+  String get _safetyBoundary {
+    final safety = _fieldSafety;
+    return safety == null
+        ? 'Follow site procedures, permits and qualified personnel before physical inspection.'
+        : '${safety.text} [${safety.reference}]';
+  }
+
   String get arrivalSummary =>
       '$tag · $condition · Synthetic workbook\n'
-      'Next check · $nextCheck [${stateEvidence.reference}]';
+      'Next check · $nextCheck [${stateEvidence.reference}]\n'
+      '$_safetyBoundary';
 
   String get reportText => [
     '$tag · $condition ($assetId)',
@@ -45,6 +57,7 @@ class AssetDiagnosis {
     if (matchingOpenEvidence case final event?)
       'Matching open workbook event: ${event.text}\n[${event.reference}]',
     'Local evidence summary. A cause has not been confirmed.',
+    if (_fieldSafety == null) _safetyBoundary,
     for (final e in qualityIssues) 'Data quality: ${e.text}\n[${e.reference}]',
     'Evidence:',
     for (final e in evidence)
