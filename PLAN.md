@@ -34,8 +34,10 @@ RGB thresholds (0.79 A, 0.72 B), the current typed RF-DETR export scored
 same fine-tuned checkpoint scored 10/0/16 and 12/1/13. DINOv2 with a trained
 linear head and frozen backbone, and pretrained DISK + LightGlue, re-ranked
 the same 1,662 archived proposals. Neither produced a usable RGB threshold
-at 95% precision. This compares the tested pipelines, including their
-preprocessing and adaptation choices.
+at 95% precision. Three fixed epochs of DINOv2 last-block and head
+fine-tuning also failed the precision gate. LightGlue supports fine-tuning
+with correspondence supervision, which this box-labeled screen did not use.
+The comparison includes the tested preprocessing and adaptation choices.
 
 Keep the current app export. A validation-only follow-up with the same
 detector and four fixed overlapping RGB crops improved to 13/0/13 and
