@@ -82,6 +82,9 @@ A later held-out-from-training A/B pilot used two previously archived
 test cells with fresh views. Both full-frame and four-crop replays
 found 3/3 of each ID with no false positives. It had no usable reverse
 pair and did not qualify either ID.
+A further frozen DINOv2 patch-pooling experiment kept the box and context
+features separate. Its best nonzero RGB precision was 61.1% for A and
+50.0% for B on the same validation proposal set. It was rejected.
 
 ## Additional approaches and continuous clearance
 
@@ -121,6 +124,9 @@ route and showed its workbook report. The 21 enabled RF-DETR IDs passed
 their fixed views and the entrance stayed empty. P-005 stays assigned
 to R3 and passed the simulator RF-DETR journey regression separately.
 The total enabled catalog stays at 30 of 33.
+On published revision `ff8d154`, all six representative journeys passed
+again, including the difficult starts and P-005. This matrix uses the
+simulator RF-DETR backend and is separate from the regular CV-003 run.
 
 The right blue actuator remains assigned to R3. RF-DETR improved its
 walking result from 19/1/10 to 23/0/6, but the room archive gained one
