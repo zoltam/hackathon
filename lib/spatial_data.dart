@@ -10,11 +10,11 @@ class SpatialDiagnosis {
     required this.arrivalSummary,
     required this.reportText,
     required this.engine,
-    this.motorCurrentSamples = const [],
+    this.telemetryChart,
   });
 
   final String tag, condition, arrivalSummary, reportText, engine;
-  final List<double> motorCurrentSamples;
+  final RecordData? telemetryChart;
 }
 
 class SpatialAssetData {
@@ -176,11 +176,9 @@ class SpatialAssetData {
       final disclosure = report['mappingNotice'] as String;
       final legacy = _legacy.forObject(objectId, equipmentType: equipmentType);
       final evidence = legacy?.arrivalSummary ?? report['reportText'] as String;
-      final redPump =
-          objectId == 'boiler-room:red-circulation-pump' &&
-          legacy?.tag == 'P-005' &&
-          legacy?.assetId == 'ASSET-017';
-      final brief = redPump ? _redPumpBrief(legacy!, report) : null;
+      final brief = legacy?.signalMetric == null
+          ? null
+          : _assetBrief(legacy!, report);
       final aiEvidence = report['engine'] == 'ollama'
           ? 'Local AI explanation · Precomputed\n$explanation\n'
                 '[${(report['llmReferences'] as List).join(', ')}]\n\n'
@@ -199,7 +197,7 @@ class SpatialAssetData {
             '${brief == null ? aiEvidence : ''}'
             '${report['reportText']}\n\nEngine: ${report['engine']}',
         engine: report['engine'] as String,
-        motorCurrentSamples: redPump ? legacy!.motorCurrentSamples : const [],
+        telemetryChart: _chart(legacy),
       );
     }
     final legacy = _legacy.forObject(objectId, equipmentType: equipmentType);
@@ -211,19 +209,39 @@ class SpatialAssetData {
             arrivalSummary: legacy.arrivalSummary,
             reportText: legacy.reportText,
             engine: 'legacy-deterministic',
-            motorCurrentSamples: legacy.motorCurrentSamples,
+            telemetryChart: _chart(legacy),
           );
   }
 
-  static String _redPumpBrief(AssetDiagnosis pump, RecordData report) {
-    const metrics = {
-      'motor_current_a': ('Motor current', 'A', 1),
-      'speed_rpm': ('Speed', 'rpm', 0),
-      'bearing_temp_c': ('Bearing temperature', '°C', 1),
-      'process_flow_pct': ('Flow', '%', 1),
-      'process_pressure_bar': ('Process pressure', 'bar', 2),
-      'vibration_mm_s': ('Vibration', 'mm/s', 2),
+  static const _metrics = {
+    'motor_current_a': ('Motor current', 'A', 1),
+    'speed_rpm': ('Speed', 'rpm', 0),
+    'bearing_temp_c': ('Bearing temperature', '°C', 1),
+    'process_flow_pct': ('Flow', '%', 1),
+    'process_pressure_bar': ('Process pressure', 'bar', 2),
+    'vibration_mm_s': ('Vibration', 'mm/s', 2),
+    'position_setpoint_pct': ('Position setpoint', '%', 1),
+    'position_actual_pct': ('Actual valve position', '%', 1),
+    'pneumatic_supply_bar': ('Pneumatic supply', 'bar', 2),
+    'stiction_index': ('Stiction index', '', 2),
+    'load_for_opening_pct': ('Opening load', '%', 1),
+  };
+
+  static RecordData? _chart(AssetDiagnosis? asset) {
+    final format = _metrics[asset?.signalMetric];
+    if (asset == null || format == null || asset.signalSamples.length < 2) {
+      return null;
+    }
+    return {
+      'title': format.$1,
+      'unit': format.$2,
+      'samples': asset.signalSamples,
     };
+  }
+
+  static String _assetBrief(AssetDiagnosis asset, RecordData report) {
+    final signal = asset.signalMetric;
+    final isValve = signal == 'position_actual_pct';
     final allowed = {
       for (final citation in report['citations'] as List)
         _map(citation)['reference'],
@@ -233,7 +251,7 @@ class SpatialAssetData {
     if (observations is List) {
       for (final row in observations.whereType<RecordData>()) {
         final metric = row['metric'];
-        final format = metrics[metric];
+        final format = _metrics[metric];
         final before = row['baselineMedian'];
         final after = row['recentMedian'];
         final sources = row['references'];
@@ -249,8 +267,14 @@ class SpatialAssetData {
           continue;
         }
         final (label, unit, precision) = format;
-        final change = metric == 'motor_current_a' && before > 0
-            ? ' (${after >= before ? '+' : ''}${((after - before) / before * 100).toStringAsFixed(1)}%)'
+        final delta = after - before;
+        final sign = delta >= 0 ? '+' : '';
+        final change = metric != signal
+            ? ''
+            : unit == '%'
+            ? ' ($sign${delta.toStringAsFixed(1)} pp)'
+            : before > 0
+            ? ' ($sign${(delta / before * 100).toStringAsFixed(1)}%)'
             : '';
         trends[metric] =
             '$label · ${before.toStringAsFixed(precision)} → '
@@ -279,7 +303,7 @@ class SpatialAssetData {
       'qualityIssues',
       contains: 'in Telemetry',
     );
-    final caseWorkflow = pump.evidence
+    final caseWorkflow = asset.evidence
         .where((item) => item.reference.contains('Historical_Service_Cases!'))
         .firstOrNull;
     final maintenance = firstCitedItem(
@@ -288,35 +312,39 @@ class SpatialAssetData {
     );
     final pumpGuide = firstCitedItem(
       'observations',
-      contains: 'DOC-PROCESS_PUMP-CORE',
+      contains: isValve ? 'DOC-CONTROL_VALVE-CORE' : 'DOC-PROCESS_PUMP-CORE',
     );
-    final supportingTrends = metrics.keys
-        .where((key) => key != 'motor_current_a')
+    final supportingTrends = _metrics.keys
+        .where((key) => key != signal)
         .map((key) => trends[key])
         .nonNulls
         .join('\n');
     return [
-      'P-005 · Red circulation pump',
-      'Synthetic workbook snapshot · ${pump.updatedAt}',
-      'Next check\n${pump.nextCheck} [${pump.stateEvidence.reference}]',
-      if (trends['motor_current_a'] case final current?)
+      '${asset.tag} · ${isValve
+          ? 'Control valve'
+          : asset.tag == 'P-005'
+          ? 'Red circulation pump'
+          : 'Process pump'}',
+      'Synthetic workbook snapshot · ${asset.updatedAt}',
+      'Next check\n${asset.nextCheck} [${asset.stateEvidence.reference}]',
+      if (trends[signal] case final current?)
         'Key signal\n$current · First vs last 12-hour medians',
-      'Why this check\n${pump.stateEvidence.text} [${pump.stateEvidence.reference}]',
-      if (pump.matchingOpenEvidence case final event?)
+      'Why this check\n${asset.stateEvidence.text} [${asset.stateEvidence.reference}]',
+      if (asset.matchingOpenEvidence case final event?)
         'Open workbook event\n${event.text} [${event.reference}]',
       if (supportingTrends.isNotEmpty)
         'Telemetry · first vs last 12-hour medians\n'
             '$supportingTrends\n'
             'Exact sample rows are listed in the full evidence below.',
-      'Interpretation\nThe workbook flags possible efficiency loss or fouling. '
-          'The cause is unconfirmed. Compare flow, pressure and motor current '
-          'at comparable operating points before interpreting the change. [${pump.stateEvidence.reference}]',
+      'Interpretation\n${asset.condition == 'healthy' ? 'The workbook reports no significant deviation.' : 'The cause is unconfirmed.'} '
+          '${isValve ? 'Compare actual position with the setpoint and review supply pressure.' : 'Compare flow, pressure and motor current at comparable operating points.'} '
+          '[${asset.stateEvidence.reference}]',
       if (conflictingEvent != null || qualityNote != null)
         'Review required\n${[?conflictingEvent, ?qualityNote].join('\n')}',
       if (caseWorkflow != null)
         'Verification workflow\n${caseWorkflow.text} [${caseWorkflow.reference}]',
       if (maintenance != null) 'Recent maintenance\n$maintenance',
-      if (pumpGuide != null) 'Pump guidance\n$pumpGuide',
+      if (pumpGuide != null) 'Equipment guidance\n$pumpGuide',
       'Site procedures and qualified personnel govern physical inspection.',
     ].join('\n\n');
   }

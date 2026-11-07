@@ -89,7 +89,12 @@ struct WalkSite: Decodable {
   let walkingSpeedMetresPerSecond: Float?
   let inspectionReport: String?
   let inspectionSummary: String?
-  let motorCurrentSamples: [Double]?
+  struct TelemetryChart: Decodable {
+    let title: String
+    let unit: String
+    let samples: [Double]
+  }
+  let telemetryChart: TelemetryChart?
 
   var isRedPumpService: Bool {
     guard let target, objects.indices.contains(target) else { return false }
@@ -2240,11 +2245,11 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     text.isEditable = false
     text.font = .preferredFont(forTextStyle: .body)
     let evidence = model.inspectionReport ?? "No workbook evidence is available for this target."
-    if model.isRedPumpService {
+    if model.telemetryChart != nil || evidence.contains("\nNext check\n") {
       let sections: Set<String> = [
         "Next check", "Key signal", "Why this check", "Open workbook event",
         "Telemetry · first vs last 12-hour medians", "Interpretation",
-        "Review required", "Verification workflow", "Recent maintenance", "Pump guidance",
+        "Review required", "Verification workflow", "Recent maintenance", "Equipment guidance",
         "Local AI explanation · Precomputed", "Full workbook evidence"
       ]
       let styled = NSMutableAttributedString()
@@ -2259,10 +2264,11 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
           .font: UIFont.preferredFont(forTextStyle: style),
           .foregroundColor: style == .body ? UIColor.label : UIColor.systemTeal,
         ]))
-        if index == chartLine, let chart = motorCurrentChart(width: min(560, view.bounds.width - 48)) {
+        if index == chartLine, let series = model.telemetryChart,
+           let chart = telemetryChart(series, width: min(560, view.bounds.width - 48)) {
           let attachment = NSTextAttachment()
           attachment.image = chart
-          styled.append(NSAttributedString(string: "\n\nMotor current · \(model.motorCurrentSamples?.count ?? 0) workbook samples\n",
+          styled.append(NSAttributedString(string: "\n\n\(series.title) · \(series.samples.count) workbook samples\n",
             attributes: [.font: UIFont.preferredFont(forTextStyle: .headline), .foregroundColor: UIColor.label]))
           styled.append(NSAttributedString(attachment: attachment))
           styled.append(NSAttributedString(string: "\nSource: Telemetry_Sample_3d · sample number on horizontal axis",
@@ -2284,12 +2290,14 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     present(UINavigationController(rootViewController: report), animated: true)
   }
 
-  private func motorCurrentChart(width: CGFloat) -> UIImage? {
-    guard width > 120, let samples = model.motorCurrentSamples,
+  private func telemetryChart(_ series: WalkSite.TelemetryChart, width: CGFloat) -> UIImage? {
+    let samples = series.samples
+    guard width > 120,
           samples.count > 1, samples.allSatisfy({ $0.isFinite && $0 >= 0 && $0 < 100_000 }),
           let minValue = samples.min(), let maxValue = samples.max() else { return nil }
-    let low = floor(minValue / 5) * 5
-    let high = max(low + 5, ceil(maxValue / 5) * 5)
+    let step: Double = series.unit == "A" || series.unit == "%" ? 5 : 0.5
+    let low = floor(minValue / step) * step
+    let high = max(low + step, ceil(maxValue / step) * step)
     let size = CGSize(width: width, height: 171)
     let plot = CGRect(x: 42, y: 14, width: width - 55, height: 130)
     return UIGraphicsImageRenderer(size: size).image { _ in
@@ -2306,7 +2314,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
         grid.move(to: CGPoint(x: plot.minX, y: y))
         grid.addLine(to: CGPoint(x: plot.maxX, y: y))
         grid.stroke()
-        (String(format: "%g A", low + fraction * (high - low)) as NSString)
+        (String(format: "%g %@", low + fraction * (high - low), series.unit) as NSString)
           .draw(at: CGPoint(x: 6, y: y - 6), withAttributes: label)
       }
       let lastSample = samples.count - 1

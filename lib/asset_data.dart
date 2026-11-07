@@ -22,7 +22,8 @@ class AssetDiagnosis {
     required this.hypotheses,
     required this.qualityIssues,
     required this.mappingNotice,
-    this.motorCurrentSamples = const [],
+    this.signalMetric,
+    this.signalSamples = const [],
   });
 
   final String assetId, tag, condition, updatedAt, nextCheck;
@@ -31,7 +32,8 @@ class AssetDiagnosis {
   final Evidence stateEvidence;
   final Evidence? matchingOpenEvidence;
   final List<Evidence> evidence, hypotheses, qualityIssues;
-  final List<double> motorCurrentSamples;
+  final String? signalMetric;
+  final List<double> signalSamples;
 
   Evidence? get _fieldSafety => evidence
       .where((e) => e.reference.startsWith('DOC-FIELD-SAFETY · '))
@@ -296,6 +298,16 @@ class AssetData {
         ),
       );
     }
+    final signalMetric = switch (asset['asset_class']) {
+      'PROCESS_PUMP' => switch (issue) {
+        'MISALIGNMENT' => 'vibration_mm_s',
+        'CAVITATION_RISK' => 'process_pressure_bar',
+        'SEAL_DEGRADATION' => 'bearing_temp_c',
+        _ => 'motor_current_a',
+      },
+      'CONTROL_VALVE' => 'position_actual_pct',
+      _ => null,
+    };
     return AssetDiagnosis(
       assetId: '$assetId',
       tag: '${asset['tag']}',
@@ -306,14 +318,12 @@ class AssetData {
       stateEvidence: stateEvidence,
       matchingOpenEvidence: matchingOpenEvidence,
       mappingNotice: '${_json['mappingNotice']}',
-      motorCurrentSamples: asset['tag'] == 'P-005'
-          ? [
-              for (final row in telemetry.reversed)
-                if (row['motor_current_a'] case final num amps
-                    when amps.isFinite)
-                  amps.toDouble(),
-            ]
-          : const [],
+      signalMetric: signalMetric,
+      signalSamples: [
+        for (final row in telemetry.reversed)
+          if (row[signalMetric] case final num value when value.isFinite)
+            value.toDouble(),
+      ],
       evidence: evidence,
       hypotheses: [
         for (final r in cases)

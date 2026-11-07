@@ -136,7 +136,7 @@ import UIKit
               scene["hasWorkbook"] = evidence["hasWorkbook"] as? Bool
               scene["inspectionReport"] = evidence["inspectionReport"] as? String
               scene["inspectionSummary"] = evidence["inspectionSummary"] as? String
-              scene["motorCurrentSamples"] = evidence["motorCurrentSamples"] as? [NSNumber]
+              scene["telemetryChart"] = evidence["telemetryChart"] as? [String: Any]
             }
             present(scene)
           }
