@@ -86,6 +86,33 @@ void main() {
     },
   };
 
+  test('keeps the newest open fault event alongside recent evidence', () {
+    final source = bundle();
+    source['tables']['Alarms_Events'] = [
+      for (var day = 1; day <= 6; day++)
+        {
+          'asset_id': day == 6 ? 'other' : 'asset-1',
+          'event_id': 'evt-$day',
+          'event_code': day <= 2 || day == 6 ? 'DRIFT' : 'NOTE',
+          'status': day == 5 ? 'closed' : 'open',
+          'timestamp': '2026-01-0$day',
+          'description': 'Event $day',
+          '_source': 'Alarms_Events!${day + 1}',
+        },
+    ];
+    final data = AssetData.fromJson(jsonEncode(source));
+    final events = data
+        .forObject('object-1')!
+        .evidence
+        .where((e) => e.reference.contains('Alarms_Events!'))
+        .map((e) => e.reference);
+    expect(events, [
+      'evt-2 · Alarms_Events!3',
+      'evt-5 · Alarms_Events!6',
+      'evt-4 · Alarms_Events!5',
+    ]);
+  });
+
   test('retrieves only mapped asset evidence with source references', () {
     final data = AssetData.fromJson(jsonEncode(bundle()));
     final diagnosis = data.forObject('object-1')!;

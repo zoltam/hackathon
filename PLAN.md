@@ -430,6 +430,15 @@ The contract protects all six workbook service IDs. The iPhone check confirmed
 the four new threshold IDs, the middle actuator handoff, P-005, the empty
 view, the alternate P-005 journey and R3-only fallback.
 
+On iPhone 15, build `e8e2930` processed 720 supplemental frames in 90
+seconds at 8.00 Hz. All 720 passed the freshness check. Rendering averaged
+28.88 FPS, inference p95 was 23 ms, and capture-to-overlay p95 was 121 ms.
+Alternate scripted routes from `[69,65]` confirmed P-005, P-001 and P-002
+and reached their matching workbook reports. CV-003 passed a 5.6 m
+route from `[66,92]`. The rendered crate check
+localized three placements, replanned twice, entered a blocked state, and
+recovered the 32-cell route.
+
 - The supplied DOCX names the original Industrial Boiler Room PLY. In that
   archive 502,482 of 1,506,136 records pass the structural guard. The team uses
   the complete registered Equipment Room replacement. The scene scale remains

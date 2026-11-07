@@ -137,6 +137,21 @@ class AssetData {
                 '${field.key}: ${oldest[field.key]} to ${field.value}',
           ];
     final issue = state['issue_code'];
+    final events = latest('Alarms_Events', 'timestamp');
+    final matchingOpenEvent = events
+        .where(
+          (r) =>
+              issue is String &&
+              issue.isNotEmpty &&
+              issue != 'NORMAL' &&
+              r['event_code'] == issue &&
+              r['status'] == 'open',
+        )
+        .firstOrNull;
+    final reportEvents = [
+      ?matchingOpenEvent,
+      ...events.where((event) => event != matchingOpenEvent),
+    ].take(3);
     final cases = _rows('Historical_Service_Cases')
         .where(
           (r) =>
@@ -182,7 +197,7 @@ class AssetData {
           'Included telemetry samples from $oldestTime to '
               '$recentTime. ${comparison.join(', ')}.',
         ),
-      for (final r in latest('Alarms_Events', 'timestamp').take(3))
+      for (final r in reportEvents)
         entry(
           r,
           '${r['timestamp']}: ${r['event_code']} · '

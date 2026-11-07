@@ -269,7 +269,9 @@ Explicit overrides must match the same equipment classes as automatic mappings.
 The iPhone **Inspection evidence** panel shows supplied current state, the
 latest telemetry and the two ends of the included sample period, recent events
 and work orders, context documents, matching historical hypotheses and their
-evidence workflow, and data-quality flags. Workbook evidence keeps its row references.
+evidence workflow, and data-quality flags. If the workbook has an open event
+matching the asset's current issue code, the report includes the newest such
+event alongside the recent evidence. Workbook evidence keeps its row references.
 The snapshot date and supplied model confidence stay visible. This is a local,
 deterministic evidence-retrieval baseline; it does not call a generative AI model
 or establish a confirmed cause. Missing records remain explicit. Vision model
