@@ -107,6 +107,21 @@ Agree before changing catalog IDs, bounds, coordinate transforms, workbook schem
 
 The release checkpoint is a verified stable build. Full completion also requires reliable recognition for all 33, all supported service routes and the grounded end-to-end workflow. Keep any unmet gate explicit in the handoff.
 
+## Repeat the simulator service check
+
+From the repository root, with the optimized app installed on a booted
+iOS simulator, run:
+
+```sh
+python3 tools/verify_simulator_service_routes.py <simulator-udid> <new-log-folder>
+```
+
+This checks the six named targets, including the three difficult starts,
+and requires the matching workbook tag, nearby mapped equipment, target
+confirmation and arrival. It uses the RF-DETR simulator journey backend.
+The script defines the tested starts and saves each route result. The planner
+suite covers grid reachability.
+
 ## Goal prompts
 
 ### Mac goal
