@@ -67,6 +67,15 @@ class SpatialDiagnosticTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             evidence_report('pump', self.site, self.bundle, self.associations)
 
+    def test_explicit_bundle_cannot_add_context_or_mismatched_equipment(self):
+        self.bundle['mappingMethod'] = 'synthetic_explicit'
+        associations = build_associations(self.site, self.bundle)['associations']
+        self.assertEqual([a['sceneObjectId'] for a in associations], ['pump'])
+        self.assertEqual(associations[0]['associationKind'], 'synthetic_explicit')
+        self.bundle['mappings']['chair'] = 'B'
+        with self.assertRaisesRegex(ValueError, 'Incompatible explicit association'):
+            build_associations(self.site, self.bundle)
+
     def test_geometry_only_context_does_not_receive_workbook_identity(self):
         self.site['objects'].append(dict(objectId='stand', geometryOnly=True))
         self.assertEqual(build_associations(self.site, self.bundle), self.associations)

@@ -29,6 +29,7 @@ class SpatialAssetData {
       );
     }
     final legacy = _map(jsonDecode(legacySource));
+    final mappings = _map(legacy['mappings']);
     final associations = _map(jsonDecode(associationsSource));
     final diagnostics = _map(jsonDecode(diagnosticsSource));
     for (final sidecar in [associations, diagnostics]) {
@@ -72,6 +73,18 @@ class SpatialAssetData {
         throw const FormatException('Invalid or duplicate spatial association');
       }
       final report = _map(reports[id]);
+      final sceneType = association['sceneType'];
+      if (_legacy.hasReviewedMappings &&
+          (association['associationKind'] != 'synthetic_explicit' ||
+              !mappings.containsKey(id) ||
+              mappings[id] != association['workbookAssetId'] ||
+              sceneType is! String ||
+              _legacy.tagForObject(id, equipmentType: sceneType) !=
+                  report['tag'])) {
+        throw const FormatException(
+          'Spatial association differs from reviewed mapping',
+        );
+      }
       if (report['sceneObjectId'] != id ||
           report['workbookAssetId'] != association['workbookAssetId'] ||
           report['sourceSha256'] != legacy['sourceSha256'] ||
@@ -129,16 +142,30 @@ class SpatialAssetData {
     return value;
   }
 
+  Map<String, dynamic>? _reportForObject(
+    String objectId,
+    String? equipmentType,
+  ) {
+    final report = _reports[objectId];
+    if (report != null &&
+        _legacy.hasReviewedMappings &&
+        equipmentType != null &&
+        _legacy.tagForObject(objectId, equipmentType: equipmentType) == null) {
+      return null;
+    }
+    return report;
+  }
+
   String? tagForObject(String objectId, {required String equipmentType}) =>
-      _reports[objectId]?['tag'] as String? ??
+      _reportForObject(objectId, equipmentType)?['tag'] as String? ??
       _legacy.tagForObject(objectId, equipmentType: equipmentType);
 
   String? conditionForObject(String objectId, {String? equipmentType}) =>
-      _reports[objectId]?['condition'] as String? ??
+      _reportForObject(objectId, equipmentType)?['condition'] as String? ??
       _legacy.conditionForObject(objectId, equipmentType: equipmentType);
 
   SpatialDiagnosis? forObject(String objectId, {String? equipmentType}) {
-    final report = _reports[objectId];
+    final report = _reportForObject(objectId, equipmentType);
     if (report != null) {
       final explanation =
           report['engine'] == 'ollama' && report['llmSummary'] is String

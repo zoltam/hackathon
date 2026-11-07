@@ -28,12 +28,13 @@ class ImportTests(unittest.TestCase):
         self.site = {'objects': [dict(name='Test', x=1, z=2, width=1,
                                      depth=1, service=[0, 2], equipmentType='pump')]}
 
-    def run_export(self, mapping=None, *, include_nearby=False):
+    def run_export(self, mapping=None, *, include_nearby=False, reviewed_tags=None):
         with tempfile.TemporaryDirectory() as temp:
             workbook = Path(temp) / 'synthetic.xlsx'
             workbook.write_bytes(b'synthetic test source')
             with patch('import_asset_data.load_workbook', return_value=self.book):
-                return export(workbook, self.site, mapping, include_nearby=include_nearby)
+                return export(workbook, self.site, mapping, include_nearby=include_nearby,
+                              reviewed_tags=reviewed_tags)
 
     def test_reproducible_mapping_and_source_provenance(self):
         result = self.run_export()
@@ -54,6 +55,23 @@ class ImportTests(unittest.TestCase):
     def test_explicit_mapping_rejects_an_incompatible_workbook_class(self):
         with self.assertRaisesRegex(ValueError, 'Incompatible workbook asset C'):
             self.run_export({'grid:1:2:1:1': 'C'})
+
+    def test_reviewed_tags_are_unique_class_compatible_and_never_backfilled(self):
+        self.book['Asset_Master'] = Sheet([
+            ('asset_id', 'asset_class', 'tag'), ('A', 'PROCESS_PUMP', 'P-001'),
+            ('M', 'ELECTRIC_MOTOR', 'M-001'),
+        ])
+        self.book['Current_State'] = Sheet([('asset_id', 'health_score'), ('A', 50)])
+        self.site['objects'].append(dict(objectId='motor', equipmentType='motor'))
+        tags = {'motor': 'M-001'}
+        bundle = self.run_export(include_nearby=True, reviewed_tags=tags)
+        self.assertEqual(bundle['mappingMethod'], 'synthetic_explicit')
+        self.assertEqual(bundle['mappings'], {'motor': 'M'})
+        with self.assertRaisesRegex(ValueError, 'Incompatible workbook asset'):
+            self.run_export(include_nearby=True, reviewed_tags={'motor': 'P-001'})
+        self.book['Asset_Master'].values.append(('M2', 'ELECTRIC_MOTOR', 'M-001'))
+        with self.assertRaisesRegex(ValueError, 'Expected one workbook asset'):
+            self.run_export(include_nearby=True, reviewed_tags=tags)
 
     def test_nearby_mapping_preserves_the_service_target_rank(self):
         self.site['objects'] += [

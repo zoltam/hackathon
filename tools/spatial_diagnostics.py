@@ -86,7 +86,7 @@ def _unique(rows, field, description):
 
 
 def build_associations(site, bundle):
-    """Cover scene objects deterministically; preserve all existing assignments."""
+    """Preserve reviewed mappings, or complete coverage for legacy demo bundles."""
     if bundle.get('synthetic') is not True or not bundle.get('sourceSha256'):
         raise ValueError('Expected a provenance-backed synthetic workbook bundle')
     objects = _unique(site.get('objects', []), 'objectId', 'scene object ID') if all(
@@ -100,12 +100,23 @@ def build_associations(site, bundle):
     existing = bundle.get('mappings', {})
     if not isinstance(existing, dict) or set(existing) - objects.keys() or set(existing.values()) - assets.keys():
         raise ValueError('Legacy mappings reference unknown identities')
+    explicit = bundle.get('mappingMethod') == 'synthetic_explicit'
+    if explicit:
+        if len(set(existing.values())) != len(existing):
+            raise ValueError('Explicit mappings must be one-to-one')
+        for key, asset_id in existing.items():
+            obj = objects[key]
+            equipment_type = obj.get('equipmentType')
+            asset_class = CLASS_BY_TYPE.get(equipment_type)
+            if (obj.get('geometryOnly') or equipment_type == 'actuator' or not asset_class
+                    or assets[asset_id].get('asset_class') != asset_class):
+                raise ValueError(f'Incompatible explicit association for {key}')
     assignments = dict(existing)
-    kinds = {key: 'legacy_synthetic' for key in existing}
+    kinds = {key: 'synthetic_explicit' if explicit else 'legacy_synthetic' for key in existing}
     counts = Counter(assignments.values())
     # Complete type-compatible coverage before assigning contextual metadata.
-    pending = sorted(key for key, obj in objects.items()
-                     if key not in assignments and not obj.get('geometryOnly'))
+    pending = [] if explicit else sorted(
+        key for key, obj in objects.items() if key not in assignments and not obj.get('geometryOnly'))
     for key in pending:
         compatible = sorted(a for a, asset in assets.items()
                             if asset.get('asset_class') == CLASS_BY_TYPE.get(objects[key].get('equipmentType'))

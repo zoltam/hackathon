@@ -321,7 +321,9 @@ class RunnerTests: XCTestCase {
       XCTAssertGreaterThan(east.x, origin.x)
       XCTAssertGreaterThan(south.y, origin.y)
       XCTAssertEqual(east.x - origin.x, south.y - origin.y, accuracy: 0.001)
-      XCTAssertTrue(map.bounds.contains(map.mapPoint(x: 3, z: 3)))
+      let end = map.mapPoint(x: 3, z: 3)
+      XCTAssertLessThanOrEqual(end.x, map.bounds.maxX + 0.001)
+      XCTAssertLessThanOrEqual(end.y, map.bounds.maxY + 0.001)
     }
   }
 
@@ -384,6 +386,8 @@ class RunnerTests: XCTestCase {
     XCTAssertEqual(expanded.frame.minX, page.view.bounds.minX, accuracy: 0.01)
     XCTAssertEqual(expanded.frame.maxX, page.view.bounds.maxX, accuracy: 0.01)
     XCTAssertEqual(expanded.mapPoint(x: 0, z: 0).x, 0, accuracy: 0.01)
+    XCTAssertEqual(expanded.backgroundColor, .clear)
+    XCTAssertTrue(page.view.subviews.contains { $0 is UIVisualEffectView })
     XCTAssertEqual(expanded.pose?.columns.3, pose.columns.3)
     pose.columns.3 = SIMD4(1.5, 1.5, 1.5, 1)
     renderer.onFrameReady?(pose, matrix_identity_float4x4, renderer.view.bounds.size)

@@ -202,7 +202,8 @@ final class RouteMapView: UIControl {
     route = model.route
     mapImage = model.sourceSha256 == Self.imageSourceSha256 ? image : nil
     super.init(frame: .zero)
-    backgroundColor = UIColor.black.withAlphaComponent(0.85)
+    backgroundColor = .clear
+    isOpaque = false
     layer.cornerRadius = expanded ? 0 : 6
     clipsToBounds = true
     isAccessibilityElement = true
@@ -233,9 +234,8 @@ final class RouteMapView: UIControl {
     let region = worldBounds
     let header: CGFloat = expanded ? 0 : 22
     let footer: CGFloat = 22
-    let sideInset: CGFloat = expanded ? 0 : 2
     let contentHeight = bounds.height - header - footer
-    let scale = max(0, min((bounds.width - 2 * sideInset) / region.width, contentHeight / region.height))
+    let scale = max(0, min(bounds.width / region.width, contentHeight / region.height))
     return CGPoint(x: (bounds.width - region.width * scale) / 2 + (CGFloat(x) - region.minX) * scale,
                    y: header + (contentHeight - region.height * scale) / 2 + (CGFloat(z) - region.minY) * scale)
   }
@@ -327,16 +327,25 @@ final class RouteMapView: UIControl {
     let attributes: [NSAttributedString.Key: Any] = [
       .font: UIFont.preferredFont(forTextStyle: .caption1), .foregroundColor: UIColor.white,
     ]
+    func drawCaption(_ caption: String, y: CGFloat) {
+      let text = caption as NSString
+      let size = text.size(withAttributes: attributes)
+      let background = CGRect(x: 2, y: y - 1, width: size.width + 8, height: size.height + 2)
+      UIColor.black.withAlphaComponent(0.78).setFill()
+      UIBezierPath(roundedRect: background, cornerRadius: 3).fill()
+      text.draw(at: CGPoint(x: 6, y: y), withAttributes: attributes)
+    }
     UIColor.black.setStroke()
-    let border = UIBezierPath(rect: imageRect.insetBy(dx: 0.25, dy: 0.25))
-    border.lineWidth = 0.5
+    let pixel = 1 / contentScaleFactor
+    let border = UIBezierPath(rect: imageRect.insetBy(dx: pixel / 2, dy: pixel / 2))
+    border.lineWidth = pixel
     border.stroke()
     if !expanded {
-      ("Map ↗" as NSString).draw(at: CGPoint(x: 6, y: 3), withAttributes: attributes)
+      drawCaption("Map ↗", y: 3)
     }
     let outside = pose.map { !worldBounds.contains(CGPoint(x: CGFloat($0.columns.3.x), y: CGFloat($0.columns.3.z))) } ?? false
     let status = pose == nil ? "Location unavailable" : outside ? "Outside map" : route.isEmpty ? "No route" : "You · Route · Target"
-    (status as NSString).draw(at: CGPoint(x: 6, y: bounds.height - 19), withAttributes: attributes)
+    drawCaption(status, y: bounds.height - 19)
     guard let pose, !outside, let context = UIGraphicsGetCurrentContext() else { return }
     let point = mapPoint(x: pose.columns.3.x, z: pose.columns.3.z)
     context.saveGState()
@@ -745,8 +754,6 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     panel.spacing = 5
     panel.isLayoutMarginsRelativeArrangement = true
     panel.layoutMargins = UIEdgeInsets(top: 8, left: 9, bottom: 8, right: 9)
-    panel.backgroundColor = UIColor.black.withAlphaComponent(0.85)
-    panel.layer.cornerRadius = 12
     panel.translatesAutoresizingMaskIntoConstraints = false
     view.addSubview(panel)
     controlPanel = panel
@@ -1508,7 +1515,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
       return "\(object.displayName) · \(conditionText(for: object))"
     }
     let text = lines.isEmpty ? nil : (["Nearby equipment"] + lines).joined(separator: "\n")
-    if nearbyStatus.text != text { nearbyStatus.text = text }
+    if nearbyStatus.text != text { Self.setOutlinedText(text, on: nearbyStatus) }
     nearbyStatus.isHidden = text == nil
 
     let viewport = virtual.bounds
@@ -1632,7 +1639,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     let label = UILabel()
     let font = UIFont.preferredFont(forTextStyle: .caption2)
     let isTarget = index == model.target
-    label.font = isTarget ? font : font.withSize(font.pointSize * 0.9)
+    label.font = isTarget ? font : font.withSize(font.pointSize * 0.97)
     label.textColor = .white
     label.textAlignment = .center
     label.numberOfLines = 2
@@ -1645,17 +1652,23 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
       label.layer.masksToBounds = true
       label.text = text
     } else {
-      label.attributedText = NSAttributedString(string: text, attributes: [
-        .font: label.font!,
-        .foregroundColor: UIColor.white,
-        .strokeColor: UIColor.black,
-        .strokeWidth: -4,
-      ])
+      Self.setOutlinedText(text, on: label)
     }
     label.isHidden = true
     virtual.addSubview(label)
     nearbyLabels[index] = label
     return label
+  }
+
+  private static func setOutlinedText(_ text: String?, on label: UILabel) {
+    label.attributedText = text.map {
+      NSAttributedString(string: $0, attributes: [
+        .font: label.font as UIFont,
+        .foregroundColor: UIColor.white,
+        .strokeColor: UIColor.black,
+        .strokeWidth: -2.5,
+      ])
+    }
   }
 
   private static func clipEdge(_ a: SIMD4<Float>, _ b: SIMD4<Float>, to viewport: CGRect) -> (CGPoint, CGPoint)? {
@@ -1753,7 +1766,8 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     let names = confirmedVisionIDs.visible.map { id in
       model.objects.first { $0.objectId == id }?.displayName ?? id
     }
-    visionStatus.text = names.isEmpty ? visionIdleText : "Vision · " + names.joined(separator: ", ")
+    let text = names.isEmpty ? visionIdleText : "Vision · " + names.joined(separator: ", ")
+    if visionStatus.text != text { Self.setOutlinedText(text, on: visionStatus) }
   }
 
   private func clearDetections() {
@@ -1923,7 +1937,17 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     guard presentedViewController == nil else { return }
     let page = UIViewController()
     page.title = model.name
-    page.view.backgroundColor = .black
+    page.view.backgroundColor = .clear
+    let backdrop = UIVisualEffectView(effect: UIBlurEffect(style: .systemUltraThinMaterialDark))
+    backdrop.contentView.backgroundColor = UIColor.black.withAlphaComponent(0.12)
+    backdrop.translatesAutoresizingMaskIntoConstraints = false
+    page.view.addSubview(backdrop)
+    NSLayoutConstraint.activate([
+      backdrop.leadingAnchor.constraint(equalTo: page.view.leadingAnchor),
+      backdrop.trailingAnchor.constraint(equalTo: page.view.trailingAnchor),
+      backdrop.topAnchor.constraint(equalTo: page.view.topAnchor),
+      backdrop.bottomAnchor.constraint(equalTo: page.view.bottomAnchor),
+    ])
     let map = RouteMapView(model: model, image: mapImage, expanded: true)
     map.accessibilityTraits = .image
     map.accessibilityHint = nil
@@ -1942,6 +1966,12 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
       primaryAction: UIAction { [weak self] _ in self?.dismiss(animated: true) })
     let navigation = UINavigationController(rootViewController: page)
     navigation.modalPresentationStyle = .overFullScreen
+    navigation.view.backgroundColor = .clear
+    let appearance = UINavigationBarAppearance()
+    appearance.configureWithTransparentBackground()
+    appearance.titleTextAttributes = [.foregroundColor: UIColor.white]
+    navigation.navigationBar.standardAppearance = appearance
+    navigation.navigationBar.scrollEdgeAppearance = appearance
     present(navigation, animated: true)
   }
 
@@ -1988,7 +2018,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     align.setTitle(alignment == nil ? "Set start and direction" : "Reset alignment", for: .normal)
     toggle.setTitle(visible ? "Show camera" : "Show 3D model", for: .normal)
     if lastMessage != text {
-      message.text = text
+      Self.setOutlinedText(text, on: message)
       lastMessage = text
     }
   }

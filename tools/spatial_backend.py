@@ -13,6 +13,7 @@ import time
 import numpy as np
 
 from import_asset_data import export as import_workbook
+from import_asset_data import read_reviewed_tags
 from spatial_catalog import CatalogReview
 from spatial_diagnostics import build_associations, evidence_report, explain_report
 from spatial_navigation import Journey, plan_route, prepare_person_site
@@ -47,7 +48,10 @@ class SpatialApplication:
         if sha256(scan) != self.baseline['sourceSha256']:
             raise ValueError('Scan hash differs from the registered app geometry; rebuild its assets first')
         self.geometry = load_geometry(self.assets)
-        self.bundle = import_workbook(workbook, self.baseline, include_nearby=True)
+        manifest = self.assets / 'reviewed-asset-tags.json'
+        reviewed_tags = read_reviewed_tags(manifest) if manifest.is_file() else None
+        self.bundle = import_workbook(workbook, self.baseline, include_nearby=True,
+                                      reviewed_tags=reviewed_tags)
         self.catalog = CatalogReview(self.baseline, self.geometry, self.output / 'catalog')
         self.person_base = prepare_person_site(self.baseline, self.geometry)
         self.reports = {}
@@ -240,7 +244,7 @@ class SpatialViewer:
     def show_report(self, object_id):
         report = self.app.reports.get(object_id)
         if report is None:
-            self.report.content = 'Geometry-only context. No workbook association.'
+            self.report.content = 'No workbook association.'
             return
         text = report.get('llmSummary') or report['summary']
         self.report.content = (f"**{report['tag']} · {report['condition']}**\n\n"
@@ -362,7 +366,7 @@ class SpatialViewer:
                     for obj in nearby:
                         report = self.app.reports.get(obj['objectId'])
                         detail = (f"{report['tag']} · {report['condition']} (synthetic)"
-                                  if report else 'Geometry-only context')
+                                  if report else 'No workbook association')
                         lines.append(f"{obj['name']} · {detail}")
                     self.nearby.content = '**Nearby within 2.5 m**\n\n' + '\n\n'.join(lines)
                     if self.journey.status != 'arrived':

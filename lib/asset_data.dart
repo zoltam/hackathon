@@ -117,6 +117,8 @@ class AssetData {
   }
 
   final RecordData _json;
+  bool get hasReviewedMappings =>
+      _json['mappingMethod'] == 'synthetic_explicit';
   RecordData get _tables => _json['tables'] as RecordData;
   List<RecordData> _rows(String name) =>
       (_tables[name] as List).cast<RecordData>();
@@ -135,6 +137,14 @@ class AssetData {
       null => true,
       'pump' => asset?['asset_class'] == 'PROCESS_PUMP',
       'valve' || 'valve_actuator' => asset?['asset_class'] == 'CONTROL_VALVE',
+      'inline_valve' when hasReviewedMappings =>
+        asset?['asset_class'] == 'CONTROL_VALVE',
+      'motor' when hasReviewedMappings =>
+        asset?['asset_class'] == 'ELECTRIC_MOTOR',
+      'pressure_transmitter' when hasReviewedMappings =>
+        asset?['asset_class'] == 'PRESSURE_TRANSMITTER',
+      'vibration_sensor' when hasReviewedMappings =>
+        asset?['asset_class'] == 'VIBRATION_SENSOR',
       _ => false,
     };
     return compatible ? asset : null;

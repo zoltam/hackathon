@@ -79,6 +79,9 @@ void main() {
         load().forObject('chair')!.arrivalSummary,
         contains('chair identity retained'),
       );
+      bundle['mappingMethod'] = 'synthetic_explicit';
+      expect(load, throwsFormatException);
+      bundle.remove('mappingMethod');
       report['citations'] = [
         {'reference': 'Invented!999', 'text': 'unavailable'},
       ];
@@ -105,13 +108,18 @@ void main() {
   final prepared = File('${output.path}/diagnostics.json').existsSync();
 
   test(
-    'loads the actual person scene and every synthetic report export',
+    'loads the actual person scene and synthetic report export',
     () {
       final site = Site.fromJson(
         File('${output.path}/site.json').readAsStringSync(),
       );
+      final source = File('${output.path}/asset-data.json').readAsStringSync();
+      final bundle = jsonDecode(source) as Map;
+      final reviewed = bundle['mappingMethod'] == 'synthetic_explicit'
+          ? bundle['mappings'] as Map
+          : null;
       final data = SpatialAssetData.fromJson(
-        File('${output.path}/asset-data.json').readAsStringSync(),
+        source,
         associationsSource: File(
           '${output.path}/associations.json',
         ).readAsStringSync(),
@@ -130,6 +138,10 @@ void main() {
           expect(object.service, isNull, reason: object.objectId);
           continue;
         }
+        if (reviewed != null && !reviewed.containsKey(object.objectId)) {
+          expect(report, isNull, reason: object.objectId);
+          continue;
+        }
         expect(report, isNotNull, reason: object.objectId);
         expect(report!.reportText, contains('Synthetic'));
         expect(report.reportText, contains('Current_State!'));
@@ -143,6 +155,15 @@ void main() {
         'P-005',
       );
       expect(data.forObject('unknown'), isNull);
+      if (reviewed != null) {
+        expect(
+          data.forObject(
+            'boiler-room:red-circulation-pump',
+            equipmentType: 'carton',
+          ),
+          isNull,
+        );
+      }
     },
     skip: !prepared ? 'Prepare the local spatial backend exports first' : false,
   );

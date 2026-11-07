@@ -22,13 +22,27 @@ ASSET_CLASS_BY_EQUIPMENT_TYPE = {
     'valve': 'CONTROL_VALVE',
     'valve_actuator': 'CONTROL_VALVE',
 }
+REVIEWED_ASSET_CLASS_BY_EQUIPMENT_TYPE = {
+    **ASSET_CLASS_BY_EQUIPMENT_TYPE,
+    'inline_valve': 'CONTROL_VALVE',
+    'motor': 'ELECTRIC_MOTOR',
+    'pressure_transmitter': 'PRESSURE_TRANSMITTER',
+    'vibration_sensor': 'VIBRATION_SENSOR',
+}
 
 
 def object_id(obj):
     return obj.get('objectId') or obj.get('object_id') or 'grid:{x}:{z}:{width}:{depth}'.format(**obj)
 
 
-def export(workbook, site, mappings=None, *, include_nearby=False):
+def read_reviewed_tags(path):
+    tags = json.loads(path.read_text())
+    if not isinstance(tags, dict) or any(not isinstance(tag, str) or not tag for tag in tags.values()):
+        raise ValueError('Reviewed tags must map scene object IDs to workbook tags')
+    return tags
+
+
+def export(workbook, site, mappings=None, *, include_nearby=False, reviewed_tags=None):
     book = load_workbook(workbook, read_only=True, data_only=True)
     tables = {}
     try:
@@ -52,6 +66,18 @@ def export(workbook, site, mappings=None, *, include_nearby=False):
     assets = {r['asset_id']: r for r in tables['Asset_Master']}
     if len(assets) != len(tables['Asset_Master']):
         raise ValueError('Duplicate workbook asset IDs')
+    if reviewed_tags is not None:
+        if mappings is not None:
+            raise ValueError('Supply workbook asset IDs or reviewed tags, not both')
+        by_tag = defaultdict(list)
+        for asset_id, asset in assets.items():
+            by_tag[asset.get('tag')].append(asset_id)
+        mappings = {}
+        for scene_id, tag in reviewed_tags.items():
+            matches = by_tag[tag]
+            if len(matches) != 1:
+                raise ValueError(f'Expected one workbook asset with tag {tag}')
+            mappings[scene_id] = matches[0]
     states = {r['asset_id']: r for r in tables['Current_State']}
     if len(states) != len(tables['Current_State']):
         raise ValueError('Duplicate current states')
@@ -62,11 +88,12 @@ def export(workbook, site, mappings=None, *, include_nearby=False):
                 raise ValueError(f"Unknown asset at {row['_source']}")
 
     primary_service_id = site.get('primaryServiceObjectId')
-    objects = sorted((o for o in site['objects'] if o.get('service') is not None),
+    equipment = [o for o in site['objects'] if not o.get('geometryOnly')]
+    objects = sorted((o for o in equipment if o.get('service') is not None),
                      key=lambda o: (object_id(o) != primary_service_id, object_id(o)))
     if include_nearby:
         # Keep the service target and existing detector catalog assignments stable.
-        nearby = (o for o in site['objects'] if o.get('service') is None)
+        nearby = (o for o in equipment if o.get('service') is None)
         objects += sorted(nearby, key=lambda o: (o.get('detectorEnabled') is False, object_id(o)))
     ids = [object_id(o) for o in objects]
     if len(set(ids)) != len(ids):
@@ -102,7 +129,7 @@ def export(workbook, site, mappings=None, *, include_nearby=False):
         if scene_id not in mappings:
             continue
         asset_id = mappings[scene_id]
-        asset_class = ASSET_CLASS_BY_EQUIPMENT_TYPE.get(obj.get('equipmentType'))
+        asset_class = REVIEWED_ASSET_CLASS_BY_EQUIPMENT_TYPE.get(obj.get('equipmentType'))
         if not asset_class or assets[asset_id].get('asset_class') != asset_class:
             raise ValueError(f'Incompatible workbook asset {asset_id} for scene object {scene_id}')
     return {
@@ -121,8 +148,11 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('workbook', type=Path)
     parser.add_argument('--site', type=Path, required=True)
-    parser.add_argument('--mapping', type=Path,
-                        help='JSON object: scene object_id -> workbook asset_id')
+    mapping = parser.add_mutually_exclusive_group()
+    mapping.add_argument('--mapping', type=Path,
+                         help='JSON object: scene object_id -> workbook asset_id')
+    mapping.add_argument('--reviewed-tags', type=Path,
+                         help='JSON object: scene object_id -> reviewed workbook tag')
     parser.add_argument('--include-nearby', action='store_true',
                         help='Also map equipment without a service route')
     parser.add_argument('--output', type=Path,
@@ -130,7 +160,8 @@ def main():
     args = parser.parse_args()
     mappings = json.loads(args.mapping.read_text()) if args.mapping else None
     result = export(args.workbook, json.loads(args.site.read_text()), mappings,
-                    include_nearby=args.include_nearby)
+                    include_nearby=args.include_nearby,
+                    reviewed_tags=read_reviewed_tags(args.reviewed_tags) if args.reviewed_tags else None)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(result, ensure_ascii=False, allow_nan=False) + '\n')
     print(f"Mapped {len(result['mappings'])} scene objects; "

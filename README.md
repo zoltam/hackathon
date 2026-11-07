@@ -182,8 +182,9 @@ python3 -m venv sources/valmet/.venv
 source sources/valmet/.venv/bin/activate
 python3 -m pip install numpy Pillow -r tools/requirements-data.txt
 python3 tools/build_boiler_room.py "/path/to/Equipment Room.ply"
-python3 tools/import_asset_data.py "/path/to/Valmet_SinceAI_2026_Synthetic_Industrial_Metaverse_Builder_Pack (1) (2) (1).xlsx" \
-  --site assets/valmet/site.json --include-nearby
+python3 tools/import_asset_data.py "/path/to/Valmet builder workbook.xlsx" \
+  --site assets/valmet/site.json --include-nearby \
+  --reviewed-tags assets/valmet/reviewed-asset-tags.json
 flutter pub get
 ```
 
@@ -437,7 +438,31 @@ Override it with `--mapping /path/to/mapping.json`, whose JSON object maps scene
 `object_id` to workbook `asset_id`. Explicit `objectId` or `object_id` values are preferred;
 older objects use `grid:x:z:width:depth`. Regenerate/review the mapping when
 fallback geometry IDs change. Unknown or duplicate IDs are rejected.
-Explicit overrides must match the same equipment classes as automatic mappings.
+The reviewed manifest uses workbook tags in place of asset IDs. Both explicit
+modes require compatible equipment classes and leave unlisted objects unmapped.
+
+With the registered `person-site.json`, original room image and private
+`reviewed-room-observations.json` in `assets/valmet/`, append the reviewed scan
+observations and export the map after importing the workbook:
+
+```sh
+python3 tools/merge_reviewed_scene.py \
+  --site assets/valmet/person-site.json \
+  --observations assets/valmet/reviewed-room-observations.json \
+  --output assets/valmet/person-site.json
+python3 tools/export_service_map.py \
+  --site assets/valmet/person-site.json \
+  --bundle assets/valmet/asset-data.json \
+  --room-image assets/valmet/equipment-room-map.png \
+  --output assets/valmet/equipment-room-service-map
+```
+
+The PNG and SVG show all scene markers, including geometry-only observations.
+The merge keeps existing objects and routing data intact and accepts identical
+observations on repeated runs.
+The Markdown table accounts for all 30 workbook assets with source-row evidence,
+8 proposed synthetic assignments and 22 unlocated assets. Keep all three
+exports local.
 
 The iPhone **Inspection evidence** panel shows supplied current state, the
 latest telemetry and the two ends of the included sample period, recent events

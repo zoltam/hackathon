@@ -291,6 +291,14 @@ void main() {
       data.tagForObject('object-1', equipmentType: 'inline_valve'),
       isNull,
     );
+
+    source['mappingMethod'] = 'synthetic_explicit';
+    final reviewed = AssetData.fromJson(jsonEncode(source));
+    expect(
+      reviewed.tagForObject('object-1', equipmentType: 'inline_valve'),
+      'CV-001',
+    );
+    expect(reviewed.tagForObject('object-1', equipmentType: 'motor'), isNull);
   });
 
   test('arrival preserves source safety boundaries and exact next check', () {

@@ -158,7 +158,9 @@ class ActualSpatialBackendTest(unittest.TestCase):
         self.assertTrue(set(map(tuple, site['floor'])) <= set(map(tuple, app.baseline['floor'])))
         associations = json.loads((self.output / 'associations.json').read_text())
         records = {a['sceneObjectId']: a for a in associations['associations']}
-        workbook_objects = {key for key, obj in objects.items() if not obj.get('geometryOnly')}
+        workbook_objects = app.bundle['mappings'].keys()
+        self.assertEqual(app.bundle['mappingMethod'], 'synthetic_explicit')
+        self.assertLess(workbook_objects, objects.keys())
         self.assertEqual(records.keys(), workbook_objects)
         self.assertEqual(associations['sourceSha256'], app.bundle['sourceSha256'])
         self.assertEqual(associations['sceneSourceSha256'], app.baseline['sourceSha256'])
@@ -207,10 +209,10 @@ class ActualSpatialBackendTest(unittest.TestCase):
                 self.assertIn(target['objectId'], {o['objectId'] for o in near})
                 for obj in near:
                     self.assertEqual(box_edges(obj['extractionBounds']).shape, (12, 2, 3))
-                    if obj.get('geometryOnly'):
-                        self.assertNotIn(obj['objectId'], app.reports)
-                    else:
+                    if obj['objectId'] in app.bundle['mappings']:
                         self.assertTrue(app.reports[obj['objectId']]['synthetic'])
+                    else:
+                        self.assertNotIn(obj['objectId'], app.reports)
 
     def test_actual_blocked_and_disconnected_starts(self):
         target = next(o['objectId'] for o in self.app.site['objects'] if 'service' in o)

@@ -1,0 +1,10 @@
+{
+  "boiler-room:red-circulation-pump": "P-005",
+  "boiler-room:black-circulation-pump": "P-002",
+  "boiler-room:blue-inline-valve": "CV-003",
+  "boiler-room:far-circulation-pump": "P-001",
+  "boiler-room:middle-circulation-pump": "P-004",
+  "boiler-room:wall-circulation-pump": "P-003",
+  "boiler-room:orange-actuator-a": "CV-001",
+  "boiler-room:orange-actuator-b": "CV-002"
+}
