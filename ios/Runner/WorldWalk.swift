@@ -28,6 +28,7 @@ struct WalkSite: Decodable {
     let cells: [[Int]]?
     let bounds: [[Float]]?
     private let extractionBounds: ExtractionBounds?
+    let reviewedCenter: [Float]?
     let workbookTag: String?
     let equipmentType: String?
     let syntheticCondition: String?
@@ -42,6 +43,20 @@ struct WalkSite: Decodable {
 
     var nearbyFrameBounds: [[Float]]? { frameBounds(extractionBounds?.value) ?? markerBounds }
     var markerBounds: [[Float]]? { frameBounds(bounds) }
+
+    var displayMarker: SIMD3<Float>? {
+      guard let box = nearbyFrameBounds else { return nil }
+      if let center = reviewedCenter, center.count == 3, center.allSatisfy(\.isFinite) {
+        return SIMD3(center[0], box[1][1], center[2])
+      }
+      guard let marker = markerBounds else { return nil }
+      return SIMD3((marker[0][0] + marker[1][0]) / 2, marker[1][1], (marker[0][2] + marker[1][2]) / 2)
+    }
+
+    func displayFloorBounds(cellSize: Float) -> (min: SIMD2<Float>, max: SIMD2<Float>) {
+      guard reviewedCenter != nil, let box = nearbyFrameBounds else { return floorBounds(cellSize: cellSize) }
+      return (SIMD2(box[0][0], box[0][2]), SIMD2(box[1][0], box[1][2]))
+    }
 
     var displayName: String {
       if equipmentType == "valve_actuator", let workbookTag {
@@ -1679,7 +1694,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     let nearbyRadiusSquared: Float = 2.5 * 2.5
     let targetRadiusSquared: Float = 3.3 * 3.3
     let inRange = model.objects.indices.compactMap { index -> (index: Int, distance: Float)? in
-      let bounds = model.objects[index].floorBounds(cellSize: model.cellSize)
+      let bounds = model.objects[index].displayFloorBounds(cellSize: model.cellSize)
       let distance = simd_distance_squared(point, simd_clamp(point, bounds.min, bounds.max))
       let limit = index == model.target ? targetRadiusSquared : nearbyRadiusSquared
       return distance <= limit ? (index, distance) : nil
@@ -1715,9 +1730,8 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     CATransaction.setDisableActions(true)
     for entry in inRange {
       let object = model.objects[entry.index]
-      if entry.index == model.target, let marker = object.markerBounds {
-        let top = viewProjection * SIMD4((marker[0][0] + marker[1][0]) / 2, marker[1][1],
-                                         (marker[0][2] + marker[1][2]) / 2, 1)
+      if entry.index == model.target, let marker = object.displayMarker {
+        let top = viewProjection * SIMD4(marker, 1)
         markerPosition = Self.serviceMarkerPosition(top, viewport: viewport, availableArea: labelArea)
       }
       guard let bounds = object.nearbyFrameBounds else { continue }

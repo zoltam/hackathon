@@ -4,10 +4,41 @@ import UIKit
 
 @main
 @objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate {
+  static func applyingReviewedLocations(_ locations: Data, to payload: Data) -> Data {
+    guard let reviewed = (try? JSONSerialization.jsonObject(with: locations)) as? [String: Any],
+          let source = reviewed["sourceSha256"] as? String,
+          let equipment = reviewed["objects"] as? [[String: Any]],
+          var scene = (try? JSONSerialization.jsonObject(with: payload)) as? [String: Any],
+          scene["sourceSha256"] as? String == source,
+          var objects = scene["objects"] as? [[String: Any]] else { return payload }
+
+    for var location in equipment {
+      guard let id = location["objectId"] as? String else { continue }
+      if let index = objects.firstIndex(where: { ($0["objectId"] ?? $0["object_id"]) as? String == id }) {
+        objects[index]["reviewedCenter"] = location["reviewedCenter"]
+        objects[index]["extractionBounds"] = location["extractionBounds"]
+      } else {
+        // These findings appear in the viewer without adding obstacles or service points.
+        location["x"] = 0
+        location["z"] = 0
+        location["width"] = 0
+        location["depth"] = 0
+        location["height"] = 0
+        location["cells"] = [[Int]]()
+        objects.append(location)
+      }
+    }
+    scene["objects"] = objects
+    return (try? JSONSerialization.data(withJSONObject: scene)) ?? payload
+  }
+
   func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {
     GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
     guard let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "ValmetField") else { return }
     let channel = FlutterMethodChannel(name: "valmet/field", binaryMessenger: registrar.messenger())
+    let reviewedKey = registrar.lookupKey(forAsset: "assets/valmet/reviewed-equipment-locations.json")
+    let reviewedLocations = Bundle.main.url(forResource: reviewedKey, withExtension: nil)
+      .flatMap { try? Data(contentsOf: $0) }
     let open: (String, WorldWalk.VisionMode, [WorldWalk.VerificationPose]?, @escaping FlutterResult) -> Void = {
       payload, visionMode, verificationPoses, result in
       guard let host = UIApplication.shared.connectedScenes
@@ -16,7 +47,9 @@ import UIKit
         host.presentedViewController == nil else {
         return result(FlutterError(code: "unavailable", message: "Could not open the AR camera.", details: nil))
       }
-      guard let model = try? JSONDecoder().decode(WalkSite.self, from: Data(payload.utf8)) else {
+      let data = Data(payload.utf8)
+      let scene = reviewedLocations.map { Self.applyingReviewedLocations($0, to: data) } ?? data
+      guard let model = try? JSONDecoder().decode(WalkSite.self, from: scene) else {
         return result(FlutterError(code: "invalid_model", message: "Could not open this 3D model.", details: nil))
       }
       if visionMode == .preview {

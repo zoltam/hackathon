@@ -1,0 +1,533 @@
+{
+  "sourceSha256": "83d8c7d99316c08c9719cfc2c5a6b9d1903b89847780e2458adc662c79f32955",
+  "objects": [
+    {
+      "objectId": "boiler-room:orange-actuator-a",
+      "name": "Orange actuator a",
+      "workbookTag": "CV-001",
+      "reviewedCenter": [
+        6.45079,
+        1.14883,
+        4.02762
+      ],
+      "extractionBounds": [
+        [
+          6.41428,
+          1.07912,
+          3.96451
+        ],
+        [
+          6.50171,
+          1.21263,
+          4.07646
+        ]
+      ]
+    },
+    {
+      "objectId": "boiler-room:orange-actuator-b",
+      "name": "Orange actuator b",
+      "workbookTag": "CV-002",
+      "reviewedCenter": [
+        6.59542,
+        1.16878,
+        4.03017
+      ],
+      "extractionBounds": [
+        [
+          6.55591,
+          1.09841,
+          3.98549
+        ],
+        [
+          6.63156,
+          1.23334,
+          4.06105
+        ]
+      ]
+    },
+    {
+      "objectId": "boiler-room:blue-inline-valve",
+      "name": "Blue inline valve",
+      "workbookTag": "CV-003",
+      "reviewedCenter": [
+        10.65307,
+        0.95809,
+        7.64365
+      ],
+      "extractionBounds": [
+        [
+          10.54754,
+          0.85497,
+          7.47762
+        ],
+        [
+          10.74436,
+          1.0791,
+          7.82423
+        ]
+      ]
+    },
+    {
+      "objectId": "boiler-room:doorway-blue-valve",
+      "name": "Doorway blue valve",
+      "workbookTag": "CV-004",
+      "reviewedCenter": [
+        7.68905,
+        0.91973,
+        8.71802
+      ],
+      "extractionBounds": [
+        [
+          7.54112,
+          0.84029,
+          8.65366
+        ],
+        [
+          7.832,
+          0.99664,
+          8.7928
+        ]
+      ]
+    },
+    {
+      "objectId": "boiler-room:perimeter-blue-flanged-valve",
+      "name": "Perimeter blue flanged valve",
+      "workbookTag": "CV-005",
+      "reviewedCenter": [
+        9.11344,
+        1.15455,
+        3.85927
+      ],
+      "extractionBounds": [
+        [
+          9.06479,
+          1.06454,
+          3.7716
+        ],
+        [
+          9.15856,
+          1.23708,
+          3.94228
+        ]
+      ]
+    },
+    {
+      "objectId": "boiler-room:perimeter-green-flanged-valve",
+      "name": "Perimeter green flanged valve",
+      "workbookTag": "CV-006",
+      "reviewedCenter": [
+        8.94214,
+        1.11886,
+        3.83539
+      ],
+      "extractionBounds": [
+        [
+          8.87765,
+          1.02503,
+          3.77305
+        ],
+        [
+          9.00096,
+          1.20713,
+          3.90917
+        ]
+      ]
+    },
+    {
+      "objectId": "boiler-room:blue-valve-fourth-body",
+      "name": "Blue valve fourth body",
+      "workbookTag": "CV-007",
+      "reviewedCenter": [
+        8.89897,
+        0.69303,
+        8.58171
+      ],
+      "extractionBounds": [
+        [
+          8.83481,
+          0.64548,
+          8.5167
+        ],
+        [
+          8.962,
+          0.74112,
+          8.65347
+        ]
+      ]
+    },
+    {
+      "objectId": "boiler-room:blue-valve-middle-body",
+      "name": "Blue valve middle body",
+      "workbookTag": "CV-008",
+      "reviewedCenter": [
+        10.63844,
+        0.71695,
+        8.30187
+      ],
+      "extractionBounds": [
+        [
+          10.59597,
+          0.61661,
+          8.26325
+        ],
+        [
+          10.70807,
+          0.79689,
+          8.34241
+        ]
+      ]
+    },
+    {
+      "objectId": "boiler-room:blue-valve-right-body",
+      "name": "Blue valve right body",
+      "workbookTag": "CV-009",
+      "reviewedCenter": [
+        9.44168,
+        0.69493,
+        8.60325
+      ],
+      "extractionBounds": [
+        [
+          9.37264,
+          0.64257,
+          8.54401
+        ],
+        [
+          9.50426,
+          0.73967,
+          8.67186
+        ]
+      ]
+    },
+    {
+      "objectId": "boiler-room:blue-valve-left-body",
+      "name": "Blue valve left body",
+      "workbookTag": "CV-010",
+      "reviewedCenter": [
+        10.67756,
+        0.63527,
+        7.37851
+      ],
+      "extractionBounds": [
+        [
+          10.61036,
+          0.49652,
+          7.33923
+        ],
+        [
+          10.74769,
+          0.78209,
+          7.41198
+        ]
+      ]
+    },
+    {
+      "objectId": "boiler-room:riser-manifold-blue-valve",
+      "name": "Riser manifold blue valve",
+      "workbookTag": "CV-011",
+      "reviewedCenter": [
+        5.23128,
+        0.16535,
+        4.04953
+      ],
+      "extractionBounds": [
+        [
+          5.03928,
+          0.06547,
+          3.89298
+        ],
+        [
+          5.43692,
+          0.25742,
+          4.20449
+        ]
+      ]
+    },
+    {
+      "objectId": "boiler-room:wall-red-riser-manual-valve",
+      "name": "Wall red riser manual valve",
+      "workbookTag": "CV-012",
+      "reviewedCenter": [
+        8.91818,
+        1.50012,
+        8.69572
+      ],
+      "extractionBounds": [
+        [
+          8.834,
+          1.42027,
+          8.60676
+        ],
+        [
+          9.01408,
+          1.60179,
+          8.7753
+        ]
+      ]
+    },
+    {
+      "objectId": "boiler-room:west-pump-motor-b",
+      "name": "West pump motor b",
+      "workbookTag": "M-001",
+      "reviewedCenter": [
+        3.68259,
+        0.76946,
+        6.52047
+      ],
+      "extractionBounds": [
+        [
+          3.5801,
+          0.59298,
+          6.42064
+        ],
+        [
+          3.7804,
+          0.92732,
+          6.63153
+        ]
+      ]
+    },
+    {
+      "objectId": "boiler-room:west-pump-motor-a",
+      "name": "West pump motor a",
+      "workbookTag": "M-002",
+      "reviewedCenter": [
+        3.13348,
+        0.76581,
+        6.51417
+      ],
+      "extractionBounds": [
+        [
+          3.03908,
+          0.61996,
+          6.4201
+        ],
+        [
+          3.22817,
+          0.91212,
+          6.60743
+        ]
+      ]
+    },
+    {
+      "objectId": "boiler-room:red-ribbed-motor",
+      "name": "Red ribbed motor",
+      "workbookTag": "M-003",
+      "reviewedCenter": [
+        4.26964,
+        0.94145,
+        5.52607
+      ],
+      "extractionBounds": [
+        [
+          4.20945,
+          0.86621,
+          5.41013
+        ],
+        [
+          4.33102,
+          1.00739,
+          5.61724
+        ]
+      ]
+    },
+    {
+      "objectId": "boiler-room:grundfos-motor-b",
+      "name": "Grundfos motor b",
+      "workbookTag": "M-004",
+      "reviewedCenter": [
+        5.41693,
+        1.22345,
+        4.22388
+      ],
+      "extractionBounds": [
+        [
+          5.30284,
+          1.13409,
+          4.14609
+        ],
+        [
+          5.51111,
+          1.3134,
+          4.29836
+        ]
+      ]
+    },
+    {
+      "objectId": "boiler-room:grundfos-motor-a",
+      "name": "Grundfos motor a",
+      "workbookTag": "M-005",
+      "reviewedCenter": [
+        5.06019,
+        1.21685,
+        4.21545
+      ],
+      "extractionBounds": [
+        [
+          4.95466,
+          1.12712,
+          4.10118
+        ],
+        [
+          5.15717,
+          1.30673,
+          4.28114
+        ]
+      ]
+    },
+    {
+      "objectId": "boiler-room:wall-grundfos-motor",
+      "name": "Wall grundfos motor",
+      "workbookTag": "M-006",
+      "reviewedCenter": [
+        10.50292,
+        1.18787,
+        7.41866
+      ],
+      "extractionBounds": [
+        [
+          10.36904,
+          1.08686,
+          7.31371
+        ],
+        [
+          10.63823,
+          1.2778,
+          7.52325
+        ]
+      ]
+    },
+    {
+      "objectId": "boiler-room:far-circulation-pump",
+      "name": "Far circulation pump",
+      "workbookTag": "P-001",
+      "reviewedCenter": [
+        10.57586,
+        1.18249,
+        8.27807
+      ],
+      "extractionBounds": [
+        [
+          10.44725,
+          1.07155,
+          8.18367
+        ],
+        [
+          10.70038,
+          1.30228,
+          8.3483
+        ]
+      ]
+    },
+    {
+      "objectId": "boiler-room:black-circulation-pump",
+      "name": "Black circulation pump",
+      "workbookTag": "P-002",
+      "reviewedCenter": [
+        10.52899,
+        1.18583,
+        7.41674
+      ],
+      "extractionBounds": [
+        [
+          10.36904,
+          1.06365,
+          7.30712
+        ],
+        [
+          10.69885,
+          1.3035,
+          7.52325
+        ]
+      ]
+    },
+    {
+      "objectId": "boiler-room:wall-circulation-pump",
+      "name": "Wall circulation pump",
+      "workbookTag": "P-003",
+      "reviewedCenter": [
+        9.42636,
+        1.17195,
+        8.71849
+      ],
+      "extractionBounds": [
+        [
+          9.37766,
+          1.13376,
+          8.64327
+        ],
+        [
+          9.47887,
+          1.22392,
+          8.78577
+        ]
+      ]
+    },
+    {
+      "objectId": "boiler-room:middle-circulation-pump",
+      "name": "Middle circulation pump",
+      "workbookTag": "P-004",
+      "reviewedCenter": [
+        8.89735,
+        1.18059,
+        8.6617
+      ],
+      "extractionBounds": [
+        [
+          8.8014,
+          1.0557,
+          8.53226
+        ],
+        [
+          8.99798,
+          1.3112,
+          8.8068
+        ]
+      ]
+    },
+    {
+      "objectId": "boiler-room:red-circulation-pump",
+      "name": "Red circulation pump",
+      "workbookTag": "P-005",
+      "reviewedCenter": [
+        7.94766,
+        1.1624,
+        8.66685
+      ],
+      "extractionBounds": [
+        [
+          7.84865,
+          1.03463,
+          8.53313
+        ],
+        [
+          8.04677,
+          1.29095,
+          8.81567
+        ]
+      ]
+    },
+    {
+      "objectId": "boiler-room:grundfos-circulation-pump-b",
+      "name": "Grundfos circulation pump b",
+      "workbookTag": "P-006",
+      "reviewedCenter": [
+        5.3688,
+        1.23867,
+        3.98225
+      ],
+      "extractionBounds": [
+        [
+          5.25282,
+          1.08361,
+          3.88996
+        ],
+        [
+          5.51111,
+          1.3889,
+          4.29836
+        ]
+      ]
+    }
+  ]
+}

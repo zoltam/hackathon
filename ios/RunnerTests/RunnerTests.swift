@@ -62,6 +62,36 @@ class RunnerTests: XCTestCase {
     }
   }
 
+  func testReviewedLocationsUpdateDisplayWithoutChangingRouteOrCollision() throws {
+    let scene = Data("""
+      {"name":"Room","sourceSha256":"same","keyControls":false,"width":60,"depth":60,"cellSize":0.1,
+       "start":[4,4],"route":[[4,4],[5,4]],"target":0,"objects":[
+        {"objectId":"pump","name":"Pump","x":30,"z":3,"width":5,"depth":4,"height":1.5,
+         "bounds":[[3,1,0.3],[3.5,1.5,0.7]],"service":[5,4]}]}
+      """.utf8)
+    let reviewed = Data("""
+      {"sourceSha256":"same","objects":[
+        {"objectId":"pump","reviewedCenter":[3.2,1.3,0.6],"extractionBounds":[[3.1,1.1,0.5],[3.4,1.6,0.8]]},
+        {"objectId":"valve","name":"Valve","reviewedCenter":[5.2,1,2.3],
+         "extractionBounds":[[5,0.8,2],[5.4,1.2,2.6]],"workbookTag":"CV-010"}]}
+      """.utf8)
+    let decoder = JSONDecoder()
+    let original = try decoder.decode(WalkSite.self, from: scene)
+    let updated = try decoder.decode(WalkSite.self, from: AppDelegate.applyingReviewedLocations(reviewed, to: scene))
+    XCTAssertEqual(updated.objects.map(\.objectId), ["pump", "valve"])
+    XCTAssertEqual(updated.objects[0].displayMarker, SIMD3<Float>(3.2, 1.6, 0.6))
+    XCTAssertEqual(updated.objects[1].displayFloorBounds(cellSize: 0.1).min, SIMD2<Float>(5, 2))
+    XCTAssertEqual(updated.objects[0].bounds, original.objects[0].bounds)
+    XCTAssertEqual(updated.objects[0].service, original.objects[0].service)
+    XCTAssertNil(updated.objects[1].service)
+    XCTAssertEqual(updated.target, original.target)
+    XCTAssertEqual(updated.route, original.route)
+    XCTAssertEqual(updated.occupiedFloor, original.occupiedFloor)
+
+    let otherScan = Data(String(decoding: reviewed, as: UTF8.self).replacingOccurrences(of: "same", with: "different").utf8)
+    XCTAssertEqual(AppDelegate.applyingReviewedLocations(otherScan, to: scene), scene)
+  }
+
   func testServiceMarkerStaysVisibleAboveControlsAndAtScreenEdge() throws {
     let viewport = CGRect(x: 0, y: 0, width: 400, height: 700)
     let area = CGRect(x: 6, y: 6, width: 388, height: 340)
