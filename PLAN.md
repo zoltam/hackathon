@@ -449,6 +449,10 @@ observed floor, equipment footprints, map edges and confirmed crate cells.
 The previous center-cell check could accept a position too close to a
 diagonal obstacle. The native geometry passed 75,944 sampled positions on
 79 planned routes, including crate detours and the 0.20 m alternate P-005 route.
+The 0.10 m floor mask has 2,106 cells connected to the entrance, including all
+six service cells. The scan test checks each entrance route against an
+independent shortest distance and rejects routes from all 24 isolated
+walkable cells to each service target.
 
 The two orange actuators have distinct valve bodies in the scan. The importer
 associates them with healthy synthetic parent records CV-001 and CV-002 for
@@ -502,6 +506,11 @@ The 3.0 m CV-003 route reached the service cell and showed the correct
 workbook report, with no confirmed target. All 19 native simulator tests
 passed, and the generic iOS release build compiled. The normal iOS app still
 uses R3 for its primary detections.
+
+The same simulator build reached the correct workbook report for all six
+service targets. The RF-DETR journey gate passed for P-001 (3.4 m), P-002
+(2.9 m), P-005 (2.0 m) and CV-003 (0.9 m). P-003 (6.0 m) and P-004
+(2.3 m) arrived with the correct report but did not confirm the target.
 
 - The supplied DOCX names the original Industrial Boiler Room PLY. In that
   archive 502,482 of 1,506,136 records pass the structural guard. The team uses

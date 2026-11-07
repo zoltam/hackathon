@@ -64,13 +64,41 @@ void main() {
         ]),
       );
       final walkable = site.walkableCells(clearanceMetres: clearance).toSet();
+      expect(walkable, contains(site.start));
+      final entranceDistance = <Cell, int>{site.start: 0};
+      final reachable = <Cell>[site.start];
+      for (var i = 0; i < reachable.length; i++) {
+        final cell = reachable[i];
+        final (x, z) = cell;
+        for (final next in [(x - 1, z), (x + 1, z), (x, z - 1), (x, z + 1)]) {
+          if (walkable.contains(next) && !entranceDistance.containsKey(next)) {
+            entranceDistance[next] = entranceDistance[cell]! + 1;
+            reachable.add(next);
+          }
+        }
+      }
+      final disconnected = walkable.difference(entranceDistance.keys.toSet());
+      expect(reachable, hasLength(2106));
+      expect(disconnected, hasLength(24));
       final approaches = <Cell>{};
       for (final device in devices) {
+        final approach = device.service!;
         expect(
-          approaches.add(device.service!),
+          approaches.add(approach),
           isTrue,
           reason: '${device.objectId} shares an approach',
         );
+        expect(entranceDistance, contains(approach));
+        expect(
+          site.route(site.start, approach, clearanceMetres: clearance),
+          hasLength(entranceDistance[approach]! + 1),
+        );
+        for (final start in disconnected) {
+          expect(
+            site.route(start, approach, clearanceMetres: clearance),
+            isEmpty,
+          );
+        }
       }
       for (final start in starts) {
         final layout = Site.fromJson(
