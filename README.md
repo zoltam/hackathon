@@ -464,6 +464,7 @@ The Markdown table accounts for all 30 workbook assets with source-row evidence,
 8 proposed synthetic assignments and 22 unlocated assets. Keep all three
 exports local.
 
+
 The iPhone **Inspection evidence** panel shows supplied current state, the
 latest telemetry and the two ends of the included sample period, recent events
 and work orders, context documents, matching historical hypotheses and their
