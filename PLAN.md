@@ -287,6 +287,14 @@ all 33 classes on 292 held-out renders at least once, at 54.0% precision and
 55.6% recall. Legacy F1 was 80.5% on room views and 71.7% on walking views.
 The candidate did not pass the release checks.
 
+A later six-ID specialist reached 91.2% precision and 40.2% recall on the
+same 177-image test used for the first context model. On a separate 292-view
+set the existing projection and deduplication produced 80.8% precision and
+63.3% recall at score 0.25. This measures in-scene association after RGB
+inference. No new ID cleared both release criteria. A local 608 × 608
+Darknet pilot exported to Vision but produced zero true positives at its
+30-step checkpoint, after approximately five minutes on the Mac.
+
 - The supplied DOCX names the original Industrial Boiler Room PLY. In that
   archive 502,482 of 1,506,136 records pass the structural guard. The team uses
   the complete registered Equipment Room replacement. The scene scale remains
@@ -330,6 +338,10 @@ The candidate did not pass the release checks.
   mask as the live planner. The iOS simulator rejected a raw-floor route
   outside that mask. Two alternate runs reached P-004 and CV-003 with their
   workbook evidence; simulator Vision could not create an inference context.
+  On iPhone 15, `1722341` rejected the unsafe route and completed a 2.1 m
+  alternate P-004 run from `[66, 92]` with target recognition and the matching
+  workbook report. Five fixed views passed, including cabinet and actuator
+  overlays with the workbook loaded and an empty negative view.
 - The iPhone 15 passed the P-005 route from cell `[69, 65]` (2.0 m), the
   P-003 route (4.5 m) and the crate-recovery check with the 33-object scene.
   A separate fixed-pose check
