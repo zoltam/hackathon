@@ -467,6 +467,16 @@ inference context`, leaving the recognition condition of both scripts
 unverified in that runtime. All 18 native simulator tests passed. The
 generic iOS release build compiled for later physical-device use.
 
+A simulator build with Swift optimization (`SWIFT_OPTIMIZATION_LEVEL=-O`)
+confirmed floor carton, short step ladder, black shelf cart, yellow-wheel
+hand truck and middle blue actuator from the rendered frames. Each positive
+view had 11–12 current supplemental samples. The negative view had 11
+current samples and zero confirmed boxes. R3 still returned the inference
+context error. The 2.3 m P-004 route from `[67,65]` reached the service cell
+and loaded the matching report. The journey's new check line records
+arrival, Vision confirmation and workbook evidence independently while
+the overall journey still requires all of them.
+
 - The supplied DOCX names the original Industrial Boiler Room PLY. In that
   archive 502,482 of 1,506,136 records pass the structural guard. The team uses
   the complete registered Equipment Room replacement. The scene scale remains

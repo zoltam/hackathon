@@ -347,6 +347,9 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     var raw = Set<String>()
     var projected = Set<String>()
     var confirmed = Set<String>()
+    var supplementalSamples = 0
+    var supplementalStale = 0
+    var supplementalConfirmed = Set<String>()
   }
 
   private let model: WalkSite
@@ -586,6 +589,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
       }
       guard self.isCurrent(prediction.frame, comparedWith: pose) else {
         if benchmarking { self.supplementalBenchmarkStale += 1 }
+        self.verificationSamples?.supplementalStale += 1
         self.clearSupplementalDetections()
         return
       }
@@ -604,6 +608,8 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
       }
       self.lastSupplementalDetection = detections.isEmpty ? nil : prediction.frame
       let confirmed = self.drawDetections(detections, supplemental: true)
+      self.verificationSamples?.supplementalSamples += 1
+      self.verificationSamples?.supplementalConfirmed.formUnion(confirmed)
       if self.verificationPoses != nil, !replacements.isEmpty {
         self.verificationSamples?.raw.formUnion(prediction.detections.map(\.objectID).filter(replacements.contains))
         self.verificationSamples?.projected.formUnion(detections.map(\.objectID).filter(replacements.contains))
@@ -784,6 +790,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
           return "\(id)@\(tag)"
         }
         print("VALMET_VISION pose=\(pose.id) samples=\(samples.count) raw=\(list(samples.raw)) projected=\(list(samples.projected)) confirmed=\(list(samples.confirmed)) workbook=\(model.hasWorkbook == true) tags=\(list(Set(tags))) missing=\(list(missing)) unexpected=\(list(unexpected)) status=\(passed ? "passed" : "failed")")
+        print("VALMET_SUPPLEMENTAL pose=\(pose.id) samples=\(samples.supplementalSamples) stale=\(samples.supplementalStale) confirmed=\(list(samples.supplementalConfirmed))")
         fflush(stdout)
         verificationSamples = nil
         verifyCatalogPose(index: index + 1)
@@ -1066,6 +1073,10 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     restoreVerificationIdleTimer()
     let elapsed = CACurrentMediaTime() - start
     print("VALMET_JOURNEY nearby_frames_max=\(journeyNearbyMax.frames) mapped_nearby_frames_max=\(journeyNearbyMax.mapped)")
+    let arrivalWorkbook = arrived && hasJourneyWorkbookEvidence
+    let tag = arrivalWorkbook ? (serviceTarget?.workbookTag ?? "unavailable") : "unavailable"
+    print("VALMET_JOURNEY checks arrived=\(arrived) vision_confirmed=\(journeyConfirmedTarget) " +
+          "arrival_workbook=\(arrivalWorkbook) workbook_tag=\(tag) mapped_nearby=\(journeyNearbyMax.mapped > 0)")
     if let error {
       print("VALMET_JOURNEY result=failed error=\(error) confirmed=\(journeyConfirmedTarget) arrived=\(arrived) elapsed_s=\(elapsed)")
     } else {
