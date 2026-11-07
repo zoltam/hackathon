@@ -1574,7 +1574,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     let warnAboutAccess = isNearBlockedAccess(at: position)
     let accessLabel = model.serviceAccessDemo == true ? "Move to clear access" : "Check access"
     let nearbyRadiusSquared: Float = 2.5 * 2.5
-    let targetRadiusSquared: Float = 2.8 * 2.8
+    let targetRadiusSquared: Float = 3.3 * 3.3
     let inRange = model.objects.indices.compactMap { index -> (index: Int, distance: Float)? in
       let bounds = model.objects[index].floorBounds(cellSize: model.cellSize)
       let distance = simd_distance_squared(point, simd_clamp(point, bounds.min, bounds.max))
