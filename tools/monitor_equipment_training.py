@@ -10,7 +10,6 @@ import time
 
 
 ROOT = Path(__file__).resolve().parents[1]
-EXPORTED = "Exported equipment-detector.mlmodel"
 TEST = re.compile(r"Held-out rendered test · (\d+) frames · TP (\d+) FP (\d+) FN (\d+) · IoU ≥ 0.50")
 
 
@@ -28,7 +27,8 @@ def trainers(executable):
 def status(log, model, active, expected_sha256=None):
     log_text = log.read_text(errors="replace") if log.is_file() else ""
     lines = log_text.splitlines()
-    export = max((index for index, line in enumerate(lines) if line == EXPORTED), default=-1)
+    export_marker = f"Exported {model.name}"
+    export = max((index for index, line in enumerate(lines) if line == export_marker), default=-1)
     result = next((match for line in reversed(lines[export + 1:]) if (match := TEST.fullmatch(line))), None)
     exported = export >= 0
     present = model.is_file() and model.stat().st_size > 0

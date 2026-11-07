@@ -70,10 +70,11 @@ swiftc -O tools/train_equipment_detector.swift -o /tmp/valmet-train-equipment-mo
 In another terminal, monitor without altering the worker:
 
 ```sh
-python3 tools/monitor_equipment_training.py --watch --log /tmp/valmet-detector-hq-training.log --trainer /tmp/valmet-train-equipment-monitored
+python3 tools/monitor_equipment_training.py --watch --log /tmp/valmet-detector-hq-training.log \
+  --model build/valmet-detection-hq/candidate.mlmodel --trainer /tmp/valmet-train-equipment-monitored
 ```
 
-Train and select on validation, then evaluate the chosen export with `--evaluate-only --split=test --model=<candidate>`. Each `VALMET_EVAL` row reports counts for one instance. Training and checkpoint export default to `candidate.mlmodel` inside the dataset; evaluation alone defaults to the bundled detector. For intermediate checkpoints, copy the training session directory before using `--checkpoint-dir=<copy> --checkpoint-iteration=<step> --model=<separate-output>` on validation. The monitor can verify the evaluated export with `--expected-sha256 <digest>`. The repository includes the evaluated Core ML detector at `assets/valmet/equipment-detector.mlmodel`, which the iPhone app bundles automatically. The scan, renders and training checkpoints stay local.
+Train and select on validation, then evaluate the chosen export with `--evaluate-only --split=test --model=<candidate>`. Append the test output to the run log so the monitor can show the completed result. Each `VALMET_EVAL` row reports counts for one instance. Training and checkpoint export default to `candidate.mlmodel` inside the dataset; evaluation alone defaults to the bundled detector. For intermediate checkpoints, copy the training session directory before using `--checkpoint-dir=<copy> --checkpoint-iteration=<step> --model=<separate-output>` on validation. The monitor can verify the evaluated export with `--expected-sha256 <digest>`. The repository includes the evaluated Core ML detector at `assets/valmet/equipment-detector.mlmodel`, which the iPhone app bundles automatically. The scan, renders and training checkpoints stay local.
 
 The generated scene JSON also contains reviewed equipment volumes and stable `objectId` values for the workbook and proximity features. See [the scene handoff](PLAN.md#scene-and-equipment-handoff) for coverage and coordinate assumptions.
 

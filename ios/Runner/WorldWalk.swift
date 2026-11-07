@@ -451,13 +451,11 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
       var projectedIDs = Set<String>()
       let detections = prediction.detections.filter { detection in
         guard let object = self.model.objects.first(where: { $0.objectId == detection.objectID }) else { return false }
-        let eligible = self.model.hasWorkbook != true || object.workbookTag != nil
-        guard eligible || self.verificationPoses != nil else { return false }
         if let bounds = object.bounds {
           guard RenderedVision.matches(detection, to: bounds, viewProjection: viewProjection) else { return false }
           if self.verificationPoses != nil { projectedIDs.insert(detection.objectID) }
         }
-        return eligible
+        return true
       }
       self.lastDetection = detections.isEmpty ? nil : prediction.frame
       let confirmedIDs = self.drawDetections(detections)

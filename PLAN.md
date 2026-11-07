@@ -281,8 +281,11 @@ candidate found each of its classes at least once on 250 held-out renders,
 but reached only 54.3% precision and 54.2% recall. On the corrected-scan 11-ID
 sets its F1 fell to 33.3% on room views and 58.1% on walking views, compared
 with 91.5% and 81.4% for the bundled detector. The candidate stays local.
-The 33-ID follow-up adds complete labels for the remaining three objects
-and more wide and edge-clipped legacy views.
+The 33-ID follow-up preserved legacy training images and their existing boxes,
+added missing labels and included more wide and edge-clipped views. It found
+all 33 classes on 292 held-out renders at least once, at 54.0% precision and
+55.6% recall. Legacy F1 was 80.5% on room views and 71.7% on walking views.
+The candidate did not pass the release checks.
 
 - The supplied DOCX names the original Industrial Boiler Room PLY. In that
   archive 502,482 of 1,506,136 records pass the structural guard. The team uses
@@ -291,9 +294,11 @@ and more wide and edge-clipped legacy views.
 - The local Core ML detector recognizes the 11 trained catalog IDs. Its
   capture-time projection must agree with each mapped 3D frame. Teal frames
   and their synthetic workbook conditions come from proximity within 2.5 m.
-  Yellow boxes require two consecutive image detections. With the workbook
-  loaded they are limited to the six catalog entries with compatible Excel
-  classes. The app displays the exact Excel tag alongside the scene name.
+  Yellow boxes require two consecutive image detections. Vision overlays show
+  the detected catalog object's scene name. The six compatible mapped objects
+  also show their exact Excel tags. A capture-pose replay across all 11
+  detector IDs produced 193 true positives, 10 false positives and 57 missed
+  annotations on 69 walking renders, before the two-frame display rule.
 - With the class-checked workbook mapping, the iPhone scripted 3.10 m route
   confirmed the pump as `P-005 · Red circulation pump` and displayed the
   workbook-based next check at arrival in 20.36 seconds. Up to four nearby
