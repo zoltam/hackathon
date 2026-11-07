@@ -28,4 +28,42 @@ void main() {
     ''');
     expect(sparse.route(sparse.start, (2, 0)), isEmpty);
   });
+
+  test('clearance measures Euclidean distance to a diagonal obstacle', () {
+    final grid = Site.fromJson('''
+      {"name":"Diagonal","width":5,"depth":5,"cellSize":0.1,
+       "start":[2,2],"objects":[]}
+    ''');
+    const obstacle = {(3, 3)};
+    const start = (2, 2);
+    const goal = (1, 2);
+    expect(
+      grid.route(
+        start,
+        goal,
+        clearanceMetres: .070,
+        additionalBlocked: obstacle,
+      ),
+      [start, goal],
+    );
+    expect(
+      grid.route(
+        start,
+        goal,
+        clearanceMetres: .071,
+        additionalBlocked: obstacle,
+      ),
+      isEmpty,
+    );
+  });
+
+  test('finite clearance wider than the site returns no walkable cells', () {
+    const radius = double.maxFinite;
+    expect(site.isWalkable(site.start, clearanceMetres: radius), isFalse);
+    expect(site.walkableCells(clearanceMetres: radius), isEmpty);
+    expect(
+      site.route(site.start, site.start, clearanceMetres: radius),
+      isEmpty,
+    );
+  });
 }

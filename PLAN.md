@@ -434,8 +434,8 @@ On iPhone 15, build `e8e2930` processed 720 supplemental frames in 90
 seconds at 8.00 Hz. All 720 passed the freshness check. Rendering averaged
 28.88 FPS, inference p95 was 23 ms, and capture-to-overlay p95 was 121 ms.
 Alternate scripted routes from `[69,65]` confirmed P-005, P-001 and P-002
-and reached their matching workbook reports. CV-003 passed a 5.6 m
-route from `[66,92]`. The rendered crate check
+and reached their matching workbook reports. CV-003 and P-003 passed
+5.6 m and 6.0 m routes from `[66,92]`. The rendered crate check
 localized three placements, replanned twice, entered a blocked state, and
 recovered the 32-cell route.
 
@@ -478,6 +478,10 @@ recovered the 32-cell route.
 - The route regression suite covers all six service targets from twelve starts
   and six replans around a 0.50 m crate. It checks blocked starts and goals,
   disconnected corridors, route recovery and arrival in the planner.
+  It also checks 48 wider-clearance combinations across all six targets, four
+  starts and 0.20 m and 0.30 m radii. The 21-cell P-005 route from `[69,65]`
+  remains walkable at 0.20 m. Radii that cannot fit within the map return an
+  empty route before conversion to grid coordinates.
 - Scripted inspection checks the supplied route against the same clearance
   mask as the live planner. The iOS simulator rejected a raw-floor route
   outside that mask. Two alternate runs reached P-004 and CV-003 with their

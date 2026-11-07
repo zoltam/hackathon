@@ -142,6 +142,37 @@ void main() {
         ? 'Generate the local Equipment Room scan first'
         : false,
   );
+
+  test(
+    'larger camera presets preserve the reachable alternate P005 approach',
+    () {
+      final site = Site.fromJson(scan.readAsStringSync());
+      final services = site.objects.where((object) => object.service != null);
+      const alternateStart = (69, 65);
+      final starts = [site.start, alternateStart, (53, 29), (42, 83)];
+      for (final radius in [.2, .3]) {
+        final walkable = site.walkableCells(clearanceMetres: radius).toSet();
+        for (final start in starts) {
+          for (final service in services) {
+            final goal = service.service!;
+            final reason = '${service.objectId} from $start at $radius m';
+            final route = site.route(start, goal, clearanceMetres: radius);
+            if (radius == .2 &&
+                start == alternateStart &&
+                service.objectId == 'boiler-room:red-circulation-pump') {
+              expectRoute(route, start, goal, walkable, reason);
+              expect(route, hasLength(21), reason: reason);
+            } else {
+              expect(route, isEmpty, reason: reason);
+            }
+          }
+        }
+      }
+    },
+    skip: !scan.existsSync()
+        ? 'Generate the local Equipment Room scan first'
+        : false,
+  );
 }
 
 void expectRoute(

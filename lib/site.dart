@@ -132,6 +132,11 @@ class Site {
         !blocked.contains(p);
     if (!allowed(cell)) return false;
     if (radius == 0) return true;
+    // Reject a radius that cannot fit inside the map before converting it
+    // into a grid reach. A finite radius can overflow when divided by cellSize.
+    final edgeX = min(cell.$1, width - 1 - cell.$1) + 0.5;
+    final edgeZ = min(cell.$2, depth - 1 - cell.$2) + 0.5;
+    if (radius > min(edgeX, edgeZ) * cellSize) return false;
     final reach = (radius / cellSize + 0.5).ceil();
     for (var dx = -reach; dx <= reach; dx++) {
       for (var dz = -reach; dz <= reach; dz++) {
