@@ -252,7 +252,8 @@ struct RouteReturnGuidance {
       }
     }
 
-    if distanceSquared <= 0.25 * 0.25 {
+    let rejoinRadius: Float = isActive ? 0.15 : 0.25
+    if distanceSquared <= rejoinRadius * rejoinRadius {
       self = Self()
       trail = [rejoin]
       return []
@@ -2124,8 +2125,9 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     for icon in [returnSymbol, returnDirection] {
       icon.tintColor = .systemOrange
       icon.contentMode = .scaleAspectFit
-      icon.widthAnchor.constraint(equalToConstant: 32).isActive = true
-      icon.heightAnchor.constraint(equalToConstant: 32).isActive = true
+      let size: CGFloat = icon === returnDirection ? 42 : 32
+      icon.widthAnchor.constraint(equalToConstant: size).isActive = true
+      icon.heightAnchor.constraint(equalToConstant: size).isActive = true
     }
     let row = UIStackView(arrangedSubviews: [returnSymbol, labels, returnDirection])
     row.alignment = .center
@@ -2168,16 +2170,13 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
       if !UIAccessibility.isReduceMotionEnabled {
         let pulse = CABasicAnimation(keyPath: "opacity")
         pulse.fromValue = 1
-        pulse.toValue = 0.35
+        pulse.toValue = 0.65
         pulse.duration = 0.55
         pulse.autoreverses = true
         pulse.repeatCount = .infinity
-        returnSymbol.layer.add(pulse, forKey: "return-pulse")
-        pulse.toValue = 0.65
         returnDirection.layer.add(pulse, forKey: "return-pulse")
       }
     } else if !active, !returnBanner.isHidden {
-      returnSymbol.layer.removeAnimation(forKey: "return-pulse")
       returnDirection.layer.removeAnimation(forKey: "return-pulse")
     }
     returnBanner.isHidden = !active
@@ -2189,7 +2188,6 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     routeMap.returnPath = []
     expandedMap?.returnPath = []
     returnBanner.isHidden = true
-    returnSymbol.layer.removeAnimation(forKey: "return-pulse")
     returnDirection.layer.removeAnimation(forKey: "return-pulse")
   }
 

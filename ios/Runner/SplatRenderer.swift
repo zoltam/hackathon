@@ -49,6 +49,7 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
   private let obstacleRendering: ObstacleRendering?
   private var routeBuffer: MTLBuffer?
   private var routeCount = 0
+  private var routeArrowPoints: [SIMD2<Float>] = []
   private var returnBuffer: MTLBuffer?
   private var returnCount = 0
   private let routeCellSize: Float
@@ -158,6 +159,7 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
 
   func setRoute(_ route: [SIMD3<Float>]) {
     let markers = Self.guideMarkers(for: route, cellSize: routeCellSize)
+    routeArrowPoints = markers.filter { $0.w == 0 }.map { SIMD2($0.x, $0.y) }
     routeBuffer = markers.withUnsafeBytes { bytes in
       guard !bytes.isEmpty, let base = bytes.baseAddress else { return nil }
       return view.device?.makeBuffer(bytes: base, length: bytes.count, options: .storageModeShared)
@@ -166,12 +168,14 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
   }
 
   func setReturnPath(_ path: [SIMD2<Float>]) {
-    var markers = Self.guideMarkers(for: path.map { SIMD3($0.x, 0, $0.y) }, cellSize: routeCellSize)
-      .filter { $0.w == 0 }
-    if let end = path.last, let previous = path.dropLast().last(where: { $0 != end }) {
-      let direction = end - previous
-      markers.append(SIMD4(end.x, end.y, atan2(direction.y, direction.x), 0))
+    var joinedPath = path
+    if let rejoin = path.last, let arrow = routeArrowPoints.min(by: {
+      simd_distance_squared($0, rejoin) < simd_distance_squared($1, rejoin)
+    }), arrow != rejoin {
+      joinedPath.append(arrow)
     }
+    let markers = Self.guideMarkers(for: joinedPath.map { SIMD3($0.x, 0, $0.y) }, cellSize: routeCellSize)
+      .filter { $0.w >= 0 }
     returnBuffer = markers.withUnsafeBytes { bytes in
       guard !bytes.isEmpty, let base = bytes.baseAddress else { return nil }
       return view.device?.makeBuffer(bytes: base, length: bytes.count, options: .storageModeShared)
@@ -576,7 +580,7 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
     float border = .12;
     if (in.ribbonLength > 0) {
       distance = length(float2(p.x, max(abs(p.y) - in.ribbonLength * .5, 0.0))) - .036;
-      ink = float3(.27, .78, .64);
+      ink = in.colorMode > 0 ? float3(1.0, .57, .16) : float3(.27, .78, .64);
       float aa = clamp(fwidth(distance), .005, .018);
       float alpha = 1.0 - smoothstep(-aa, aa, distance);
       return float4(ink * alpha, alpha);
