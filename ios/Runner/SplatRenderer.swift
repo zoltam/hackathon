@@ -532,7 +532,7 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
     float2 offset = local * extent;
     const bool arrow = marker.w == 0.0;
     if (arrow) { offset.x *= 1.08; }
-    float brightness = arrow && wavePhase >= 0.0 ? .5 + .5 * sin(float(index) * .85 - wavePhase) : .5;
+    float brightness = arrow && wavePhase >= 0.0 ? .5 + .5 * sin(float(index) * 1.70 - wavePhase) : -1.0;
     float scale = marker.w > 0 ? cellSize : max(cellSize, .18);
     float2 p = marker.xy + (right * offset.x + forward * offset.y) * scale;
     return { u.viewProjection * float4(p.x, .035, p.y, 1),
@@ -562,7 +562,8 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
     } else {
       float2 tip = float2(0, .62);
       distance = guideSegment(float2(abs(p.x), p.y), tip, float2(.59, -.30)) - .17;
-      ink = mix(float3(.32, .91, .70), float3(.42, 1.0, .83), in.brightness);
+      ink = in.brightness < 0.0 ? float3(.37, .955, .765) :
+        mix(float3(.20, .68, .54), float3(.68, 1.0, .94), in.brightness);
       border = .08;
     }
     float aa = clamp(fwidth(distance), .005, border);
