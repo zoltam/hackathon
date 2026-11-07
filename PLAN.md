@@ -86,6 +86,23 @@ A further frozen DINOv2 patch-pooling experiment kept the box and context
 features separate. Its best nonzero RGB precision was 61.1% for A and
 50.0% for B on the same validation proposal set. It was rejected.
 
+## Rear vessel label audit
+
+Eight fresh RGB views from archived test-only cells revealed that the
+semantic labels truncated the visible lower shell. Two reviewers
+reconciled manual boxes before replay. The corrected boxes extend
+99–166 px lower. The original multiview point selection retained
+94 of 362 lower-shell red/opaque candidates in the 0.371–0.60 m band
+and 1,140 of 1,475 in the 1.20–1.445 m band. The later 18-point cleanup
+did not remove the missing lower edge.
+
+At the existing 0.76 threshold, the shipped RF-DETR weights found 7/8
+manual labels with zero extra boxes in both RGB and projected replay.
+The suite contains positives only and is exploratory. Keep the rear
+vessel disabled pending train-label repair and independent hard negatives
+with only the front vessel visible. Scene bounds and detector annotation
+memberships are separate contracts.
+
 ## Additional approaches and continuous clearance
 
 The higher-resolution simulator build also passed six alternate journeys:
