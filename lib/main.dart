@@ -278,6 +278,7 @@ class _SiteSimulationState extends State<SiteSimulation> {
               'bounds': object.bounds,
               'service': object.service == null ? null : pair(object.service!),
               'workbookTag': _workbookTag(object, data),
+              'equipmentType': object.equipmentType,
               'syntheticCondition': data?.conditionForObject(
                 object.objectId,
                 equipmentType: object.equipmentType,

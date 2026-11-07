@@ -51,8 +51,8 @@ SURROUNDING_SEEDS = [
     ('rear-red-vessel', 'Rear red pressure vessel', 'vessel', (5.545, 0.371, -3.152), (6.433, 1.445, -2.359)),
     ('doorway-blue-valve', 'Doorway blue inline valve', 'inline_valve', (5.515, 0.824, 2.385), (5.848, 1.033, 2.735)),
     ('front-red-vessel', 'Front red vessel', 'vessel', (4.779, 0.0, -3.087), (5.453, 1.407, -2.363)),
-    ('orange-actuator-a', 'Orange actuator A', 'actuator', (4.399, 1.065, -2.418), (4.497, 1.230, -2.169)),
-    ('orange-actuator-b', 'Orange actuator B', 'actuator', (4.544, 1.084, -2.383), (4.644, 1.249, -2.171)),
+    ('orange-actuator-a', 'Orange actuator A', 'valve_actuator', (4.399, 1.065, -2.418), (4.497, 1.230, -2.169)),
+    ('orange-actuator-b', 'Orange actuator B', 'valve_actuator', (4.544, 1.084, -2.383), (4.644, 1.249, -2.171)),
 ]
 
 

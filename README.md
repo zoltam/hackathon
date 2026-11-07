@@ -259,8 +259,10 @@ workbook classes by increasing health score, breaking ties by asset ID. The
 nearby option considers the remaining scene objects without changing service
 targets. Pumps map to `PROCESS_PUMP`. The inline valve uses `CONTROL_VALVE` as
 its synthetic valve-family mapping. The app shows the exact workbook tag
-alongside the scene name. These workbook identities are synthetic. Override
-it with `--mapping /path/to/mapping.json`, whose JSON object maps scene
+alongside the scene name. The two reviewed orange actuators show their own
+names with synthetic parent-valve records. Nearby assignments prefer the
+healthiest remaining compatible records. These workbook identities are synthetic.
+Override it with `--mapping /path/to/mapping.json`, whose JSON object maps scene
 `object_id` to workbook `asset_id`. Explicit `objectId` or `object_id` values are preferred;
 older objects use `grid:x:z:width:depth`. Regenerate/review the mapping when
 fallback geometry IDs change. Unknown or duplicate IDs are rejected.

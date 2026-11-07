@@ -88,7 +88,7 @@ class AssetData {
     final compatible = switch (equipmentType) {
       null => true,
       'pump' => asset?['asset_class'] == 'PROCESS_PUMP',
-      'valve' => asset?['asset_class'] == 'CONTROL_VALVE',
+      'valve' || 'valve_actuator' => asset?['asset_class'] == 'CONTROL_VALVE',
       _ => false,
     };
     return compatible ? asset : null;

@@ -439,6 +439,34 @@ and reached their matching workbook reports. CV-003 and P-003 passed
 localized three placements, replanned twice, entered a blocked state, and
 recovered the 32-cell route.
 
+### Continuous clearance and parent-valve records
+
+The viewer now measures clearance at the camera's actual position against
+observed floor, equipment footprints, map edges and confirmed crate cells.
+The previous center-cell check could accept a position too close to a
+diagonal obstacle. The native geometry passed 75,944 sampled positions on
+79 planned routes, including crate detours and the 0.20 m alternate P-005 route.
+
+The two orange actuators have distinct valve bodies in the scan. The importer
+associates them with healthy synthetic parent records CV-001 and CV-002 for
+nearby display. Their scene identities and the six existing service assignments
+are preserved. The displayed parent tag describes the demo association.
+
+The 384 px replay trained on the repaired rear-vessel and chair annotations.
+The chair cleanup narrowed 494 boxes and removed 49 false labels from the
+1,829 training images. The native checkpoint replay regressed 11 of the 19
+released RF-DETR outputs at locked thresholds against the shipped typed
+export. The chair's associated validation result moved
+from 75/3/9 to 71/3/13 (true positives / false positives / misses). The candidate
+stayed local.
+
+Subsequent device checks use the iOS simulator. The alternate 2.0 m P-005
+and 6.0 m P-003 scripts reached their service cells and loaded the correct
+reports on the iPhone 17 Pro simulator. R3 reported `Could not create
+inference context`, leaving the recognition condition of both scripts
+unverified in that runtime. All 18 native simulator tests passed. The
+generic iOS release build compiled for later physical-device use.
+
 - The supplied DOCX names the original Industrial Boiler Room PLY. In that
   archive 502,482 of 1,506,136 records pass the structural guard. The team uses
   the complete registered Equipment Room replacement. The scene scale remains

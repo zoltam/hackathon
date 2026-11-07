@@ -20,11 +20,15 @@ struct WalkSite: Decodable {
     let cells: [[Int]]?
     let bounds: [[Float]]?
     let workbookTag: String?
+    let equipmentType: String?
     let syntheticCondition: String?
     let service: [Int]?
 
     var displayName: String {
-      workbookTag.map { "\($0) · \(name)" } ?? name
+      if equipmentType == "valve_actuator", let workbookTag {
+        return "\(name) · synthetic parent \(workbookTag)"
+      }
+      return workbookTag.map { "\($0) · \(name)" } ?? name
     }
 
     func floorBounds(cellSize: Float) -> (min: SIMD2<Float>, max: SIMD2<Float>) {
@@ -76,6 +80,50 @@ struct WalkSite: Decodable {
 
   func cellAt(x: Float, z: Float) -> SIMD2<Int> {
     SIMD2(Int((x / cellSize).rounded(.down)), Int((z / cellSize).rounded(.down)))
+  }
+
+  var occupiedFloor: Set<SIMD2<Int>> {
+    Set(objects.flatMap { object -> [SIMD2<Int>] in
+      if let cells = object.cells {
+        return cells.compactMap { $0.count == 2 ? SIMD2($0[0], $0[1]) : nil }
+      }
+      guard object.width > 0, object.depth > 0 else { return [] }
+      return (object.x..<(object.x + object.width)).flatMap { x in
+        (object.z..<(object.z + object.depth)).map { SIMD2(x, $0) }
+      }
+    })
+  }
+
+  func isClearanceSafePosition(_ position: SIMD2<Float>,
+                               observedFloor: Set<SIMD2<Int>>?,
+                               occupied: Set<SIMD2<Int>>,
+                               additionalBlocked: Set<[Int]> = []) -> Bool {
+    let radius = clearanceMetres ?? 0
+    let extent = SIMD2(Float(width), Float(depth)) * cellSize
+    guard cellSize.isFinite, cellSize > 0, radius.isFinite, radius >= 0,
+          position.x >= 0, position.y >= 0,
+          position.x < extent.x, position.y < extent.y else { return false }
+    func pointWalkable(_ cell: SIMD2<Int>) -> Bool {
+      cell.x >= 0 && cell.x < width && cell.y >= 0 && cell.y < depth &&
+        observedFloor?.contains(cell) != false && !occupied.contains(cell) && !additionalBlocked.contains([cell.x, cell.y])
+    }
+    guard pointWalkable(cellAt(x: position.x, z: position.y)) else { return false }
+    // Allow tangency despite Float rounding in the renderer's metre coordinates.
+    let distance = max(0, radius - 0.000001)
+    guard position.x >= distance, position.y >= distance,
+          extent.x - position.x >= distance, extent.y - position.y >= distance else { return false }
+    if distance == 0 { return true }
+    let lower = cellAt(x: position.x - distance, z: position.y - distance)
+    let upper = cellAt(x: position.x + distance, z: position.y + distance)
+    for x in max(0, lower.x)...min(width - 1, upper.x) {
+      for z in max(0, lower.y)...min(depth - 1, upper.y) {
+        if pointWalkable(SIMD2(x, z)) { continue }
+        let minimum = SIMD2(Float(x), Float(z)) * cellSize
+        let nearest = simd_clamp(position, minimum, minimum + cellSize)
+        if simd_distance_squared(position, nearest) < distance * distance { return false }
+      }
+    }
+    return true
   }
 
   static func isClearanceSafeRoute(_ route: [[Int]], to service: [Int], walkableFloor: [[Int]]) -> Bool {
@@ -384,6 +432,8 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
   private var ready = false
   private var lastMessage: String?
   private var floorCells: Set<SIMD2<Int>>?
+  private lazy var observedFloor = model.floor.map { Set($0.map { SIMD2($0[0], $0[1]) }) }
+  private lazy var occupiedFloor = model.occupiedFloor
   private enum Motion: Hashable { case forward, backward }
   private var keys: [UIKeyboardHIDUsage: Motion] = [:]
   private var buttons = Set<Motion>()
@@ -1231,7 +1281,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     let direction: Float = (motions.contains(.forward) ? 1 : 0) -
       (motions.contains(.backward) ? 1 : 0)
     guard direction != 0,
-          isWalkable(cellAt(x: manualPosition.x, z: manualPosition.z)) else { return }
+          isWalkablePosition(x: manualPosition.x, z: manualPosition.z) else { return }
     let back = pose.columns.2
     let heading = SIMD2(-back.x, -back.z)
     guard simd_length(heading) > 0.1 else { return }
@@ -1242,8 +1292,8 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     for _ in 0..<steps {
       let x = manualPosition.x + step.x
       let z = manualPosition.z + step.y
-      if isWalkable(cellAt(x: x, z: manualPosition.z)) { manualPosition.x = x }
-      if isWalkable(cellAt(x: manualPosition.x, z: z)) { manualPosition.z = z }
+      if isWalkablePosition(x: x, z: manualPosition.z) { manualPosition.x = x }
+      if isWalkablePosition(x: manualPosition.x, z: z) { manualPosition.z = z }
     }
   }
 
@@ -1254,6 +1304,12 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
   private func isWalkable(_ cell: SIMD2<Int>) -> Bool {
     cell.x >= 0 && cell.y >= 0 && cell.x < model.width && cell.y < model.depth &&
       floorCells?.contains(cell) != false
+  }
+
+  private func isWalkablePosition(x: Float, z: Float) -> Bool {
+    model.isClearanceSafePosition(SIMD2(x, z), observedFloor: observedFloor,
+                                  occupied: occupiedFloor, additionalBlocked: confirmedBlockedCells) &&
+      isWalkable(cellAt(x: x, z: z))
   }
 
   private func updateNearbyEquipment(at position: SIMD4<Float>, viewProjection: simd_float4x4) {
@@ -1543,13 +1599,14 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
 
   private func updateWalkStatus(at position: SIMD4<Float>) {
     let cell = cellAt(x: position.x, z: position.z)
-    if replanAfterRetreat, !replanPending, isWalkable(cell),
+    let walkable = isWalkablePosition(x: position.x, z: position.z)
+    if replanAfterRetreat, !replanPending, walkable,
        let center = plannedObstacleCenter, let placed = obstaclePlacedAt {
       replanAfterRetreat = false
       replanAroundCrate(at: center, from: cell, placed: placed)
     }
     arrived = false
-    if !isWalkable(cell) {
+    if !walkable {
       if model.keyControls && cell == SIMD2(model.start[0], model.start[1]) {
         updateDisplay("Start position lacks the selected clearance. Close and reduce the camera radius.")
       } else if model.keyControls && replanAfterRetreat {

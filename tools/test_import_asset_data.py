@@ -100,6 +100,20 @@ class ImportTests(unittest.TestCase):
         self.assertEqual(self.run_export(include_nearby=True)['mappings'],
                          {'grid:1:2:1:1': 'B'})
 
+    def test_reviewed_actuator_maps_to_a_healthy_parent_valve(self):
+        self.book['Asset_Master'].values.extend([
+            ('D', 'CONTROL_VALVE'), ('E', 'CONTROL_VALVE'),
+        ])
+        self.book['Current_State'].values.extend([('D', 96), ('E', 59)])
+        self.site['objects'] += [
+            dict(objectId='service-valve', equipmentType='valve', service=[0, 1]),
+            dict(objectId='reviewed-actuator', equipmentType='valve_actuator'),
+            dict(objectId='uncertain-actuator', equipmentType='actuator'),
+        ]
+        self.assertEqual(self.run_export(include_nearby=True)['mappings'], {
+            'grid:1:2:1:1': 'B', 'service-valve': 'C', 'reviewed-actuator': 'D',
+        })
+
 
 if __name__ == '__main__':
     unittest.main()

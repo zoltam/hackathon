@@ -6,6 +6,15 @@ import simd
 @testable import Runner
 
 class RunnerTests: XCTestCase {
+  func testValveActuatorShowsSyntheticParentTagSeparately() throws {
+    let json = """
+      {"name":"Orange actuator A","equipmentType":"valve_actuator",
+       "x":0,"z":0,"width":1,"depth":1,"height":1,"workbookTag":"CV-001"}
+      """
+    let block = try JSONDecoder().decode(WalkSite.Block.self, from: Data(json.utf8))
+    XCTAssertEqual(block.displayName, "Orange actuator A · synthetic parent CV-001")
+  }
+
   func testSupplementalDecoderRanksBackgroundBeforeDroppingItAndClipsBoxes() throws {
     let boxes = try MLMultiArray(shape: [1, 2, 4], dataType: .float32)
     let logits = try MLMultiArray(shape: [1, 2, 3], dataType: .float32)
@@ -88,6 +97,43 @@ class RunnerTests: XCTestCase {
     map.setRoute([[0, 0], [0, 1], [1, 1]])
     XCTAssertEqual(map.route, [[0, 0], [0, 1], [1, 1]])
     XCTAssertNotEqual(try XCTUnwrap(snapshot()), original)
+  }
+
+  private func clearanceSite(_ radius: String) throws -> WalkSite {
+    let json = """
+      {"name":"Clearance","keyControls":true,"width":126,"depth":129,"cellSize":0.1,
+       "start":[67,63],"route":[],"clearanceMetres":\(radius),
+       "objects":[{"name":"Obstacle","x":65,"z":61,"width":1,"depth":1,"height":1}]}
+      """
+    return try JSONDecoder().decode(WalkSite.self, from: Data(json.utf8))
+  }
+
+  func testContinuousClearanceRejectsOffCentrePositionsInSafeCells() throws {
+    let cases: [(String, SIMD2<Float>, SIMD2<Float>)] = [
+      ("0.2", SIMD2(6.75, 6.35), SIMD2(6.75, 6.301)),
+      ("0.3", SIMD2(6.85, 6.45), SIMD2(6.801, 6.401)),
+    ]
+    for (radius, center, nearCorner) in cases {
+      let site = try clearanceSite(radius)
+      XCTAssertEqual(site.cellAt(x: center.x, z: center.y), site.cellAt(x: nearCorner.x, z: nearCorner.y))
+      XCTAssertTrue(site.isClearanceSafePosition(center, observedFloor: nil, occupied: site.occupiedFloor))
+      XCTAssertFalse(site.isClearanceSafePosition(nearCorner, observedFloor: nil, occupied: site.occupiedFloor))
+      XCTAssertFalse(site.isClearanceSafePosition(nearCorner, observedFloor: nil,
+                                                  occupied: [], additionalBlocked: [[65, 61]]))
+      let observed = Set((62...72).flatMap { x in (58...69).map { SIMD2(x, $0) } }).subtracting([SIMD2(65, 61)])
+      XCTAssertFalse(site.isClearanceSafePosition(nearCorner, observedFloor: observed, occupied: []))
+    }
+  }
+
+  func testContinuousClearanceAllowsTangencyAndLegacyPointRouting() throws {
+    let site = try clearanceSite("0.2")
+    XCTAssertTrue(site.isClearanceSafePosition(SIMD2(0.2, 1), observedFloor: nil, occupied: []))
+    XCTAssertFalse(site.isClearanceSafePosition(SIMD2(0.1999, 1), observedFloor: nil, occupied: []))
+    XCTAssertTrue(site.isClearanceSafePosition(SIMD2(6.8, 6.15), observedFloor: nil, occupied: site.occupiedFloor))
+    XCTAssertFalse(site.isClearanceSafePosition(SIMD2(6.7999, 6.15), observedFloor: nil, occupied: site.occupiedFloor))
+    let old = try clearanceSite("null")
+    XCTAssertTrue(old.isClearanceSafePosition(SIMD2(0.01, 1), observedFloor: nil, occupied: []))
+    XCTAssertFalse(old.isClearanceSafePosition(SIMD2(0.01, 1), observedFloor: [], occupied: []))
   }
 
   func testArrivalAcceptsTheApproachButNotOtherNearbyCells() throws {

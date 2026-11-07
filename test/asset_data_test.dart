@@ -164,6 +164,25 @@ void main() {
     expect(data.conditionForObject('object-1', equipmentType: 'valve'), isNull);
   });
 
+  test('uses a parent valve record for a reviewed valve actuator', () {
+    final source = bundle();
+    final tables = source['tables'] as Map;
+    final asset = (tables['Asset_Master'] as List).single as Map;
+    asset['tag'] = 'CV-001';
+    asset['asset_class'] = 'CONTROL_VALVE';
+    final data = AssetData.fromJson(jsonEncode(source));
+
+    expect(
+      data.tagForObject('object-1', equipmentType: 'valve_actuator'),
+      'CV-001',
+    );
+    expect(data.tagForObject('object-1', equipmentType: 'actuator'), isNull);
+    expect(
+      data.tagForObject('object-1', equipmentType: 'inline_valve'),
+      isNull,
+    );
+  });
+
   test('missing evidence is explicit and confidence is not manufactured', () {
     final json = jsonDecode(jsonEncode(bundle())) as Map<String, dynamic>;
     final tables = json['tables'] as Map;

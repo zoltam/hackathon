@@ -20,6 +20,7 @@ SHEETS = (
 ASSET_CLASS_BY_EQUIPMENT_TYPE = {
     'pump': 'PROCESS_PUMP',
     'valve': 'CONTROL_VALVE',
+    'valve_actuator': 'CONTROL_VALVE',
 }
 
 
@@ -81,8 +82,16 @@ def export(workbook, site, mappings=None, *, include_nearby=False):
         mappings = {}
         for obj in objects:
             asset_class = ASSET_CLASS_BY_EQUIPMENT_TYPE.get(obj.get('equipmentType'))
-            if asset_class and by_class[asset_class]:
-                mappings[object_id(obj)] = by_class[asset_class].popleft()
+            if not asset_class or not by_class[asset_class]:
+                continue
+            available = by_class[asset_class]
+            if obj.get('service') is not None:
+                asset_id = available.popleft()
+            else:
+                # Nearby synthetic records illustrate normal operation first.
+                asset_id = max(available, key=lambda a: states[a].get('health_score', 101))
+                available.remove(asset_id)
+            mappings[object_id(obj)] = asset_id
     if set(mappings) - set(ids):
         raise ValueError('Mapping contains scene objects outside the selected mapping scope')
     if set(mappings.values()) - assets.keys():
