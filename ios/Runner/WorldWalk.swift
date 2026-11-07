@@ -237,18 +237,24 @@ struct RouteReturnGuidance {
       self = Self()
       return []
     }
+    var rejoin = start
     var distanceSquared = simd_distance_squared(position, start)
     for (a, b) in zip(route, route.dropFirst()) {
       let segment = b - a
       let lengthSquared = simd_length_squared(segment)
       guard lengthSquared > 0 else { continue }
       let fraction = min(1, max(0, simd_dot(position - a, segment) / lengthSquared))
-      distanceSquared = min(distanceSquared, simd_distance_squared(position, a + fraction * segment))
+      let point = a + fraction * segment
+      let candidateDistance = simd_distance_squared(position, point)
+      if candidateDistance < distanceSquared {
+        rejoin = point
+        distanceSquared = candidateDistance
+      }
     }
 
-    if distanceSquared <= 0.8 * 0.8 {
+    if distanceSquared <= 0.25 * 0.25 {
       self = Self()
-      trail = [position]
+      trail = [rejoin]
       return []
     }
     if isActive {
@@ -263,7 +269,7 @@ struct RouteReturnGuidance {
     if let last = trail.last, simd_distance_squared(position, last) >= 0.35 * 0.35 {
       trail.append(position)
     }
-    guard distanceSquared >= 2.0 * 2.0 else {
+    guard distanceSquared >= 1.5 * 1.5 else {
       departedAt = nil
       return []
     }
@@ -2167,9 +2173,12 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
         pulse.autoreverses = true
         pulse.repeatCount = .infinity
         returnSymbol.layer.add(pulse, forKey: "return-pulse")
+        pulse.toValue = 0.65
+        returnDirection.layer.add(pulse, forKey: "return-pulse")
       }
     } else if !active, !returnBanner.isHidden {
       returnSymbol.layer.removeAnimation(forKey: "return-pulse")
+      returnDirection.layer.removeAnimation(forKey: "return-pulse")
     }
     returnBanner.isHidden = !active
   }
@@ -2181,6 +2190,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     expandedMap?.returnPath = []
     returnBanner.isHidden = true
     returnSymbol.layer.removeAnimation(forKey: "return-pulse")
+    returnDirection.layer.removeAnimation(forKey: "return-pulse")
   }
 
   private func updateWalkStatus(at position: SIMD4<Float>) {

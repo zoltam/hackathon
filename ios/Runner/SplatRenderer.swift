@@ -166,8 +166,12 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
   }
 
   func setReturnPath(_ path: [SIMD2<Float>]) {
-    let markers = Self.guideMarkers(for: path.map { SIMD3($0.x, 0, $0.y) }, cellSize: routeCellSize)
+    var markers = Self.guideMarkers(for: path.map { SIMD3($0.x, 0, $0.y) }, cellSize: routeCellSize)
       .filter { $0.w == 0 }
+    if let end = path.last, let previous = path.dropLast().last(where: { $0 != end }) {
+      let direction = end - previous
+      markers.append(SIMD4(end.x, end.y, atan2(direction.y, direction.x), 0))
+    }
     returnBuffer = markers.withUnsafeBytes { bytes in
       guard !bytes.isEmpty, let base = bytes.baseAddress else { return nil }
       return view.device?.makeBuffer(bytes: base, length: bytes.count, options: .storageModeShared)
