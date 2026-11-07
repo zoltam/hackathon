@@ -318,7 +318,7 @@ class _SiteSimulationState extends State<SiteSimulation> {
   bool _moved = false;
   bool _keyControls = false;
   bool _obstacleDemo = false;
-  late double _clearanceMetres =
+  late final double _clearanceMetres =
       widget.site.personNavigation?.radiusMetres ??
       (widget.site.originShift == null ? 0.2 : 0.1);
 
@@ -476,28 +476,6 @@ class _SiteSimulationState extends State<SiteSimulation> {
             onChanged: (value) => setState(() => _obstacleDemo = value),
           ),
         if (person == null)
-          DropdownButtonFormField<double>(
-            initialValue: _clearanceMetres,
-            decoration: const InputDecoration(
-              labelText: 'Virtual camera radius',
-            ),
-            items: const [
-              DropdownMenuItem(
-                value: 0.1,
-                child: Text('0.10 m · virtual camera'),
-              ),
-              DropdownMenuItem(value: 0.2, child: Text('0.20 m · camera')),
-              DropdownMenuItem(value: 0.3, child: Text('0.30 m · camera')),
-            ],
-            onChanged: (radius) {
-              if (radius == null) return;
-              setState(() {
-                _clearanceMetres = radius;
-                _journey = _createJourney();
-              });
-            },
-          ),
-        if (person == null)
           const Text(
             'Camera height 1.50 m · not a standing-person clearance check.',
           )
@@ -514,7 +492,7 @@ class _SiteSimulationState extends State<SiteSimulation> {
         ))
           Text(
             person == null
-                ? 'Start position lacks the selected clearance. Reduce the radius to move from this start.'
+                ? 'Start position lacks virtual camera clearance.'
                 : 'Start position lacks walking-person clearance.',
           ),
         if (person == null)

@@ -330,7 +330,7 @@ void main() {
     );
   });
 
-  testWidgets('blocked start stays explicit and clearance can be reduced', (
+  testWidgets('blocked start stays explicit with the default camera radius', (
     tester,
   ) async {
     final site = Site.fromJson('''{
@@ -362,40 +362,16 @@ void main() {
       isNotNull,
     );
     expect(
-      find.text(
-        'Start position lacks the selected clearance. Reduce the radius to move from this start.',
-      ),
+      find.text('Start position lacks virtual camera clearance.'),
       findsOneWidget,
     );
     await tester.tap(find.text('Walk inside the 3D model'));
     await tester.pumpAndSettle();
     expect(payload!['walkableFloor'], isEmpty);
     expect(payload!['route'], isEmpty);
-    await tester.tap(find.text('0.20 m · camera'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('0.10 m · virtual camera').last);
-    await tester.pumpAndSettle();
-    expect(
-      tester
-          .widget<FilledButton>(
-            find.widgetWithText(FilledButton, 'Walk inside the 3D model'),
-          )
-          .onPressed,
-      isNotNull,
-    );
-    await tester.tap(find.text('Walk inside the 3D model'));
-    await tester.pump();
-    await tester.pumpAndSettle();
-    expect(payload!['clearanceMetres'], .1);
+    expect(find.byType(DropdownButtonFormField<double>), findsNothing);
+    expect(payload!['clearanceMetres'], .2);
     expect(payload!['arrivalRadiusMetres'], .3);
-    expect(payload!['route'], hasLength(5));
-    expect(payload!['walkableFloor'], [
-      [0, 0],
-      [1, 0],
-      [2, 0],
-      [3, 0],
-      [4, 0],
-    ]);
     expect((payload!['objects'] as List).first['object_id'], 'test-target');
   });
 

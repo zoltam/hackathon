@@ -382,7 +382,7 @@ the 3.10 m pump route. The picture uses the same registered coordinates,
 equipment catalogue and full-scan asset as the app. The overhead illustration
 cuts geometry above 1.35 m to reveal the floor.
 
-The **Virtual camera radius** selector checks obstacles, unknown floor and map
+The virtual camera uses a fixed radius to check obstacles, unknown floor and map
 boundaries. If a target has no route, free exploration remains available.
 A blocked starting point is reported explicitly.
 Physical AR movement cannot be constrained; leaving the mask displays a warning.

@@ -2011,7 +2011,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     arrived = false
     if !walkable {
       if model.keyControls && cell == SIMD2(model.start[0], model.start[1]) {
-        updateDisplay("Start position lacks the selected clearance. Close and reduce the camera radius.")
+        updateDisplay("Start position lacks virtual camera clearance.")
       } else if model.keyControls && replanAfterRetreat {
         updateDisplay("The crate blocks this position. Reset alignment to resume from the start.")
       } else {
