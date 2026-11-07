@@ -37,8 +37,10 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
   var frameCounter: FrameCounter?
   var onFrameReady: ((simd_float4x4, simd_float4x4, CGSize) -> Void)?
   var obstacleCenter: SIMD2<Float>?
-  private var renderLimit: CGFloat = 1200
+  private static let renderLimits: [CGFloat] = [900, 1200, 1440, 1800]
+  private var qualityLevel = renderLimits.count - 1
   private var slowFrames = 0
+  private var fastFrames = 0
   private let queue: MTLCommandQueue
   private let pipeline: MTLRenderPipelineState
   private let floorPipeline: MTLRenderPipelineState
@@ -190,7 +192,7 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
     let size = view.bounds.size
     guard size.width > 0, size.height > 0,
           inFlight.wait(timeout: .now()) == .success else { return }
-    let ratio = min(view.contentScaleFactor, renderLimit / max(size.width, size.height))
+    let ratio = min(view.contentScaleFactor, Self.renderLimits[qualityLevel] / max(size.width, size.height))
     let dimensions = CGSize(width: (size.width * ratio).rounded(), height: (size.height * ratio).rounded())
     if view.drawableSize != dimensions { view.drawableSize = dimensions }
     guard let pass = view.currentRenderPassDescriptor, let drawable = view.currentDrawable,
@@ -228,7 +230,8 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
     }
     encoder.endEncoding()
     vision.capture(drawable.texture, command: command,
-                   frame: RenderedVision.Frame(pose: pose, projection: projection, timestamp: frame.timestamp))
+                   frame: RenderedVision.Frame(pose: pose, projection: projection, timestamp: frame.timestamp,
+                                               sourceSize: SIMD2(drawable.texture.width, drawable.texture.height)))
     if let routeBuffer {
       // Draw guidance after the vision readback, using the same camera and drawable.
       let guidePass = MTLRenderPassDescriptor()
@@ -254,14 +257,25 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
       frameCounter?.recordCompletion(at: now)
       DispatchQueue.main.async { [weak self] in
         guard let self else { return }
-        if self.renderLimit > 900 {
-          self.slowFrames = now - frame.timestamp > 0.16 ? self.slowFrames + 1 : 0
-          if self.slowFrames >= 3 { self.renderLimit = 900 }
-        }
+        self.adjustRenderQuality(frameAge: now - frame.timestamp)
         self.onFrameReady?(pose, projection, size)
       }
     }
     command.commit()
+  }
+
+  private func adjustRenderQuality(frameAge: CFTimeInterval) {
+    slowFrames = frameAge > 0.12 ? slowFrames + 1 : 0
+    fastFrames = frameAge < 0.04 ? fastFrames + 1 : 0
+    if slowFrames >= 3, qualityLevel > 0 {
+      qualityLevel -= 1
+    } else if fastFrames >= 180, qualityLevel < Self.renderLimits.count - 1 {
+      qualityLevel += 1
+    } else {
+      return
+    }
+    slowFrames = 0
+    fastFrames = 0
   }
 
   static func guideMarkers(for route: [SIMD3<Float>], cellSize: Float) -> [SIMD4<Float>] {

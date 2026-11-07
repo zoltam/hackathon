@@ -350,6 +350,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     var supplementalSamples = 0
     var supplementalStale = 0
     var supplementalConfirmed = Set<String>()
+    var supplementalSourceSizes = Set<String>()
   }
 
   private let model: WalkSite
@@ -616,6 +617,10 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
         return RenderedVision.matches(detection, to: bounds, viewProjection: viewProjection)
       }
       let confirmed = self.drawDetections(detections, frame: prediction.frame, supplemental: true)
+      if self.journeyStart != nil, let target = self.serviceTarget?.objectId,
+         replacements.contains(target) {
+        self.confirmJourneyTarget(confirmed)
+      }
       #if targetEnvironment(simulator)
       if self.usesSimulatorJourneyDetector, self.journeyStart != nil {
         // This test stream contains only the selected service target.
@@ -627,6 +632,10 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
       }
       #endif
       self.verificationSamples?.supplementalSamples += 1
+      if self.verificationSamples != nil {
+        let size = prediction.frame.sourceSize
+        self.verificationSamples?.supplementalSourceSizes.insert("\(size.x)x\(size.y)")
+      }
       self.verificationSamples?.supplementalConfirmed.formUnion(confirmed)
       if self.verificationPoses != nil, !replacements.isEmpty {
         self.verificationSamples?.raw.formUnion(prediction.detections.map(\.objectID).filter(replacements.contains))
@@ -814,7 +823,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
           return "\(id)@\(tag)"
         }
         print("VALMET_VISION pose=\(pose.id) samples=\(samples.count) raw=\(list(samples.raw)) projected=\(list(samples.projected)) confirmed=\(list(samples.confirmed)) workbook=\(model.hasWorkbook == true) tags=\(list(Set(tags))) missing=\(list(missing)) unexpected=\(list(unexpected)) status=\(passed ? "passed" : "failed")")
-        print("VALMET_SUPPLEMENTAL pose=\(pose.id) samples=\(samples.supplementalSamples) stale=\(samples.supplementalStale) confirmed=\(list(samples.supplementalConfirmed))")
+        print("VALMET_SUPPLEMENTAL pose=\(pose.id) samples=\(samples.supplementalSamples) stale=\(samples.supplementalStale) confirmed=\(list(samples.supplementalConfirmed)) source=\(list(samples.supplementalSourceSizes))")
         fflush(stdout)
         verificationSamples = nil
         verifyCatalogPose(index: index + 1)

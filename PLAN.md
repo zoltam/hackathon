@@ -17,6 +17,8 @@ P-005 is the primary demo. Demonstrate the five other service targets in verific
 - At the 0.10 m default virtual-camera clearance, 2,106 cells connect to all six service approaches. The other 24 walkable cells are disconnected. Planner tests cover shortest routes, alternate starts, larger radii and unreachable cases.
 - RF-DETR simulator journeys passed at least once for each service target. CV-003 and P-003 passed previously missed approaches on retry. P-004's 2.3 m approach confirmed once on retry despite 37 projected detections. History expired by age 32 times and by pose four times. Separating overlay expiry from capture pairing increased confirmed frames from 1 to 32 for P-004 in the simulator. P-003 (6.0 m), CV-003 (3.0 m) and P-005 (2.0 m) also passed on the same build. These are individual simulator runs. R3 fails to create an inference context on the tested iOS 26.5 simulator. RF-DETR journey mode provides separate simulator evidence. Preserve normal iPhone compatibility.
 - On app revision `87cbaa2`, a single iOS 26.5 simulator run confirmed all 20 enabled RF-DETR IDs at their assigned fixed views, with 8–12 fresh samples per view. The entrance negative stayed empty over nine fresh samples. This confirms those runtime examples. The R3 gate failed separately and these views do not estimate precision or recall. The P-005 simulator capture and matching log are ready for private handoff.
+- The same app build passed P-001 (3.4 m) and P-002 (2.9 m) after the pairing fix, completing simulator runs for all six service targets on that build. On P-005, the simulator UI opened the report for ASSET-017, showed the next check at Current_State!18 and matching event at Alarms_Events!249, and returned to the same arrived route on Close.
+- R3 isolation reproduced the feature mismatch with identical 299×299 BGRA input bytes. The two positive images produced 1 and 6 NMS rows on Mac and zero in the simulator. Feeding Mac features to the simulator head recovered both results. Feeding simulator features to the Mac head reproduced the misses. The discrepancy is isolated to the platform VisionFeaturePrint stage for these fixtures.
 - Excel import preserves workbook SHA and worksheet rows. Six service targets have compatible synthetic records. CV-001 and CV-002 are additional nearby parent-valve mappings. The app retrieves supplied evidence and shows row citations beside the next check. The explanation is deterministic. The workbook's full 14-day CSV is unavailable, so use its included 4,320 telemetry rows.
 
 | Tag | Scene object | Passing simulator start | Distance |
@@ -28,6 +30,32 @@ P-005 is the primary demo. Demonstrate the five other service targets in verific
 | P-005 | Red circulation pump | `[69,65]` | 2.0 m |
 | CV-003 | Blue inline valve | `[88,67]` | 0.9 m |
 
+## Render quality
+
+The app now starts with an 1,800 px long edge and steps down through 1,440,
+1,200 and 900 when completed frames stay slow. Sustained fast frames recover
+quality. The previous cap was 1,200 and could fall permanently to 900.
+Detection captures the clean render before drawing route guidance. The model
+keeps its existing 384 × 384 input contract.
+
+On iOS 26.5 simulator, all 20 approved RF-DETR fixed views confirmed with
+828 × 1,800 source frames and the negative view stayed empty. The 2.0 m
+P-005 route passed with 54 confirmed samples and the correct report. A
+15-second moving-view benchmark measured 27.60 GPU FPS and 4.00 Hz RF-DETR
+with 53 current and seven stale results. R3 remained unavailable there.
+The generic iOS release build passed. Visual improvement varies by the
+detail and visibility captured in the source scan.
+All six service targets passed on the same higher-resolution app build.
+The additional runs covered P-001 (3.4 m), P-002 (2.9 m), P-003 (6.0 m),
+P-004 (2.3 m) and CV-003 (3.0 m). Each confirmed the target, arrived
+and displayed the matching workbook report and nearby mapped equipment.
+
+A simulator-only evaluation of an independently scheduled RF-DETR capture
+deadline raised sample rate from 3.93–4.00 Hz to 4.27–4.33 Hz across two
+15-second runs per implementation. The current-result age p95 increased
+from 230–243 ms to 271–281 ms. The experiment was reverted. The app retains
+the original scheduler and higher render quality.
+
 ## Orange-actuator model comparison
 
 The 259-view validation set contains 26 A and 25 B annotations. At the locked
@@ -36,8 +64,10 @@ RGB thresholds (0.79 A, 0.72 B), the current typed RF-DETR export scored
 same fine-tuned checkpoint scored 10/0/16 and 12/1/13. DINOv2 with a trained
 linear head and frozen backbone, and pretrained DISK + LightGlue, re-ranked
 the same 1,662 archived proposals. Neither produced a usable RGB threshold
-at 95% precision. This compares the tested pipelines, including their
-preprocessing and adaptation choices.
+at 95% precision. Three fixed epochs of DINOv2 last-block and head
+fine-tuning also failed the precision gate. LightGlue supports fine-tuning
+with correspondence supervision, which this box-labeled screen did not use.
+The comparison includes the tested preprocessing and adaptation choices.
 
 Keep the current app export. A validation-only follow-up with the same
 detector and four fixed overlapping RGB crops improved to 13/0/13 and
@@ -45,6 +75,82 @@ detector and four fixed overlapping RGB crops improved to 13/0/13 and
 extra inference cost has not been verified in the app. No candidate was
 promoted. Evaluate model fine-tuning only against frozen splits and require
 new independent views before release.
+A fresh three-cell RGB pilot bypassed the projected-box overlap filter.
+None of the three views showed both actuator housings and their own
+connectors clearly. The same four-crop replay for the rear vessel at the
+locked 0.76 threshold retained 25 true positives and added one false
+positive. It was rejected.
+A later held-out-from-training A/B pilot used two previously archived
+test cells with fresh views. Both full-frame and four-crop replays
+found 3/3 of each ID with no false positives. It had no usable reverse
+pair and did not qualify either ID.
+A further frozen DINOv2 patch-pooling experiment kept the box and context
+features separate. Its best nonzero RGB precision was 61.1% for A and
+50.0% for B on the same validation proposal set. It was rejected.
+
+## Rear vessel label audit
+
+Eight fresh RGB views from archived test-only cells revealed that the
+semantic labels truncated the visible lower shell. Two reviewers
+reconciled manual boxes before replay. The corrected boxes extend
+99–166 px lower. The original multiview point selection retained
+94 of 362 lower-shell red/opaque candidates in the 0.371–0.60 m band
+and 1,140 of 1,475 in the 1.20–1.445 m band. The later 18-point cleanup
+did not remove the missing lower edge.
+
+At the existing 0.76 threshold, the shipped RF-DETR weights found 7/8
+manual labels with zero extra boxes in both RGB and projected replay.
+The suite contains positives only and is exploratory. Keep the rear
+vessel disabled pending train-label repair and independent hard negatives
+with only the front vessel visible. Scene bounds and detector annotation
+memberships are separate contracts.
+
+## Additional approaches and continuous clearance
+
+The higher-resolution simulator build also passed six alternate journeys:
+P-001 and P-002 from `[96,36]` (4.0 and 3.7 m), P-003 and P-004 from
+`[42,83]` (7.5 and 3.6 m), P-005 from `[66,92]` (1.8 m), and CV-003 from
+`[96,36]` (3.6 m). Each confirmed the target and correct workbook tag,
+arrived, and displayed nearby mapped equipment.
+
+A native audit derived the entrance component from the app's exact
+`site.json` bytes. It checked all 3,860 unique cardinal edges in the
+2,106-cell component against the modeled obstacle rectangles and map
+boundary over the full length of each edge. All six service cells were
+reachable. Minimum modeled clearance was 0.15 m at a required 0.10 m.
+This covers the static camera grid, separate from the simulator vision
+and arrival checks.
+
+## Blue inline valve handoff
+
+At the locked 0.814663589 threshold, RF-DETR improved the projected room
+archive from 61/2/1 to 62/0/0 (TP/FP/FN). The original walking archive
+remained 7/0/0, one positive below the old support minimum. In ten new
+views from archived test cells disjoint from audited training and
+validation, RF-DETR improved from 4/2/6 to 10/0/0 and stayed empty in
+both target-absent controls.
+
+A separately frozen walking extension in nine of those test cells
+supplied 72 moving frames. At the planned 125 ms cadence, RF-DETR
+confirmed all nine clips using two consecutive observations. The overlay
+scored 63/0/9, with each missed frame the first in its clip. R3 confirmed
+four clips. These share the static test cells and the replay measures
+capture-time pairing, separate from real-time simulator inference.
+
+The app now uses RF-DETR for CV-003 with the existing R3 fallback.
+The regular simulator pipeline confirmed CV-003, arrived on the 3.0 m
+route and showed its workbook report. The 21 enabled RF-DETR IDs passed
+their fixed views and the entrance stayed empty. P-005 stays assigned
+to R3 and passed the simulator RF-DETR journey regression separately.
+The total enabled catalog stays at 30 of 33.
+On published revision `ff8d154`, all six representative journeys passed
+again, including the difficult starts and P-005. This matrix uses the
+simulator RF-DETR backend and is separate from the regular CV-003 run.
+
+The right blue actuator remains assigned to R3. RF-DETR improved its
+walking result from 19/1/10 to 23/0/6, but the room archive gained one
+false positive in a target-absent view.
+
 
 ## Ownership
 
@@ -73,6 +179,21 @@ Agree before changing catalog IDs, bounds, coordinate transforms, workbook schem
 4. **Submit.** Mac supplies the tested revision, P-005 capture and measured limitations. Linux assembles the video, 5–8 slides, technical note and source package, verifies the current submission form and coordinates delivery. Both confirm the claims match the evidence before submission. The previous event schedule listed Sunday 8 November at 10:00 Finnish time. Confirm in the organizer portal.
 
 The release checkpoint is a verified stable build. Full completion also requires reliable recognition for all 33, all supported service routes and the grounded end-to-end workflow. Keep any unmet gate explicit in the handoff.
+
+## Repeat the simulator service check
+
+From the repository root, with the optimized app installed on a booted
+iOS simulator, run:
+
+```sh
+python3 tools/verify_simulator_service_routes.py <simulator-udid> <new-log-folder>
+```
+
+This checks the six named targets, including the three difficult starts,
+and requires the matching workbook tag, nearby mapped equipment, target
+confirmation and arrival. It uses the RF-DETR simulator journey backend.
+The script defines the tested starts and saves each route result. The planner
+suite covers grid reachability.
 
 ## Goal prompts
 

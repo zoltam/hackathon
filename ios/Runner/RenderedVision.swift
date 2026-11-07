@@ -46,6 +46,7 @@ final class RenderedVision {
     let pose: simd_float4x4
     let projection: simd_float4x4
     let timestamp: CFTimeInterval
+    var sourceSize: SIMD2<Int> = .zero
 
     func matchesPose(_ other: simd_float4x4) -> Bool {
       simd_distance(pose.columns.3, other.columns.3) <= 0.16 &&
@@ -180,7 +181,7 @@ final class RenderedVision {
         topK > 0 && !approvedObjectIDs.isEmpty &&
         approvedObjectIDs.isSubset(of: labels) &&
         primaryReplacements.count == (replacesPrimaryObjectIDs?.count ?? 0) &&
-        primaryReplacements.isSubset(of: ["boiler-room:middle-blue-actuator"]) &&
+        primaryReplacements.isSubset(of: ["boiler-room:middle-blue-actuator", "boiler-room:blue-inline-valve"]) &&
         approvedObjectIDs.intersection(primaryIDs) == primaryReplacements
     }
 
