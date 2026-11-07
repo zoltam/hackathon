@@ -1,6 +1,7 @@
 import CoreImage
 import CoreImage.CIFilterBuiltins
 import MetalKit
+import UIKit
 import simd
 
 final class SplatRenderer: NSObject, MTKViewDelegate {
@@ -265,10 +266,13 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
       }
       if let guide {
         var cellSize = routeCellSize
+        var wavePhase: Float = UIAccessibility.isReduceMotionEnabled
+          ? -1 : Float(frame.timestamp.truncatingRemainder(dividingBy: 3)) * (2 * .pi / 3)
         guide.setRenderPipelineState(routePipeline)
         guide.setVertexBuffer(routeBuffer, offset: 0, index: 0)
         guide.setVertexBytes(&cellSize, length: MemoryLayout<Float>.size, index: 1)
         guide.setVertexBytes(&uniforms, length: MemoryLayout<Uniforms>.stride, index: 2)
+        guide.setVertexBytes(&wavePhase, length: MemoryLayout<Float>.size, index: 3)
         guide.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4, instanceCount: routeCount)
         if separateGuide { guide.endEncoding() }
       }
@@ -512,22 +516,27 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
     float4 position [[position]];
     float2 local;
     float ribbonLength [[flat]];
+    float brightness [[flat]];
   };
 
   vertex GuidePixel guideVertex(uint corner [[vertex_id]], uint index [[instance_id]],
                                 const device float4 *markers [[buffer(0)]],
                                 constant float &cellSize [[buffer(1)]],
-                                constant Uniforms &u [[buffer(2)]]) {
+                                constant Uniforms &u [[buffer(2)]],
+                                constant float &wavePhase [[buffer(3)]]) {
     float4 marker = markers[index];
     float2 forward = float2(cos(marker.z), sin(marker.z));
     float2 right = float2(-forward.y, forward.x);
     float2 local = float2(corner & 1, (corner >> 1) & 1) * 2.0 - 1.0;
     float2 extent = marker.w > 0 ? float2(.11, marker.w * .5 + .11) : float2(.43);
     float2 offset = local * extent;
+    const bool arrow = marker.w == 0.0;
+    if (arrow) { offset.x *= 1.08; }
+    float brightness = arrow && wavePhase >= 0.0 ? .5 + .5 * sin(float(index) * .85 - wavePhase) : .5;
     float scale = marker.w > 0 ? cellSize : max(cellSize, .18);
     float2 p = marker.xy + (right * offset.x + forward * offset.y) * scale;
     return { u.viewProjection * float4(p.x, .035, p.y, 1),
-             marker.w > 0 ? offset : local, marker.w };
+             marker.w > 0 ? offset : local, marker.w, brightness };
   }
 
   float guideSegment(float2 p, float2 a, float2 b) {
@@ -553,7 +562,8 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
     } else {
       float2 tip = float2(0, .62);
       distance = guideSegment(float2(abs(p.x), p.y), tip, float2(.59, -.30)) - .17;
-      ink = float3(.36, 1.0, .77);
+      ink = mix(float3(.32, .91, .70), float3(.42, 1.0, .83), in.brightness);
+      border = .08;
     }
     float aa = clamp(fwidth(distance), .005, border);
     float fill = 1.0 - smoothstep(-aa, aa, distance);
