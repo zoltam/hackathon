@@ -1,4 +1,4 @@
-# Valmet Field Service Copilot
+# ServicePath
 
 Extracts equipment from a 3D scan, guides technicians to faulty machines, and shows what to check next.
 

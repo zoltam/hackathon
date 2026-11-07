@@ -74,7 +74,7 @@ class ValmetApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Valmet Field App',
+      title: 'ServicePath',
       theme: ThemeData(colorSchemeSeed: const Color(0xff006755)),
       home: FieldScreen(site: site),
     );
@@ -223,7 +223,7 @@ class _FieldScreenState extends State<FieldScreen> {
   Widget build(BuildContext context) {
     final site = widget.site;
     return Scaffold(
-      appBar: AppBar(title: const Text('Valmet Field App')),
+      appBar: AppBar(title: const Text('ServicePath')),
       body: SafeArea(
         child: site != null
             ? SiteSimulation(site: site, openNative: _openNative)

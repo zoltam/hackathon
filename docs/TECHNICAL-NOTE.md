@@ -1,4 +1,4 @@
-# Valmet Field Service Copilot — Technical note
+# ServicePath — Technical note
 
 ## From scan to equipment
 

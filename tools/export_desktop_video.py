@@ -63,7 +63,7 @@ def project(points, eye, look_at):
 def frame_base(scene, tag, status, stage):
     frame = Image.new("RGB", SIZE, "#091317")
     draw = ImageDraw.Draw(frame)
-    label(draw, (36, 26), "VALMET  /  FIELD-SERVICE COPILOT", 15, MINT, True)
+    label(draw, (36, 26), "VALMET  /  SERVICEPATH", 15, MINT, True)
     label(draw, (36, 49), "Kohdehaku laitetilassa", 40, INK, True)
     label(draw, (1026, 65), "3D-SKANNI  /  SIMULAATIO", 15, MUTED, True)
     left, top, right, bottom = SCENE

@@ -1,4 +1,4 @@
-# Valmet Field App · AI development report
+# ServicePath · AI development report
 
 This report covers offline equipment extraction from the replacement Equipment Room scan, evaluation of image recognition and the handoff to the iOS service simulation. The release baseline was main revision `faeac88`. Results below distinguish the local integration, the shipped detector pair and experimental research.
 
