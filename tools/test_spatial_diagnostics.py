@@ -67,6 +67,10 @@ class SpatialDiagnosticTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             evidence_report('pump', self.site, self.bundle, self.associations)
 
+    def test_geometry_only_context_does_not_receive_workbook_identity(self):
+        self.site['objects'].append(dict(objectId='stand', geometryOnly=True))
+        self.assertEqual(build_associations(self.site, self.bundle), self.associations)
+
     def test_all_objects_have_reports_and_contextual_disclosure(self):
         for obj in self.site['objects']:
             report = evidence_report(obj['objectId'], self.site, self.bundle, self.associations)

@@ -66,10 +66,16 @@ import UIKit
       open(payload, call.method == "openWorld" ? .normal : .preview, nil, result)
     }
     let arguments = ProcessInfo.processInfo.arguments
+    #if targetEnvironment(simulator)
+    let personArgument = arguments.firstIndex(of: "--verify-person-service")
+    #else
+    let personArgument: Int? = nil
+    #endif
     let obstacleArgument = arguments.firstIndex(of: "--verify-obstacle-reroute")
     let journeyArgument = obstacleArgument ?? arguments.firstIndex(of: "--verify-service-journey")
     let verifyArgument = arguments.firstIndex(of: "--verify-rendered-vision")
-    let visionMode: WorldWalk.VisionMode = obstacleArgument != nil ? .obstacle : journeyArgument != nil ? .journey :
+    let visionMode: WorldWalk.VisionMode = personArgument != nil ? .preview :
+      obstacleArgument != nil ? .obstacle : journeyArgument != nil ? .journey :
       arguments.contains("--benchmark-rendered-vision") ? .benchmark :
       verifyArgument != nil ? .verify : .normal
     let verificationPoses: [WorldWalk.VerificationPose]?
@@ -88,10 +94,11 @@ import UIKit
       verificationPoses = nil
     }
     if visionMode != .normal {
-      let logPrefix = visionMode == .obstacle ? "VALMET_OBSTACLE" : visionMode == .journey ? "VALMET_JOURNEY" :
+      let logPrefix = personArgument != nil ? "VALMET_PERSON" :
+        visionMode == .obstacle ? "VALMET_OBSTACLE" : visionMode == .journey ? "VALMET_JOURNEY" :
         visionMode == .benchmark ? "VALMET_BENCH" : "VALMET_VISION"
       DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
-        let key = registrar.lookupKey(forAsset: "assets/valmet/site.json")
+        let key = registrar.lookupKey(forAsset: personArgument == nil ? "assets/valmet/site.json" : "assets/valmet/person-site.json")
         guard let url = Bundle.main.url(forResource: key, withExtension: nil),
               let data = try? Data(contentsOf: url),
               var site = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
@@ -113,7 +120,9 @@ import UIKit
           }
         }
         func presentWithEvidence(_ scene: [String: Any], targetID: String) {
-          channel.invokeMethod("serviceJourneyEvidence", arguments: ["targetID": targetID]) { result in
+          channel.invokeMethod("serviceJourneyEvidence", arguments: [
+            "targetID": targetID, "personNavigation": personArgument != nil
+          ]) { result in
             var scene = scene
             if let evidence = result as? [String: Any], var objects = scene["objects"] as? [[String: Any]] {
               let conditions = evidence["conditions"] as? [String: Any] ?? [:]
@@ -132,7 +141,41 @@ import UIKit
             present(scene)
           }
         }
-        if let journeyArgument {
+        if let personArgument {
+          guard arguments.indices.contains(personArgument + 1),
+                let profile = site["navigationProfile"] as? [String: Any],
+                let clearance = profile["radiusMetres"] as? Double,
+                let eye = profile["eyeHeightMetres"] as? Double,
+                let speed = profile["speedMetresPerSecond"] as? Double,
+                let cellSize = site["cellSize"] as? Double,
+                let objects = site["objects"] as? [[String: Any]],
+                let target = objects.firstIndex(where: { $0["objectId"] as? String == arguments[personArgument + 1] }),
+                let service = objects[target]["service"] as? [Int] else {
+            print("\(logPrefix) error=invalid_target_or_profile")
+            fflush(stdout)
+            return
+          }
+          channel.invokeMethod("replanServiceRoute", arguments: [
+            "from": start, "to": service, "blocked": [] as [[Int]], "clearanceMetres": clearance,
+            "personNavigation": true
+          ]) { result in
+            guard let planner = result as? [String: Any], let floor = planner["walkableFloor"] as? [[Int]],
+                  let route = planner["route"] as? [[Int]], !route.isEmpty else {
+              print("\(logPrefix) error=no_route")
+              fflush(stdout)
+              return
+            }
+            var scene = site
+            scene["target"] = target
+            scene["route"] = route
+            scene["walkableFloor"] = floor
+            scene["clearanceMetres"] = clearance
+            scene["eyeHeightMetres"] = eye
+            scene["walkingSpeedMetresPerSecond"] = speed
+            scene["arrivalRadiusMetres"] = cellSize / 2
+            presentWithEvidence(scene, targetID: arguments[personArgument + 1])
+          }
+        } else if let journeyArgument {
           guard arguments.indices.contains(journeyArgument + 1),
                 let journey = (try? JSONSerialization.jsonObject(
                   with: Data(arguments[journeyArgument + 1].utf8))) as? [String: Any],

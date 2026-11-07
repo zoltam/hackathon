@@ -12,6 +12,14 @@ struct VisionConfirmedIDs {
 let assumedPhoneHeight: Float = 1.50
 
 struct WalkSite: Decodable {
+  struct ExtractionBounds: Decodable {
+    let value: [[Float]]?
+
+    init(from decoder: Decoder) {
+      value = try? decoder.singleValueContainer().decode([[Float]].self)
+    }
+  }
+
   struct Block: Decodable {
     let name: String
     let objectId: String?
@@ -19,10 +27,21 @@ struct WalkSite: Decodable {
     let height: CGFloat
     let cells: [[Int]]?
     let bounds: [[Float]]?
+    private let extractionBounds: ExtractionBounds?
     let workbookTag: String?
     let equipmentType: String?
     let syntheticCondition: String?
     let service: [Int]?
+
+    private func frameBounds(_ candidate: [[Float]]?) -> [[Float]]? {
+      guard let candidate, candidate.count == 2,
+            candidate.allSatisfy({ $0.count == 3 && $0.allSatisfy(\.isFinite) }),
+            zip(candidate[0], candidate[1]).allSatisfy({ $0.0 < $0.1 }) else { return nil }
+      return candidate
+    }
+
+    var nearbyFrameBounds: [[Float]]? { frameBounds(extractionBounds?.value) ?? markerBounds }
+    var markerBounds: [[Float]]? { frameBounds(bounds) }
 
     var displayName: String {
       if equipmentType == "valve_actuator", let workbookTag {
@@ -71,6 +90,8 @@ struct WalkSite: Decodable {
   let objects: [Block]
   let arrivalRadiusMetres: Float?
   let clearanceMetres: Float?
+  let eyeHeightMetres: Float?
+  let walkingSpeedMetresPerSecond: Float?
   let inspectionReport: String?
   let inspectionSummary: String?
 
@@ -325,7 +346,15 @@ final class RouteMapView: UIControl {
 }
 
 final class WorldWalk: UIViewController, ARSessionDelegate {
-  enum VisionMode { case normal, preview, verify, benchmark, journey, obstacle }
+  enum VisionMode {
+    case normal, preview, verify, benchmark, journey, obstacle
+
+    var isLiveWalk: Bool { self == .normal || self == .preview }
+
+    func acceptsDetection(_ objectID: String, selectedID: String?) -> Bool {
+      !isLiveWalk || objectID == selectedID
+    }
+  }
 
   struct VerificationPose: Decodable {
     let id: String
@@ -360,8 +389,11 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
   private let detectionLayer = CAShapeLayer()
   private let supplementalLayer = CAShapeLayer()
   private let nearbyFrameLayer = CAShapeLayer()
+  private let targetFrameLayer = CAShapeLayer()
   private let serviceMarker = UILabel()
   private var nearbyLabels: [Int: UILabel] = [:]
+  private var nearbyLabelSizes: [Int: CGSize] = [:]
+  private var nearbyLabelWidth: CGFloat = 0
   private weak var controlPanel: UIStackView?
   private let message = UILabel()
   private let visionStatus = UILabel()
@@ -484,14 +516,19 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     reality.session.delegate = self
     reality.session.delegateQueue = .main
     floorCells = (model.walkableFloor ?? model.floor).map { Set($0.map { SIMD2($0[0], $0[1]) }) }
-    nearbyFrameLayer.strokeColor = UIColor.systemTeal.cgColor
+    nearbyFrameLayer.strokeColor = UIColor.systemGreen.withAlphaComponent(0.58).cgColor
     nearbyFrameLayer.fillColor = UIColor.clear.cgColor
-    nearbyFrameLayer.lineWidth = 1.75
+    nearbyFrameLayer.lineWidth = 1.25
     nearbyFrameLayer.lineJoin = .round
     virtual.layer.addSublayer(nearbyFrameLayer)
+    targetFrameLayer.strokeColor = UIColor.systemTeal.cgColor
+    targetFrameLayer.fillColor = UIColor.clear.cgColor
+    targetFrameLayer.lineWidth = 1.75
+    targetFrameLayer.lineJoin = .round
+    virtual.layer.addSublayer(targetFrameLayer)
     detectionLayer.strokeColor = UIColor.systemYellow.cgColor
     detectionLayer.fillColor = UIColor.clear.cgColor
-    detectionLayer.lineWidth = 3
+    detectionLayer.lineWidth = 2
     detectionLayer.lineJoin = .round
     supplementalLayer.strokeColor = detectionLayer.strokeColor
     supplementalLayer.fillColor = detectionLayer.fillColor
@@ -514,7 +551,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
 
     message.font = .preferredFont(forTextStyle: .callout)
     message.textColor = .white
-    message.numberOfLines = 0
+    message.numberOfLines = visionMode.isLiveWalk ? 5 : 0
     visionStatus.font = .preferredFont(forTextStyle: .caption1)
     visionStatus.textColor = .white
     visionStatus.numberOfLines = 2
@@ -554,8 +591,10 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
       let replaced = self.supplementalReplacement?.ids ?? []
       let viewProjection = prediction.frame.projection * prediction.frame.pose.inverse
       var projectedIDs = Set<String>()
+      let selectedID = self.serviceTarget?.objectId
       let detections = prediction.detections.filter { detection in
-        guard !replaced.contains(detection.objectID),
+        guard self.visionMode.acceptsDetection(detection.objectID, selectedID: selectedID),
+              !replaced.contains(detection.objectID),
               let object = self.model.objects.first(where: { $0.objectId == detection.objectID }) else { return false }
         if let bounds = object.bounds {
           guard RenderedVision.matches(detection, to: bounds, viewProjection: viewProjection) else { return false }
@@ -624,8 +663,10 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
         self.supplementalBenchmarkAges.append(Int((CACurrentMediaTime() - prediction.frame.timestamp) * 1000))
       }
       let viewProjection = prediction.frame.projection * prediction.frame.pose.inverse
+      let selectedID = self.serviceTarget?.objectId
       let detections = prediction.detections.filter { detection in
-        guard let object = self.model.objects.first(where: { $0.objectId == detection.objectID }),
+        guard self.visionMode.acceptsDetection(detection.objectID, selectedID: selectedID),
+              let object = self.model.objects.first(where: { $0.objectId == detection.objectID }),
               let bounds = object.bounds else { return false }
         return RenderedVision.matches(detection, to: bounds, viewProjection: viewProjection)
       }
@@ -734,18 +775,21 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     #endif
     if visionMode == .preview { startJourney() }
     renderer.vision.detectsObstacleTag = visionMode == .obstacle || model.obstacleDemo == true
+    if visionMode == .normal { startTracking() }
+    guard !visionMode.isLiveWalk || serviceTarget?.objectId != nil else { return }
     renderer.vision.loadModel(at: detectorURL) { [weak self] loaded in
       guard let self, !self.closed, self.view.window != nil else { return }
       self.visionIdleText = loaded ? "Vision · No equipment detected" : "Vision · Detector unavailable"
       self.clearDetections()
       if loaded, self.supplementalEnabled {
         if let url = Bundle.main.url(forResource: "RFDETRSupplemental", withExtension: "mlmodelc") {
-          self.renderer.vision.loadSupplementalModel(at: url)
+          let selectedID = self.visionMode.isLiveWalk ? self.serviceTarget?.objectId : nil
+          self.renderer.vision.loadSupplementalModel(at: url, limitingTo: selectedID)
         } else {
           NSLog("Supplemental detector resource unavailable")
         }
       }
-      guard self.visionMode != .normal, self.visionMode != .preview else { return }
+      guard !self.visionMode.isLiveWalk else { return }
       if !loaded {
         self.visionStatus.isHidden = false
         let log = self.visionMode == .obstacle ? "VALMET_OBSTACLE error=detector_unavailable" :
@@ -769,7 +813,9 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
         self.startJourney()
       }
     }
-    if visionMode != .normal { return }
+  }
+
+  private func startTracking() {
     AVCaptureDevice.requestAccess(for: .video) { [weak self] allowed in
       DispatchQueue.main.async {
         guard let self, self.view.window != nil else { return }
@@ -1103,17 +1149,23 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
       return
     }
     let end = Float(model.route.count - 1)
-    let speed: Float = visionMode == .preview ? 0.45 : 0.15
+    let speed: Float = visionMode == .preview ? model.walkingSpeedMetresPerSecond ?? 0.45 : 0.15
+    let eyeHeight = model.eyeHeightMetres ?? assumedPhoneHeight
     let elapsed = Float(CACurrentMediaTime() - start)
     let elapsedWalking = end * model.cellSize / speed
     let step = min(end, elapsed * speed / model.cellSize)
     func point(at step: Float) -> SIMD3<Float> {
       let index = Int(step)
-      let a = model.center(model.route[index], height: assumedPhoneHeight)
-      let b = model.center(model.route[min(index + 1, model.route.count - 1)], height: assumedPhoneHeight)
+      let a = model.center(model.route[index], height: eyeHeight)
+      let b = model.center(model.route[min(index + 1, model.route.count - 1)], height: eyeHeight)
       return a + (b - a) * (step - Float(index))
     }
     let eye = point(at: step)
+    if model.walkingSpeedMetresPerSecond != nil, !isWalkablePosition(x: eye.x, z: eye.z) {
+      updateWalkStatus(at: SIMD4(eye.x, eye.y, eye.z, 1))
+      stopJourney(error: "unsafe_position")
+      return
+    }
     let bounds = target.floorBounds(cellSize: model.cellSize)
     let targetCenter = (bounds.min + bounds.max) / 2
     let lookAtTarget = SIMD3(targetCenter.x, Float(target.height) * 0.9, targetCenter.y)
@@ -1147,7 +1199,8 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
       }
       stopJourney(error: error)
     } else {
-      DispatchQueue.main.asyncAfter(deadline: .now() + 1.0 / 30.0) { [weak self] in
+      let fps = visionMode == .preview ? model.renderFramesPerSecond : 30
+      DispatchQueue.main.asyncAfter(deadline: .now() + 1.0 / Double(fps)) { [weak self] in
         self?.journeyFrame()
       }
     }
@@ -1157,7 +1210,20 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     guard let start = journeyStart else { return }
     journeyStart = nil
     restoreVerificationIdleTimer()
-    guard visionMode != .preview else { return }
+    if visionMode == .preview {
+      #if targetEnvironment(simulator)
+      if ProcessInfo.processInfo.arguments.contains("--verify-person-service") {
+        let hasReport = model.inspectionReport?.isEmpty == false && hasJourneyWorkbookEvidence
+        let tag = serviceTarget?.workbookTag ?? "unavailable"
+        if error == nil && arrived && hasReport { showInspection() }
+        let reportOpened = (presentedViewController as? UINavigationController)?.topViewController?.title == "Inspection evidence"
+        let result = error == nil && arrived && hasReport && reportOpened ? "passed" : "failed"
+        print("VALMET_PERSON result=\(result) arrived=\(arrived) report=\(hasReport) opened=\(reportOpened) tag=\(tag) error=\(error ?? "none")")
+        fflush(stdout)
+      }
+      #endif
+      return
+    }
     let elapsed = CACurrentMediaTime() - start
     #if targetEnvironment(simulator)
     if usesSimulatorJourneyDetector {
@@ -1439,6 +1505,12 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
       labelArea.size.height = max(0, min(labelArea.maxY, virtual.convert(panel.bounds, from: panel).minY - 6) - labelArea.minY)
     }
     let frames = UIBezierPath()
+    let targetFrame = UIBezierPath()
+    let labelWidth = labelArea.width * 0.65
+    if nearbyLabelWidth != labelWidth {
+      nearbyLabelWidth = labelWidth
+      nearbyLabelSizes.removeAll(keepingCapacity: true)
+    }
     var placedLabels: [CGRect] = []
     var visibleLabels = Set<Int>()
     var markerPosition: CGPoint?
@@ -1448,9 +1520,12 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     CATransaction.setDisableActions(true)
     for entry in nearby {
       let object = model.objects[entry.index]
-      guard let bounds = object.bounds, bounds.count == 2,
-            bounds.allSatisfy({ $0.count == 3 && $0.allSatisfy(\.isFinite) }),
-            zip(bounds[0], bounds[1]).allSatisfy({ $0.0 < $0.1 }) else { continue }
+      if entry.index == model.target, let marker = object.markerBounds {
+        let top = viewProjection * SIMD4((marker[0][0] + marker[1][0]) / 2, marker[1][1],
+                                         (marker[0][2] + marker[1][2]) / 2, 1)
+        markerPosition = Self.serviceMarkerPosition(top, viewport: viewport, availableArea: labelArea)
+      }
+      guard let bounds = object.nearbyFrameBounds else { continue }
       let corners = (0..<8).map { index in
         viewProjection * SIMD4(bounds[index & 1][0], bounds[(index >> 1) & 1][1],
                                bounds[(index >> 2) & 1][2], 1)
@@ -1465,23 +1540,15 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
         }
       }
       guard !frame.isEmpty else { continue }
-      frames.append(frame)
-      if entry.index == model.target {
-        let top = (corners[2] + corners[3] + corners[6] + corners[7]) * 0.25
-        if top.w > 0, top.z >= 0, top.z <= top.w {
-          let x = (CGFloat(top.x / top.w) + 1) * viewport.width * 0.5
-          let y = (1 - CGFloat(top.y / top.w)) * viewport.height * 0.5 - 25
-          let position = CGPoint(x: x, y: y)
-          if labelArea.insetBy(dx: 22, dy: 28).contains(position) {
-            markerPosition = position
-          }
-        }
-      }
+      let path = entry.index == model.target ? targetFrame : frames
+      path.append(frame)
       frameCount += 1
       if object.syntheticCondition != nil { mappedFrameCount += 1 }
       let label = nearbyLabel(at: entry.index, text: object.displayName + "\n" + conditionText(for: object))
       let projected = frame.bounds
-      let size = label.sizeThatFits(CGSize(width: labelArea.width * 0.65, height: .greatestFiniteMagnitude))
+      let size = nearbyLabelSizes[entry.index] ??
+        label.sizeThatFits(CGSize(width: labelWidth, height: .greatestFiniteMagnitude))
+      nearbyLabelSizes[entry.index] = size
       let width = min(labelArea.width, ceil(size.width) + 12)
       let height = ceil(size.height) + 6
       guard width > 0, labelArea.height >= height else { continue }
@@ -1498,8 +1565,8 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
         placedLabels.append(candidate)
         visibleLabels.insert(entry.index)
         let anchor = CGPoint(x: projected.minX, y: projected.minY)
-        frames.move(to: anchor)
-        frames.addLine(to: CGPoint(x: min(max(anchor.x, candidate.minX), candidate.maxX),
+        path.move(to: anchor)
+        path.addLine(to: CGPoint(x: min(max(anchor.x, candidate.minX), candidate.maxX),
                                    y: min(max(anchor.y, candidate.minY), candidate.maxY)))
         break
       }
@@ -1507,6 +1574,8 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     for (index, label) in nearbyLabels where !visibleLabels.contains(index) { label.isHidden = true }
     nearbyFrameLayer.frame = viewport
     nearbyFrameLayer.path = frames.cgPath
+    targetFrameLayer.frame = viewport
+    targetFrameLayer.path = targetFrame.cgPath
     CATransaction.commit()
     updateServiceMarker(at: markerPosition)
     if journeyStart != nil {
@@ -1533,6 +1602,15 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     serviceMarker.layer.add(bob, forKey: key)
   }
 
+  static func serviceMarkerPosition(_ top: SIMD4<Float>, viewport: CGRect, availableArea: CGRect) -> CGPoint? {
+    guard top.w > 0, top.z >= 0, top.z <= top.w, abs(top.x) <= top.w, abs(top.y) <= top.w,
+          availableArea.width >= 44, availableArea.height >= 56 else { return nil }
+    let x = viewport.midX + CGFloat(top.x / top.w) * viewport.width / 2
+    let y = viewport.midY - CGFloat(top.y / top.w) * viewport.height / 2 - 25
+    return CGPoint(x: min(max(x, availableArea.minX + 22), availableArea.maxX - 22),
+                   y: min(max(y, availableArea.minY + 28), availableArea.maxY - 28))
+  }
+
   private func conditionText(for object: WalkSite.Block) -> String {
     object.syntheticCondition.map { "Synthetic: \($0)" } ?? "Condition unavailable"
   }
@@ -1540,10 +1618,11 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
   private func nearbyLabel(at index: Int, text: String) -> UILabel {
     if let label = nearbyLabels[index] { return label }
     let label = UILabel()
-    label.font = .preferredFont(forTextStyle: .caption2)
+    let font = UIFont.preferredFont(forTextStyle: .caption2)
+    label.font = index == model.target ? font : font.withSize(font.pointSize * 0.9)
     label.textColor = .white
     label.backgroundColor = UIColor.black.withAlphaComponent(0.85)
-    label.layer.borderColor = UIColor.systemTeal.cgColor
+    label.layer.borderColor = index == model.target ? targetFrameLayer.strokeColor : nearbyFrameLayer.strokeColor
     label.layer.borderWidth = 1
     label.layer.cornerRadius = 4
     label.layer.masksToBounds = true
@@ -1865,7 +1944,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     virtual.isHidden = !visible
     movementControls?.isHidden = !visible
     inspect.isHidden = !visible || !arrived
-    visionStatus.isHidden = !visible
+    visionStatus.isHidden = !visible || visionMode.isLiveWalk
     nearbyStatus.isHidden = !visible || nearbyStatus.text == nil
     moveCrate.isHidden = !visible || model.obstacleDemo != true
     moveCrate.isEnabled = !replanPending
@@ -1877,6 +1956,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
       clearSupplementalDetections()
       if nearbyFrameLayer.path != nil {
         nearbyFrameLayer.path = nil
+        targetFrameLayer.path = nil
         nearbyLabels.values.forEach { $0.isHidden = true }
         nearbyStatus.text = nil
       }

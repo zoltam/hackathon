@@ -6,6 +6,46 @@ import simd
 @testable import Runner
 
 class RunnerTests: XCTestCase {
+  func testLiveVisionAcceptsOnlySelectedEquipment() {
+    for mode in [WorldWalk.VisionMode.normal, .preview] {
+      XCTAssertTrue(mode.acceptsDetection("pump", selectedID: "pump"))
+      XCTAssertFalse(mode.acceptsDetection("valve", selectedID: "pump"))
+      XCTAssertFalse(mode.acceptsDetection("pump", selectedID: nil))
+    }
+    for mode in [WorldWalk.VisionMode.verify, .benchmark, .journey, .obstacle] {
+      XCTAssertTrue(mode.acceptsDetection("valve", selectedID: "pump"))
+      XCTAssertTrue(mode.acceptsDetection("pump", selectedID: nil))
+    }
+  }
+
+  func testNearbyFramesUseValidExtractionBoundsIndependentlyOfOperationalBounds() throws {
+    let prefix = #"{"name":"Pump","x":0,"z":0,"width":1,"depth":1,"height":1,"bounds":[[1,2,3],[2,3,4]]"#
+    func block(_ extraction: String? = nil) throws -> WalkSite.Block {
+      let field = extraction.map { #", "extractionBounds": "# + $0 } ?? ""
+      return try JSONDecoder().decode(WalkSite.Block.self, from: Data((prefix + field + "}").utf8))
+    }
+    let operational: [[Float]] = [[1, 2, 3], [2, 3, 4]]
+    let valid = try block("[[5,6,7],[8,9,10]]")
+    XCTAssertEqual(valid.nearbyFrameBounds, [[5, 6, 7], [8, 9, 10]])
+    XCTAssertEqual(valid.bounds, operational)
+    XCTAssertEqual(valid.markerBounds, operational)
+    XCTAssertEqual(valid.floorBounds(cellSize: 1).min, SIMD2<Float>(1, 3))
+    XCTAssertEqual(try block().nearbyFrameBounds, operational)
+    for malformed in ["[[1,2],[3,4]]", "[[2,2,3],[1,3,4]]", "[[1,2,3],[1,3,4]]", "[[1,2,3],[1e40,3,4]]", #""bad""#] {
+      XCTAssertEqual(try block(malformed).nearbyFrameBounds, operational)
+    }
+  }
+
+  func testServiceMarkerStaysVisibleAboveControlsAndAtScreenEdge() throws {
+    let viewport = CGRect(x: 0, y: 0, width: 400, height: 700)
+    let area = CGRect(x: 6, y: 6, width: 388, height: 340)
+    let top = try XCTUnwrap(WorldWalk.serviceMarkerPosition(SIMD4(0.99, -0.5, 0.5, 1),
+                                                           viewport: viewport, availableArea: area))
+    XCTAssertEqual(top, CGPoint(x: 372, y: 318))
+    XCTAssertNil(WorldWalk.serviceMarkerPosition(SIMD4(0, 0, 0, -1), viewport: viewport, availableArea: area))
+    XCTAssertNil(WorldWalk.serviceMarkerPosition(SIMD4(2, 0, 0.5, 1), viewport: viewport, availableArea: area))
+  }
+
   func testValveActuatorShowsSyntheticParentTagSeparately() throws {
     let json = """
       {"name":"Orange actuator A","equipmentType":"valve_actuator",

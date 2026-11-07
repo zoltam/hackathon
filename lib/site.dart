@@ -22,8 +22,10 @@ class SiteObject {
       depth = json['depth'] as int,
       height = (json['height'] as num).toDouble(),
       movable = json['movable'] == true,
+      geometryOnly = json['geometryOnly'] == true,
       cells = (json['cells'] as List?)?.map(_cell).toList(),
       bounds = json['bounds'] as List?,
+      extractionBounds = json['extractionBounds'],
       service = json['service'] == null ? null : _cell(json['service']);
 
   final String objectId;
@@ -32,9 +34,11 @@ class SiteObject {
   final int x, z, width, depth;
   final double height;
   final bool movable;
+  final bool geometryOnly;
   final Cell? service;
   final List<Cell>? cells;
   final List<dynamic>? bounds;
+  final Object? extractionBounds;
 
   Iterable<Cell> get footprint sync* {
     if (cells case final cells?) {
@@ -49,6 +53,30 @@ class SiteObject {
   }
 }
 
+class PersonNavigation {
+  PersonNavigation._(Map<String, dynamic> json)
+    : radiusMetres = _positive(json['radiusMetres']),
+      bodyHeightMetres = _positive(json['bodyHeightMetres']),
+      headMarginMetres = _positive(json['headMarginMetres']),
+      eyeHeightMetres = _positive(json['eyeHeightMetres']),
+      speedMetresPerSecond = _positive(json['speedMetresPerSecond']);
+
+  final double radiusMetres, bodyHeightMetres, headMarginMetres;
+  final double eyeHeightMetres, speedMetresPerSecond;
+
+  static double _positive(Object? value) {
+    if (value is! num || !value.isFinite || value <= 0) {
+      throw const FormatException('Invalid walking-person navigation profile');
+    }
+    return value.toDouble();
+  }
+
+  static PersonNavigation? fromJson(Object? value) =>
+      value is Map<String, dynamic> && value['name'] == 'walking-person'
+      ? PersonNavigation._(value)
+      : null;
+}
+
 class Site {
   Site.fromJson(String source)
     : this._(jsonDecode(source) as Map<String, dynamic>);
@@ -61,6 +89,7 @@ class Site {
       cellSize = (json['cellSize'] as num).toDouble(),
       originShift = json['originShift'] as List?,
       shRotation = json['shRotation'] as List?,
+      personNavigation = PersonNavigation.fromJson(json['navigationProfile']),
       start = _cell(json['start']),
       floor = (json['floor'] as List?)?.map(_cell).toSet(),
       objects = (json['objects'] as List)
@@ -78,6 +107,7 @@ class Site {
   final int width, depth;
   final double cellSize;
   final List<dynamic>? originShift, shRotation;
+  final PersonNavigation? personNavigation;
   final Cell start;
   final Set<Cell>? floor;
   final List<SiteObject> objects;

@@ -67,9 +67,8 @@ class SpatialApplication:
                             obj[field] = deepcopy(approaches[obj['objectId']][field])
             self.associations = build_associations(self.site, self.bundle)
             self.associations['sceneSourceSha256'] = self.site['sourceSha256']
-            self.reports = {obj['objectId']: evidence_report(
-                obj['objectId'], self.site, self.bundle, self.associations)
-                for obj in self.site['objects']}
+            self.reports = {key: evidence_report(key, self.site, self.bundle, self.associations)
+                            for key in (a['sceneObjectId'] for a in self.associations['associations'])}
             write_json(self.output / 'site.json', self.site)
             write_json(self.output / 'asset-data.json', self.bundle)
             write_json(self.output / 'associations.json', self.associations)
@@ -129,7 +128,7 @@ class SpatialViewer:
             self.status = self.server.gui.add_markdown('Preparing route…')
             self.nearby = self.server.gui.add_markdown('Nearby equipment')
         with self.server.gui.add_folder('Equipment and evidence'):
-            self.asset_names = {o['name'] + ' · ' + o['objectId']: o['objectId'] for o in app.site['objects']}
+            self.asset_names = self.report_options()
             self.asset = self.server.gui.add_dropdown('Inspect asset', list(self.asset_names))
             self.asset.on_update(lambda _: self.show_report(self.asset_names[self.asset.value]))
             self.server.gui.add_button('Open inspection report').on_click(
@@ -180,7 +179,8 @@ class SpatialViewer:
         self.boxes = {}
         for obj in self.app.site['objects']:
             self.boxes[obj['objectId']] = self.server.scene.add_line_segments(
-                '/assets/' + obj['objectId'].replace(':', '/'), box_edges(obj['bounds']),
+                '/assets/' + obj['objectId'].replace(':', '/'),
+                box_edges(obj.get('extractionBounds', obj['bounds'])),
                 (60, 210, 180), thickness=.008)
 
     def connected(self, client):
@@ -238,10 +238,17 @@ class SpatialViewer:
             self.arrival_opened = False
 
     def show_report(self, object_id):
-        report = self.app.reports[object_id]
+        report = self.app.reports.get(object_id)
+        if report is None:
+            self.report.content = 'Geometry-only context. No workbook association.'
+            return
         text = report.get('llmSummary') or report['summary']
         self.report.content = (f"**{report['tag']} · {report['condition']}**\n\n"
             f"{report['mappingNotice']}\n\n{text}\n\nEngine: {report['engine']}")
+
+    def report_options(self):
+        return {o['name'] + ' · ' + o['objectId']: o['objectId']
+                for o in self.app.site['objects'] if o['objectId'] in self.app.reports}
 
     def open_report(self, object_id):
         report = self.app.reports[object_id]
@@ -325,7 +332,7 @@ class SpatialViewer:
             self.draw_catalog()
             self.proposal.options = list(catalog.candidates)
             self.proposal.value = candidate
-            self.asset_names = {o['name'] + ' · ' + o['objectId']: o['objectId'] for o in self.app.site['objects']}
+            self.asset_names = self.report_options()
             self.asset.options = list(self.asset_names)
             self.review_status.content = f'Saved. {len(catalog.accepted_objects)} reviewed assets.'
         except (ValueError, KeyError) as error:
@@ -353,8 +360,10 @@ class SpatialViewer:
                         box.visible = object_id in visible
                     lines = []
                     for obj in nearby:
-                        report = self.app.reports[obj['objectId']]
-                        lines.append(f"{obj['name']} · {report['tag']} · {report['condition']} (synthetic)")
+                        report = self.app.reports.get(obj['objectId'])
+                        detail = (f"{report['tag']} · {report['condition']} (synthetic)"
+                                  if report else 'Geometry-only context')
+                        lines.append(f"{obj['name']} · {detail}")
                     self.nearby.content = '**Nearby within 2.5 m**\n\n' + '\n\n'.join(lines)
                     if self.journey.status != 'arrived':
                         remaining = max(0, self.journey.length_metres - self.journey.travelled)

@@ -48,7 +48,7 @@ void main() {
     await tester.scrollUntilVisible(open, 200);
     await tester.tap(open);
     await tester.pumpAndSettle();
-    for (final rate in [15, 60]) {
+    for (final rate in [15, 30]) {
       final dropdown = find.byType(DropdownButtonFormField<int>);
       await tester.scrollUntilVisible(dropdown, -200);
       await tester.tap(dropdown);
@@ -59,7 +59,7 @@ void main() {
       await tester.tap(open);
       await tester.pumpAndSettle();
     }
-    expect(rates, [30, 15, 60]);
+    expect(rates, [60, 15, 30]);
   });
 
   testWidgets('opens with a route and the first-person walkthrough', (
@@ -130,6 +130,7 @@ void main() {
   ) async {
     final site = Site.fromJson('''{
       "name":"Workshop","width":6,"depth":4,"cellSize":1,"start":[0,0],
+      "sourceSha256":"scene-hash",
       "objects":[
         {"name":"Feed pump","object_id":"pump","equipmentType":"pump",
          "x":4,"z":1,"width":2,"depth":1,"height":1.5,"service":[3,1]},
@@ -139,6 +140,7 @@ void main() {
     }''');
     const workbook = '''{
       "schemaVersion":1,"synthetic":true,
+      "sourceSha256":"workbook-hash",
       "mappings":{"pump":"asset-1","valve":"asset-2"},
       "tables":{
         "Asset_Master":[
@@ -154,12 +156,38 @@ void main() {
       }
     }''';
     const asset = 'assets/valmet/asset-data.json';
+    const associations = 'assets/valmet/associations.json';
+    const diagnostics = 'assets/valmet/diagnostics.json';
     const channel = MethodChannel('valmet/field');
     final messenger = tester.binding.defaultBinaryMessenger;
-    rootBundle.evict(asset);
+    for (final name in [asset, associations, diagnostics]) {
+      rootBundle.evict(name);
+    }
+    var diagnosticSceneHash = 'scene-hash';
     messenger.setMockMessageHandler('flutter/assets', (message) async {
-      if (const StringCodec().decodeMessage(message) != asset) return null;
-      return const StringCodec().encodeMessage(workbook);
+      final name = const StringCodec().decodeMessage(message);
+      final data = switch (name) {
+        asset => workbook,
+        associations =>
+          '''
+          {"schemaVersion":1,"sourceSha256":"workbook-hash",
+           "sceneSourceSha256":"scene-hash","synthetic":true,
+           "associations":[{"sceneObjectId":"pump","workbookAssetId":"asset-1","synthetic":true}]}
+        ''',
+        diagnostics =>
+          '''
+          {"schemaVersion":1,"sourceSha256":"workbook-hash",
+           "sceneSourceSha256":"$diagnosticSceneHash",
+           "reports":{"pump":{"sceneObjectId":"pump","workbookAssetId":"asset-1",
+           "sourceSha256":"workbook-hash","synthetic":true,"tag":"P-005",
+           "condition":"attention_required","summary":"Check the coupling.",
+           "mappingNotice":"Synthetic association","reportText":"Evidence [Current_State!2]",
+           "engine":"ollama","modelStatus":"validated","llmSummary":"Validated local explanation.",
+           "llmReferences":["Current_State!2"],"citations":[{"reference":"Current_State!2"}]}}}
+        ''',
+        _ => null,
+      };
+      return data == null ? null : const StringCodec().encodeMessage(data);
     });
     Map<String, dynamic>? payload;
     String? openedMethod;
@@ -169,7 +197,9 @@ void main() {
       return null;
     });
     addTearDown(() {
-      rootBundle.evict(asset);
+      for (final name in [asset, associations, diagnostics]) {
+        rootBundle.evict(name);
+      }
       messenger.setMockMessageHandler('flutter/assets', null);
       messenger.setMockMethodCallHandler(channel, null);
     });
@@ -188,6 +218,10 @@ void main() {
     expect(payload!['hasWorkbook'], isTrue);
     expect(payload!['inspectionSummary'], contains('Inspect coupling'));
     expect(payload!['inspectionReport'], contains('Current_State!2'));
+    expect(
+      payload!['inspectionReport'],
+      contains('Validated local explanation'),
+    );
     final objects = (payload!['objects'] as List).cast<Map<String, dynamic>>();
     expect(objects, hasLength(2));
     for (final object in site.objects) {
@@ -221,6 +255,21 @@ void main() {
     expect((payload!['route'] as List).last, [2, 2]);
     expect(payload!['keyControls'], isFalse);
     expect(payload!['obstacleDemo'], isFalse);
+
+    diagnosticSceneHash = 'unrelated-scene';
+    rootBundle.evict(diagnostics);
+    await tester.pumpWidget(const SizedBox());
+    await tester.pumpWidget(ValmetApp(site: site));
+    await tester.pumpAndSettle();
+    await tester.drag(find.byType(ListView), const Offset(0, -800));
+    await tester.pumpAndSettle();
+    await tester.tap(simulate);
+    await tester.pumpAndSettle();
+    expect(payload!['inspectionReport'], contains('Inspect coupling'));
+    expect(
+      payload!['inspectionReport'],
+      isNot(contains('Validated local explanation')),
+    );
   });
 
   testWidgets('blocked start stays explicit and clearance can be reduced', (
@@ -290,6 +339,117 @@ void main() {
       [4, 0],
     ]);
     expect((payload!['objects'] as List).first['object_id'], 'test-target');
+  });
+
+  testWidgets('uses the registered person export and retains legacy AR', (
+    tester,
+  ) async {
+    const baseAsset = 'assets/valmet/site.json';
+    const personAsset = 'assets/valmet/person-site.json';
+    final room = <String, dynamic>{
+      'name': 'Workshop',
+      'sourceSha256': 'same-scan',
+      'width': 6,
+      'depth': 4,
+      'cellSize': 1,
+      'start': [0, 0],
+      'floor': [
+        for (var x = 0; x < 6; x++)
+          for (var z = 0; z < 4; z++) [x, z],
+      ],
+      'objects': [
+        {
+          'name': 'Feed pump',
+          'objectId': 'pump',
+          'x': 4,
+          'z': 1,
+          'width': 1,
+          'depth': 1,
+          'height': 1,
+          'service': [3, 1],
+        },
+      ],
+    };
+    final person = {
+      ...room,
+      'start': [1, 1],
+      'objects': [
+        {
+          ...(room['objects'] as List).single as Map<String, Object>,
+          'extractionBounds': [
+            [4, 0, 1],
+            [5, 1, 2],
+          ],
+        },
+      ],
+      'navigationProfile': {
+        'name': 'walking-person',
+        'radiusMetres': 0.30,
+        'bodyHeightMetres': 1.80,
+        'headMarginMetres': 0.05,
+        'eyeHeightMetres': 1.65,
+        'speedMetresPerSecond': 0.7,
+      },
+    };
+    const channel = MethodChannel('valmet/field');
+    final messenger = tester.binding.defaultBinaryMessenger;
+    final calls = <MethodCall>[];
+    messenger.setMockMessageHandler('flutter/assets', (message) async {
+      final site = switch (const StringCodec().decodeMessage(message)) {
+        baseAsset => room,
+        personAsset => person,
+        _ => null,
+      };
+      return site == null
+          ? null
+          : const StringCodec().encodeMessage(jsonEncode(site));
+    });
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      calls.add(call);
+      return null;
+    });
+    addTearDown(() {
+      rootBundle.evict(baseAsset);
+      rootBundle.evict(personAsset);
+      messenger.setMockMessageHandler('flutter/assets', null);
+      messenger.setMockMethodCallHandler(channel, null);
+    });
+
+    await tester.pumpWidget(const ValmetApp());
+    await tester.pumpAndSettle();
+    final simulate = find.text('Simulate service visit');
+    await tester.scrollUntilVisible(simulate, 200);
+    await tester.tap(simulate);
+    await tester.pumpAndSettle();
+    expect(calls.single.method, 'openServiceSimulation');
+    final payload = jsonDecode(calls.single.arguments as String);
+    expect(payload['route'], [
+      [1, 1],
+      [2, 1],
+      [3, 1],
+    ]);
+    expect(payload['clearanceMetres'], 0.30);
+    expect(payload['eyeHeightMetres'], 1.65);
+    expect(payload['walkingSpeedMetresPerSecond'], 0.7);
+    expect(payload['objects'].single['extractionBounds'], [
+      [4, 0, 1],
+      [5, 1, 2],
+    ]);
+    expect(find.text('Walk inside the 3D model'), findsNothing);
+
+    await tester.tap(find.text('Walking-person simulation'));
+    await tester.pumpAndSettle();
+    final walk = find.text('Walk inside the 3D model');
+    await tester.scrollUntilVisible(walk, 200);
+    await tester.tap(walk);
+    await tester.pumpAndSettle();
+    expect(calls.last.method, 'openWorld');
+    final legacyPayload = jsonDecode(calls.last.arguments as String);
+    expect(legacyPayload['start'], [0, 0]);
+    expect(legacyPayload['objects'].single['extractionBounds'], [
+      [4, 0, 1],
+      [5, 1, 2],
+    ]);
   });
   testWidgets(
     'opens exploration with no route and sends the same walkable mask',

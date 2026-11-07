@@ -104,7 +104,8 @@ def build_associations(site, bundle):
     kinds = {key: 'legacy_synthetic' for key in existing}
     counts = Counter(assignments.values())
     # Complete type-compatible coverage before assigning contextual metadata.
-    pending = sorted(set(objects) - assignments.keys())
+    pending = sorted(key for key, obj in objects.items()
+                     if key not in assignments and not obj.get('geometryOnly'))
     for key in pending:
         compatible = sorted(a for a, asset in assets.items()
                             if asset.get('asset_class') == CLASS_BY_TYPE.get(objects[key].get('equipmentType'))
@@ -131,7 +132,7 @@ def build_associations(site, bundle):
                               workbookTag=assets[assignments[key]].get('tag'),
                               workbookClass=assets[assignments[key]].get('asset_class'),
                               reused=counts[assignments[key]] > 1)
-                         for key in sorted(objects)],
+                         for key in sorted(assignments)],
     }
 
 

@@ -54,7 +54,13 @@ class CatalogTests(unittest.TestCase):
                'equipmentType': 'pump', 'x': 10, 'z': 3, 'width': 3, 'depth': 3, 'height': .6}
         self.site['objects'] = [obj]
         review = self.review()
-        self.assertEqual(review.accepted_objects, [obj])
+        [extracted] = review.accepted_objects
+        self.assertEqual(extracted['bounds'], obj['bounds'])
+        self.assertEqual(extracted['extraction']['status'], 'fitted')
+        self.assertEqual(extracted['extraction']['supportingSplats'], 200)
+        expected = np.quantile(self.geometry['centers'][:200], [.01, .99], axis=0)
+        np.testing.assert_allclose(extracted['extractionBounds'], expected + [[-.01], [.01]])
+        self.assertNotIn('extractionBounds', obj)
         self.assertEqual(len(review.candidates), 1)
         for key in review.candidates:
             self.assertFalse(np.intersect1d(review.memberships[key], review.memberships['baseline']).size)

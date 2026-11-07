@@ -78,6 +78,21 @@ class CatalogReview:
             inside = valid & ((self.points >= lo) & (self.points <= hi)).all(axis=1)
             self.memberships[object_id] = np.flatnonzero(inside)
             available &= ~inside
+            # Registered bounds seed membership and remain the service/recognition contract.
+            # Fit the displayed extraction box independently from supported splat centers.
+            support = self.points[inside]
+            obj['extraction'] = {
+                'method': 'seeded_splat_center_quantile_aabb',
+                'sourceSha256': site.get('sourceSha256'),
+                'membership': f'memberships.npz:{object_id}',
+                'supportingSplats': len(support),
+                'minimumOpacity': .12,
+                'status': 'insufficient_support',
+            }
+            if len(support) >= 50:
+                fitted = np.quantile(support, [.01, .99], axis=0)
+                obj['extractionBounds'] = (fitted + np.array([[-.01], [.01]])).tolist()
+                obj['extraction'].update(status='fitted', quantiles=[.01, .99], paddingMetres=.01)
         available &= self.points[:, 1] > .15
         indices = np.flatnonzero(available)
         available[indices[_wall_mask(self.points[indices])]] = False
@@ -148,7 +163,9 @@ class CatalogReview:
     @property
     def accepted_objects(self):
         return list(deepcopy(self.baseline).values()) + [
-            dict(deepcopy(self.candidates[k]), name=d['name'], equipmentType=d['equipmentType'])
+            dict(deepcopy(self.candidates[k]), name=d['name'], equipmentType=d['equipmentType'],
+                 extractionBounds=deepcopy(self.candidates[k]['bounds']),
+                 geometryOnly=d['equipmentType'] == 'context')
             for k, d in sorted(self.decisions.items()) if d.get('status') == 'accepted']
 
     def record_view(self, object_id, camera_position):

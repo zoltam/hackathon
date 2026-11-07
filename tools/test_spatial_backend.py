@@ -141,7 +141,7 @@ class ActualSpatialBackendTest(unittest.TestCase):
             SpatialApplication(self.assets, wrong_scan, self.workbook,
                                Path(self.directory.name) / 'rejected')
 
-    def test_exports_preserve_registered_assets_and_cover_every_approved_object(self):
+    def test_exports_preserve_registered_assets_and_cover_workbook_objects(self):
         app = self.app
         baseline = {o['objectId']: o for o in app.baseline['objects']}
         objects = {o['objectId']: o for o in app.site['objects']}
@@ -149,6 +149,8 @@ class ActualSpatialBackendTest(unittest.TestCase):
         for object_id, original in baseline.items():
             self.assertEqual(objects[object_id]['bounds'], original['bounds'])
             self.assertEqual(objects[object_id]['name'], original['name'])
+            self.assertEqual(objects[object_id]['extraction']['status'], 'fitted')
+            self.assertNotEqual(objects[object_id]['extractionBounds'], original['bounds'])
         site = json.loads((self.output / 'site.json').read_text())
         self.assertEqual(site['sourceSha256'], app.baseline['sourceSha256'])
         self.assertEqual(site['originShift'], app.baseline['originShift'])
@@ -156,14 +158,15 @@ class ActualSpatialBackendTest(unittest.TestCase):
         self.assertTrue(set(map(tuple, site['floor'])) <= set(map(tuple, app.baseline['floor'])))
         associations = json.loads((self.output / 'associations.json').read_text())
         records = {a['sceneObjectId']: a for a in associations['associations']}
-        self.assertEqual(records.keys(), objects.keys())
+        workbook_objects = {key for key, obj in objects.items() if not obj.get('geometryOnly')}
+        self.assertEqual(records.keys(), workbook_objects)
         self.assertEqual(associations['sourceSha256'], app.bundle['sourceSha256'])
         self.assertEqual(associations['sceneSourceSha256'], app.baseline['sourceSha256'])
         self.assertTrue(associations['synthetic'])
         for object_id, asset_id in app.bundle['mappings'].items():
             self.assertEqual(records[object_id]['workbookAssetId'], asset_id)
         reports = json.loads((self.output / 'diagnostics.json').read_text())
-        self.assertEqual(reports['reports'].keys(), objects.keys())
+        self.assertEqual(reports['reports'].keys(), workbook_objects)
         allowed_refs = {row['_source'] for rows in app.bundle['tables'].values()
                         if isinstance(rows, list) for row in rows if row.get('_source')}
         for object_id, report in reports['reports'].items():
@@ -203,9 +206,11 @@ class ActualSpatialBackendTest(unittest.TestCase):
                 near = nearby_objects(app.site['objects'], journey.position)
                 self.assertIn(target['objectId'], {o['objectId'] for o in near})
                 for obj in near:
-                    self.assertIn(obj['objectId'], app.reports)
-                    self.assertEqual(box_edges(obj['bounds']).shape, (12, 2, 3))
-                    self.assertTrue(app.reports[obj['objectId']]['synthetic'])
+                    self.assertEqual(box_edges(obj['extractionBounds']).shape, (12, 2, 3))
+                    if obj.get('geometryOnly'):
+                        self.assertNotIn(obj['objectId'], app.reports)
+                    else:
+                        self.assertTrue(app.reports[obj['objectId']]['synthetic'])
 
     def test_actual_blocked_and_disconnected_starts(self):
         target = next(o['objectId'] for o in self.app.site['objects'] if 'service' in o)

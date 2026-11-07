@@ -199,7 +199,8 @@ final class RenderedVision {
     }
   }
 
-  private var supplemental: (request: VNCoreMLRequest, contract: SupplementalContract, generation: Int)?
+  private var supplemental: (request: VNCoreMLRequest, contract: SupplementalContract,
+                             approvedIDs: Set<String>, generation: Int)?
   private var supplementalGeneration = 0
   private let supplementalQueue = DispatchQueue(label: "valmet.rendered-vision.supplemental", qos: .utility)
   private let supplementalReadback = Readback()
@@ -208,7 +209,8 @@ final class RenderedVision {
   var simulatorJourneyTarget: String?
   #endif
 
-  func loadSupplementalModel(at compiledURL: URL, completion: ((Bool) -> Void)? = nil) {
+  func loadSupplementalModel(at compiledURL: URL, limitingTo selectedID: String? = nil,
+                             completion: ((Bool) -> Void)? = nil) {
     dispatchPrecondition(condition: .onQueue(.main))
     stopSupplementalModel()
     let generation = supplementalGeneration
@@ -238,17 +240,20 @@ final class RenderedVision {
           reportFailure()
           return
         }
+        var approved = contract.approvedObjectIDs
+        if let selectedID { approved = approved.intersection([selectedID]) }
         #if targetEnvironment(simulator)
-        if let simulatorTarget, !contract.classes.contains(simulatorTarget) {
-          reportFailure()
-          return
+        if let simulatorTarget {
+          approved = contract.classes.contains(simulatorTarget) ? [simulatorTarget] : []
         }
         #endif
+        guard !approved.isEmpty else { reportFailure(); return }
+        let approvedIDs = approved
         let request = VNCoreMLRequest(model: try VNCoreMLModel(for: model))
         request.imageCropAndScaleOption = .scaleFill
         DispatchQueue.main.async {
           guard self.supplementalGeneration == generation else { return }
-          self.supplemental = (request, contract, generation)
+          self.supplemental = (request, contract, approvedIDs, generation)
           print("VALMET_SUPPLEMENTAL loaded=\(contract.approvedObjectIDs.count)")
           fflush(stdout)
           completion?(true)
@@ -316,10 +321,11 @@ final class RenderedVision {
       return
     }
     #endif
-    guard let request = detector?.request,
+    let request = detector?.request
+    let readsObstacleTag = detectsObstacleTag
+    guard request != nil || readsObstacleTag,
           let readback = readbacks.first(where: { $0.available.wait(timeout: .now()) == .success }) else { return }
     let width = texture.width, height = texture.height
-    let readsObstacleTag = detectsObstacleTag
     let length = stride * height
     if readback.buffer?.length != length {
       readback.buffer = texture.device.makeBuffer(length: length, options: .storageModeShared)
@@ -358,18 +364,21 @@ final class RenderedVision {
           let started = CACurrentMediaTime()
           do {
             let handler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer, orientation: .up)
-            let obstacleCenter = try withExtendedLifetime(staging) {
-              try handler.perform([request])
-              return readsObstacleTag ? self.locateObstacle(using: handler, frame: frame) : nil
-            }
-            guard let observations = request.results as? [VNRecognizedObjectObservation] else {
-              NSLog("Rendered vision model did not return object observations")
-              return
-            }
-            let detections = observations.compactMap { observation -> Detection? in
-              guard let label = observation.labels.first else { return nil }
-              return Detection(objectID: label.identifier, confidence: label.confidence,
-                               bounds: observation.boundingBox)
+            let (detections, obstacleCenter) = try withExtendedLifetime(staging) {
+              let detections: [Detection]
+              if let request {
+                try handler.perform([request])
+                let observations = request.results as? [VNRecognizedObjectObservation] ?? []
+                detections = observations.compactMap { observation in
+                  guard let label = observation.labels.first else { return nil }
+                  return Detection(objectID: label.identifier, confidence: label.confidence,
+                                   bounds: observation.boundingBox)
+                }
+              } else {
+                detections = []
+              }
+              let obstacleCenter = readsObstacleTag ? self.locateObstacle(using: handler, frame: frame) : nil
+              return (detections, obstacleCenter)
             }
             let result = Prediction(frame: frame, detections: detections, obstacleCenter: obstacleCenter,
                                     inferenceMilliseconds: Int((CACurrentMediaTime() - started) * 1000))
@@ -385,14 +394,9 @@ final class RenderedVision {
   private func captureSupplemental(_ texture: MTLTexture, command: MTLCommandBuffer,
                                    blit: MTLBlitCommandEncoder, frame: Frame, stride: Int) {
     let readback = supplementalReadback
-    guard let (request, contract, generation) = supplemental,
+    guard let (request, contract, approved, generation) = supplemental,
           readback.available.wait(timeout: .now()) == .success else { return }
     let width = texture.width, height = texture.height, length = stride * texture.height
-    #if targetEnvironment(simulator)
-    let approved = simulatorJourneyTarget.map { Set([$0]) } ?? contract.approvedObjectIDs
-    #else
-    let approved = contract.approvedObjectIDs
-    #endif
     if readback.buffer?.length != length {
       readback.buffer = texture.device.makeBuffer(length: length, options: .storageModeShared)
     }

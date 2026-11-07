@@ -99,7 +99,9 @@ void main() {
     },
   );
 
-  final output = Directory('build/spatial');
+  final output = Directory(
+    Platform.environment['VALMET_SPATIAL_EXPORT'] ?? 'build/spatial',
+  );
   final prepared = File('${output.path}/diagnostics.json').existsSync();
 
   test(
@@ -123,6 +125,11 @@ void main() {
           object.objectId,
           equipmentType: object.equipmentType,
         );
+        if (object.geometryOnly) {
+          expect(report, isNull, reason: object.objectId);
+          expect(object.service, isNull, reason: object.objectId);
+          continue;
+        }
         expect(report, isNotNull, reason: object.objectId);
         expect(report!.reportText, contains('Synthetic'));
         expect(report.reportText, contains('Current_State!'));

@@ -49,8 +49,10 @@ let highQuality = legacyAugmentation || CommandLine.arguments.contains("--detect
 let distantActuatorTraining = CommandLine.arguments.contains("--distant-actuator-training")
 let actuatorTraining = distantActuatorTraining || CommandLine.arguments.contains("--actuator-training")
 let routeDataset = actuatorTraining || CommandLine.arguments.contains("--route-dataset")
-let width = routeDataset ? 720 : (highQuality ? 1440 : 820)
-let height = routeDataset ? 1560 : (highQuality ? 960 : 550)
+let desktopHD = CommandLine.arguments.dropFirst().first == "--desktop-frames-hd"
+let desktopFrames = desktopHD || CommandLine.arguments.dropFirst().first == "--desktop-frames"
+let width = desktopHD ? 1920 : (desktopFrames ? 1280 : (routeDataset ? 720 : (highQuality ? 1440 : 820)))
+let height = desktopHD ? 1080 : (desktopFrames ? 720 : (routeDataset ? 1560 : (highQuality ? 960 : 550)))
 let textureDescriptor = MTLTextureDescriptor.texture2DDescriptor(
   pixelFormat: .rgba8Unorm, width: width, height: height, mipmapped: false
 )
@@ -113,24 +115,53 @@ func annotationBuffers() -> [MTLBuffer] {
   }
 }
 
+var lastDesktopOrder: (forward: SIMD3<Float>, eyeDepth: Float, cutHeight: Float?,
+                       buffer: MTLBuffer, count: Int)?
+
 func render(eye legacyEye: SIMD3<Float>, aim: SIMD3<Float>, bounds: [[Float]]? = nil,
-            masks: [MTLBuffer] = [], annotations: (([[String: Any]]) -> Void)? = nil) -> NSBitmapImageRep {
+            masks: [MTLBuffer] = [], cutHeight: Float? = nil, orthographicSpan: Float? = nil,
+            annotations: (([[String: Any]]) -> Void)? = nil) -> NSBitmapImageRep {
   let eye = legacyEye + origin
   let forward = simd_normalize(aim - eye)
   let right = simd_normalize(simd_cross(SIMD3(0, 1, 0), -forward))
   let up = simd_cross(-forward, right)
   let pose = simd_float4x4(columns: (vector(right, 0), vector(up, 0), vector(-forward, 0), vector(eye, 1)))
-  var uniforms = Uniforms(viewProjection: projection * pose.inverse,
+  let cameraProjection = orthographicSpan.map { span in
+    simd_float4x4(columns: (
+      SIMD4(2 * Float(height) / (Float(width) * span), 0, 0, 0),
+      SIMD4(0, 2 / span, 0, 0),
+      SIMD4(0, 0, 1 / (near - far), 0),
+      SIMD4(0, 0, near / (near - far), 1)
+    ))
+  } ?? projection
+  var uniforms = Uniforms(viewProjection: cameraProjection * pose.inverse,
                           screen: SIMD2(Float(width), Float(height)),
                           roomSize: SIMD2(Float(site.width), Float(site.depth)) * site.cellSize,
                           camera: vector(eye, 1), sourceRotation: sourceRotation)
-  let distances = (0..<count).map { index in
-    let p = rows.load(fromByteOffset: index * stride, as: SIMD4<Float>.self)
-    return simd_dot(SIMD3(p.x, p.y, p.z) - eye, forward)
+  let eyeDepth = simd_dot(eye, forward)
+  let order: MTLBuffer
+  let instanceCount: Int
+  if let cached = lastDesktopOrder, cached.forward == forward,
+     cached.eyeDepth == eyeDepth, cached.cutHeight == cutHeight {
+    order = cached.buffer
+    instanceCount = cached.count
+  } else {
+    let distances = (0..<count).map { index in
+      let p = rows.load(fromByteOffset: index * stride, as: SIMD4<Float>.self)
+      return simd_dot(SIMD3(p.x, p.y, p.z) - eye, forward)
+    }
+    let indices = (0..<count).filter { index in
+      guard distances[index] > near else { return false }
+      guard let cutHeight else { return true }
+      return rows.load(fromByteOffset: index * stride, as: SIMD4<Float>.self).y <= cutHeight
+    }
+      .sorted { distances[$0] > distances[$1] }.map(UInt32.init)
+    order = indices.withUnsafeBufferPointer { device.makeBuffer(bytes: $0.baseAddress!, length: $0.count * 4)! }
+    instanceCount = indices.count
+    if desktopHD {
+      lastDesktopOrder = (forward, eyeDepth, cutHeight, order, instanceCount)
+    }
   }
-  let indices = (0..<count).filter { distances[$0] > near }
-    .sorted { distances[$0] > distances[$1] }.map(UInt32.init)
-  let order = indices.withUnsafeBufferPointer { device.makeBuffer(bytes: $0.baseAddress!, length: $0.count * 4)! }
   func draw(_ buffer: MTLBuffer, floor: Bool) {
     pass.colorAttachments[0].clearColor = floor
       ? MTLClearColor(red: 0.10, green: 0.11, blue: 0.12, alpha: 1)
@@ -146,7 +177,7 @@ func render(eye legacyEye: SIMD3<Float>, aim: SIMD3<Float>, bounds: [[Float]]? =
     encoder.setVertexBuffer(buffer, offset: 0, index: 0)
     encoder.setVertexBuffer(order, offset: 0, index: 1)
     encoder.setVertexBytes(&uniforms, length: MemoryLayout<Uniforms>.stride, index: 2)
-    encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4, instanceCount: indices.count)
+    encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4, instanceCount: instanceCount)
     encoder.endEncoding()
     command.commit()
     command.waitUntilCompleted()
@@ -205,6 +236,35 @@ func render(eye legacyEye: SIMD3<Float>, aim: SIMD3<Float>, bounds: [[Float]]? =
   texture.getBytes(image.bitmapData!, bytesPerRow: w * 4,
                    from: MTLRegionMake2D(minX, minY, w, h), mipmapLevel: 0)
   return image
+}
+
+if desktopFrames {
+  struct Shot: Decodable {
+    let eye: SIMD3<Float>
+    let lookAt: SIMD3<Float>
+    let cutHeight: Float?
+    let orthographicSpan: Float?
+    let output: String
+  }
+  guard CommandLine.arguments.count == 3 else {
+    fatalError("Usage: swift tools/build_pump_references.swift --desktop-frames shots.json")
+  }
+  let plan = URL(fileURLWithPath: CommandLine.arguments[2])
+  let shots = try JSONDecoder().decode([Shot].self, from: Data(contentsOf: plan))
+  for shot in shots {
+    if let span = shot.orthographicSpan, !span.isFinite || span <= 0 {
+      fatalError("Orthographic span must be finite and positive")
+    }
+    let image = render(eye: shot.eye - origin, aim: shot.lookAt, cutHeight: shot.cutHeight,
+                       orthographicSpan: shot.orthographicSpan) { _ in }
+    if shot.output == "-" {
+      FileHandle.standardOutput.write(Data(bytes: image.bitmapData!, count: width * height * 4))
+    } else {
+      try image.representation(using: .png, properties: [:])!
+        .write(to: URL(fileURLWithPath: shot.output), options: .atomic)
+    }
+  }
+  exit(EXIT_SUCCESS)
 }
 
 let trainingEyes: [(String, SIMD3<Float>)] = [

@@ -64,16 +64,46 @@ or refine its bounds. Geometric proposals are not automatically named or counted
 as equipment. Review records identify the reviewer; the checked local display
 stand addition was reviewed by an agent from two full Gaussian renders.
 
-Generated data stays in ignored `build/spatial/`: the person `site.json`, unchanged
-legacy workbook bundle, association and diagnostic sidecars, and
-`catalog/review.json` plus splat memberships. Keep that review file with approved
-private assets to replay decisions on another machine. A fresh output directory
-starts with the baseline 33 objects and unaccepted proposals.
+Generated data stays in ignored `build/spatial/`. The exporter fits each of the
+33 registered seed volumes to the observed splats and writes separate
+`extractionBounds` for display. Routing and vision registration retain their
+operational bounds. The 4 cm and 8 cm voxel search proposes additional regions
+without seed volumes. In the reviewed room, one of 38 proposals is a display
+stand and 37 remain pending. The stand has no workbook identity.
 
-`lib/spatial_data.dart` loads the optional sidecars through a tested adapter.
-Without them, original tag/report behaviour is preserved. No iOS or Core ML change
-is required to generate these exports; Mac can adopt them separately. Use
-`--prepare-only` to export data without starting a browser server.
+The offline RGB survey provides an independent extraction pass for the 33
+equipment IDs. Render clean views from observed floor cells, then run the
+detector with the frozen confidence thresholds. The fusion tool consumes the
+renderer shot JSON and detector `BOX` log. It triangulates detections from
+distinct camera positions and fits bounds to supporting Gaussian splats.
+
+```sh
+python tools/spatial_vision_fusion.py --shots "$SHOTS" --predictions "$BOX_LOG" \
+  --thresholds "$THRESHOLDS" --output "$FITS" --memberships "$MEMBERSHIPS"
+```
+
+For an occluded coloured surface, `--grow-color OBJECT_ID` can extend a fit
+using connected splats with the same dominant colour. Validate fits against
+separate evidence before applying them with `apply_approved`. Carry the matching
+memberships into the animation export. The app reads the approved bounds from
+the packaged map and draws them in the current camera view.
+
+Keep `catalog/review.json` with the approved private assets to replay decisions.
+Use `--prepare-only` to export without starting the browser server. On Mac,
+package the matching exports together from the same run. Preserve the original
+`assets/valmet/site.json` for the legacy navigation profile.
+
+```sh
+cp build/spatial/site.json assets/valmet/person-site.json
+cp build/spatial/{asset-data,associations,diagnostics}.json assets/valmet/
+```
+
+The iOS app validates the exported scene registration and uses the offline
+extraction bounds for turquoise frames. The yellow service marker identifies
+the selected repair target. In normal use, only confirmed clean-RGB detections
+of that target can draw a yellow box. Verification modes can test other classes.
+With the person export absent, the app uses the legacy scene. Missing or invalid
+report sidecars leave the original workbook reports available.
 
 ```sh
 python -m unittest discover -s tools -p 'test_*.py'
@@ -83,6 +113,14 @@ flutter analyze
 
 Full Gaussian evidence rendering additionally uses `tools/requirements-render.txt`.
 Private scan, workbook, review evidence and generated exports are not published.
+
+On Mac, export the verified P-005 route and render the local presentation video
+with Metal, FFmpeg and the existing spatial environment. Keep the MP4 outside
+the repository.
+
+```sh
+python tools/export_desktop_video.py build/spatial /path/to/valmet-kohdehaku.mp4
+```
 
 ## Linux backend setup and product handoff
 

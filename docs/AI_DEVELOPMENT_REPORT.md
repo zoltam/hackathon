@@ -96,11 +96,24 @@ Counts are true positives / false positives / misses. Walking scores cover only 
 
 </details>
 
-## Seed-independent semantic localization pilot
+## Offline 3D localization from multiple views
 
-A separate offline pilot intersected camera rays from thresholded RGB boxes, selected a consensus across distinct views and fit a region to splats that projected into the supporting observations. Existing catalog bounds were withheld from the fit and compared afterward. The pilot produced 21 regions. Nine overlapped their corresponding existing bounds at 3D IoU ≥0.50. P-005 reached 0.80 with five supporting views and 1,668 splats.
+The current local app build uses the project's own 3D fitting algorithm for all 33 equipment identities. RF-DETR supplies the identity, confidence and a 2D detection for each rendered RGB view. Our algorithm uses camera poses and the scan's Gaussian splats to estimate the position and dimensions. The previous 3D boxes were withheld from fitting and used afterward as comparison proxies.
 
-The existing reviewed bounds are a comparison proxy. The pilot also uses preselected views of this room. Its output stays separate from the shipped catalog pending broader evaluation. Full automatic discovery and labeling of every catalog asset remain open.
+1. **Survey the scan.** Select 24 well-spaced camera positions from the observed floor and render eight directions at each position. This produces 192 initial views without targeting catalog coordinates. Follow-up views use rays or centers from the initial predictions.
+2. **Triangulate per identity.** Keep the strongest detection per camera position. Cast a 3D ray through each box center and test ray pairs for a common location. Reject pairs with weak parallax or more than 20 cm between their closest points. Count a ray as supporting the hypothesis when it passes within 19 cm of the candidate center. Prefer more supporting views, then higher confidence and smaller residuals. A strict fit requires at least three above-threshold positions. A corroborated fit requires two above-threshold positions and at least five supporting positions in total.
+3. **Vote on observed geometry.** Project nearby Gaussian centers into the supporting camera views. Keep centers that land inside their detection rectangles in at least 70% of the supporting views, with a minimum of three votes. Require at least 50 centers. Compute the axis-aligned bounds from the 1st and 99th percentiles and add 15 mm per face. This suppresses isolated outliers while leaving room for the Gaussian extent.
+4. **Recover occluded surfaces when supported.** For the rear red vessel, grow the accepted geometry into a neighboring 3.5 cm voxel component with the same dominant color. The component must share at least 40% of the existing point membership. This recovered the lower part of the vessel and raised its 3D IoU from 0.426 to 0.566.
+5. **Validate and export.** Retain each approved box and its scan-point membership under the stable object ID. The export checks the source hash, ordered finite bounds and valid point indices. The app reads `extractionBounds` from the bundled map and projects the turquoise frame for the current camera view. The geometric fit runs only during preparation. Routing geometry and workbook associations retain their existing registration. [Fusion implementation](../tools/spatial_vision_fusion.py) · [Reproduction command](../README.md)
+
+| Final result | Evidence |
+| --- | --- |
+| 33 of 33 equipment identities localized | 32 strict fits and one corroborated fit |
+| 32 of 33 at 3D IoU ≥0.50 | Median 0.659 against the previous reviewed volumes |
+| Doorway blue valve | 3D IoU 0.481. The new box projected closer to the annotated valve in all seven separate views. Median projected IoU rose from 0.401 to 0.477. The scan contained 180 blue supporting centers and none in the extra depth covered by the previous box. |
+| Final app and animation | Same 33 equipment fits plus one display stand from the separate voxel search. Six simulated routes opened the matching service reports. |
+
+3D IoU is the intersection volume divided by the union volume. The comparison volumes are earlier reviewed boxes. The separate valve check measures the visible projection and scan support, so it does not establish an exact hidden surface. This evaluation covers known equipment identities in this scan. It does not establish accuracy in a different room or for previously unseen equipment classes. The detailed per-object results are in the local export's `vision-audit.json`.
 
 ## Offline fine-tuning experiment
 

@@ -5,19 +5,47 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'site.dart';
-import 'asset_data.dart';
 import 'navigation.dart';
+import 'spatial_data.dart';
 
-Future<AssetData?> _loadAssetData([
-  Future<AssetData?> Function()? loader,
+Future<String?> _loadOptionalAsset(String name) async {
+  try {
+    return await rootBundle.loadString('assets/valmet/$name');
+  } on FlutterError {
+    return null;
+  }
+}
+
+Future<SpatialAssetData?> _loadAssetData(
+  Site site, [
+  Future<SpatialAssetData?> Function()? loader,
 ]) async {
   try {
     if (loader != null) return await loader();
-    return AssetData.fromJson(
-      await rootBundle.loadString('assets/valmet/asset-data.json'),
-    );
-  } on FlutterError {
-    return null;
+    final legacy = await _loadOptionalAsset('asset-data.json');
+    if (legacy == null) return null;
+    final hash = site.sourceSha256;
+    if (hash != null) {
+      final [associations, diagnostics] = await Future.wait([
+        _loadOptionalAsset('associations.json'),
+        _loadOptionalAsset('diagnostics.json'),
+      ]);
+      if (associations != null && diagnostics != null) {
+        try {
+          return SpatialAssetData.fromJson(
+            legacy,
+            associationsSource: associations,
+            diagnosticsSource: diagnostics,
+            sceneSourceSha256: hash,
+          );
+        } on FormatException {
+          // Fall back to the workbook when private sidecars are invalid.
+        } on TypeError {
+          // Bad field types also invalidate the optional sidecars.
+        }
+      }
+    }
+    return SpatialAssetData.fromJson(legacy);
   } on FormatException {
     return null;
   }
@@ -25,8 +53,18 @@ Future<AssetData?> _loadAssetData([
 
 void main() => runApp(const ValmetApp());
 
-String? _workbookTag(SiteObject object, AssetData? data) =>
-    data?.tagForObject(object.objectId, equipmentType: object.equipmentType);
+String? _workbookTag(SiteObject object, SpatialAssetData? data) =>
+    object.geometryOnly
+    ? null
+    : data?.tagForObject(object.objectId, equipmentType: object.equipmentType);
+
+String? _workbookCondition(SiteObject object, SpatialAssetData? data) =>
+    object.geometryOnly
+    ? null
+    : data?.conditionForObject(
+        object.objectId,
+        equipmentType: object.equipmentType,
+      );
 
 class ValmetApp extends StatelessWidget {
   const ValmetApp({super.key, this.site});
@@ -56,7 +94,41 @@ class _FieldScreenState extends State<FieldScreen> {
   late final _site = rootBundle
       .loadString('assets/valmet/site.json')
       .then(Site.fromJson);
+  late final _personSite = _loadPersonSite();
+  bool _usePersonSite = true;
   static const _ar = MethodChannel('valmet/field');
+
+  Future<Site?> _loadPersonSite() async {
+    final source = await _loadOptionalAsset('person-site.json');
+    if (source == null) return null;
+    try {
+      final site = Site.fromJson(source);
+      final legacy = await _site;
+      if (site.personNavigation != null &&
+          site.floor != null &&
+          site.sourceSha256 != null &&
+          site.sourceSha256 == legacy.sourceSha256 &&
+          site.width == legacy.width &&
+          site.depth == legacy.depth &&
+          site.cellSize == legacy.cellSize &&
+          jsonEncode(site.originShift) == jsonEncode(legacy.originShift) &&
+          jsonEncode(site.shRotation) == jsonEncode(legacy.shRotation)) {
+        return site;
+      }
+    } on FormatException {
+      return null;
+    } on TypeError {
+      return null;
+    }
+    return null;
+  }
+
+  Future<Site> _requestedSite(Map<Object?, Object?> request) async {
+    if (widget.site case final site?) return site;
+    if (request['personNavigation'] != true) return _site;
+    return await _personSite ??
+        (throw PlatformException(code: 'invalid_person_site'));
+  }
 
   @override
   void initState() {
@@ -73,13 +145,13 @@ class _FieldScreenState extends State<FieldScreen> {
   Future<Object?> _handleNativeCall(MethodCall call) async {
     if (call.method == 'serviceJourneyEvidence') {
       final request = call.arguments as Map<Object?, Object?>;
-      final data = await _loadAssetData();
-      final site = widget.site ?? await _site;
+      final site = await _requestedSite(request);
+      final data = await _loadAssetData(site);
       final targetId = request['targetID'] as String;
       final object = site.objects
           .where((object) => object.objectId == targetId)
           .singleOrNull;
-      final target = object == null
+      final target = object == null || object.geometryOnly
           ? null
           : data?.forObject(targetId, equipmentType: object.equipmentType);
       return {
@@ -92,10 +164,7 @@ class _FieldScreenState extends State<FieldScreen> {
         },
         'conditions': {
           for (final object in site.objects)
-            object.objectId: data?.conditionForObject(
-              object.objectId,
-              equipmentType: object.equipmentType,
-            ),
+            object.objectId: _workbookCondition(object, data),
         },
       };
     }
@@ -109,7 +178,7 @@ class _FieldScreenState extends State<FieldScreen> {
     }
 
     List<int> pair(Cell cell) => [cell.$1, cell.$2];
-    final site = widget.site ?? await _site;
+    final site = await _requestedSite(request);
     final from = readCell(request['from']);
     final to = readCell(request['to']);
     final blocked = (request['blocked'] as List).map(readCell).toSet();
@@ -171,7 +240,39 @@ class _FieldScreenState extends State<FieldScreen> {
                   if (site == null) {
                     return const Center(child: CircularProgressIndicator());
                   }
-                  return SiteSimulation(site: site, openNative: _openNative);
+                  return FutureBuilder<Site?>(
+                    future: _personSite,
+                    builder: (context, snapshot) {
+                      if (snapshot.connectionState != ConnectionState.done) {
+                        return const Center(child: CircularProgressIndicator());
+                      }
+                      final person = snapshot.data;
+                      return Column(
+                        children: [
+                          if (person != null)
+                            SwitchListTile(
+                              title: const Text('Walking-person simulation'),
+                              subtitle: const Text('Turn off for live AR'),
+                              value: _usePersonSite,
+                              onChanged: (value) =>
+                                  setState(() => _usePersonSite = value),
+                            ),
+                          Expanded(
+                            child: SiteSimulation(
+                              key: ValueKey(_usePersonSite),
+                              site: _usePersonSite ? person ?? site : site,
+                              extractionBounds: {
+                                for (final object
+                                    in person?.objects ?? const <SiteObject>[])
+                                  object.objectId: ?object.extractionBounds,
+                              },
+                              openNative: _openNative,
+                            ),
+                          ),
+                        ],
+                      );
+                    },
+                  );
                 },
               ),
       ),
@@ -185,29 +286,33 @@ class SiteSimulation extends StatefulWidget {
     required this.site,
     required this.openNative,
     this.loadAssetData,
+    this.extractionBounds = const {},
   });
 
   final Site site;
   final Future<void> Function(String, [String?]) openNative;
-  final Future<AssetData?> Function()? loadAssetData;
+  final Future<SpatialAssetData?> Function()? loadAssetData;
+  final Map<String, Object> extractionBounds;
 
   @override
   State<SiteSimulation> createState() => _SiteSimulationState();
 }
 
 class _SiteSimulationState extends State<SiteSimulation> {
-  late final _assetData = _loadAssetData(widget.loadAssetData);
+  late final _assetData = _loadAssetData(widget.site, widget.loadAssetData);
   late final _devices = widget.site.objects
-      .where((o) => o.service != null)
+      .where((o) => o.service != null && !o.geometryOnly)
       .toList();
   late SiteObject? _target = _devices.firstOrNull;
   late NavigationJourney? _journey = _createJourney();
   List<Cell> get _route => _journey?.route ?? [];
   bool _moved = false;
   bool _keyControls = false;
-  int _framesPerSecond = 30;
+  int _framesPerSecond = 60;
   bool _obstacleDemo = false;
-  late double _clearanceMetres = widget.site.originShift == null ? 0.2 : 0.1;
+  late double _clearanceMetres =
+      widget.site.personNavigation?.radiusMetres ??
+      (widget.site.originShift == null ? 0.2 : 0.1);
 
   NavigationJourney? _createJourney() {
     final target = _target;
@@ -234,6 +339,7 @@ class _SiteSimulationState extends State<SiteSimulation> {
       return;
     }
     final site = widget.site;
+    final person = site.personNavigation;
     final visible = site.visibleObjects(_moved).toList();
     final target = visible.indexWhere((object) => object == _target);
     List<int> pair(Cell cell) => [cell.$1, cell.$2];
@@ -258,7 +364,12 @@ class _SiteSimulationState extends State<SiteSimulation> {
         'start': pair(site.start),
         'route': _route.map(pair).toList(),
         'clearanceMetres': _clearanceMetres,
-        'arrivalRadiusMetres': math.max(0.30, site.cellSize / 2),
+        if (person != null) 'eyeHeightMetres': person.eyeHeightMetres,
+        if (person != null)
+          'walkingSpeedMetresPerSecond': person.speedMetresPerSecond,
+        'arrivalRadiusMetres': person == null
+            ? math.max(0.30, site.cellSize / 2)
+            : site.cellSize / 2,
         'floor': site.floor?.map(pair).toList(),
         'walkableFloor': site
             .walkableCells(moved: _moved, clearanceMetres: _clearanceMetres)
@@ -278,13 +389,13 @@ class _SiteSimulationState extends State<SiteSimulation> {
               'height': object.height,
               'cells': object.cells?.map(pair).toList(),
               'bounds': object.bounds,
+              'extractionBounds':
+                  object.extractionBounds ??
+                  widget.extractionBounds[object.objectId],
               'service': object.service == null ? null : pair(object.service!),
               'workbookTag': _workbookTag(object, data),
               'equipmentType': object.equipmentType,
-              'syntheticCondition': data?.conditionForObject(
-                object.objectId,
-                equipmentType: object.equipmentType,
-              ),
+              'syntheticCondition': _workbookCondition(object, data),
             },
         ],
       }),
@@ -294,12 +405,13 @@ class _SiteSimulationState extends State<SiteSimulation> {
   @override
   Widget build(BuildContext context) {
     final site = widget.site;
+    final person = site.personNavigation;
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
         Text(site.name, style: Theme.of(context).textTheme.titleLarge),
         const SizedBox(height: 12),
-        FutureBuilder<AssetData?>(
+        FutureBuilder<SpatialAssetData?>(
           future: _assetData,
           builder: (context, snapshot) => DropdownButtonFormField<SiteObject>(
             initialValue: _target,
@@ -337,14 +449,17 @@ class _SiteSimulationState extends State<SiteSimulation> {
           },
         ),
         const Text('Target frame rate. Actual FPS depends on the device.'),
-        SwitchListTile(
-          contentPadding: EdgeInsets.zero,
-          title: const Text('Forward and backward controls'),
-          subtitle: const Text('Use ↑/↓ to move. Turn by rotating the phone.'),
-          value: _keyControls,
-          onChanged: (value) => setState(() => _keyControls = value),
-        ),
-        if (_target != null && _route.isNotEmpty)
+        if (person == null)
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('Forward and backward controls'),
+            subtitle: const Text(
+              'Use ↑/↓ to move. Turn by rotating the phone.',
+            ),
+            value: _keyControls,
+            onChanged: (value) => setState(() => _keyControls = value),
+          ),
+        if (person == null && _target != null && _route.isNotEmpty)
           SwitchListTile(
             contentPadding: EdgeInsets.zero,
             title: const Text('Movable demo crate'),
@@ -354,48 +469,61 @@ class _SiteSimulationState extends State<SiteSimulation> {
             value: _obstacleDemo,
             onChanged: (value) => setState(() => _obstacleDemo = value),
           ),
-        DropdownButtonFormField<double>(
-          initialValue: _clearanceMetres,
-          decoration: const InputDecoration(labelText: 'Virtual camera radius'),
-          items: const [
-            DropdownMenuItem(
-              value: 0.1,
-              child: Text('0.10 m · virtual camera'),
+        if (person == null)
+          DropdownButtonFormField<double>(
+            initialValue: _clearanceMetres,
+            decoration: const InputDecoration(
+              labelText: 'Virtual camera radius',
             ),
-            DropdownMenuItem(value: 0.2, child: Text('0.20 m · camera')),
-            DropdownMenuItem(value: 0.3, child: Text('0.30 m · camera')),
-          ],
-          onChanged: (radius) {
-            if (radius == null) return;
-            setState(() {
-              _clearanceMetres = radius;
-              _journey = _createJourney();
-            });
-          },
-        ),
-        const Text(
-          'Camera height 1.50 m · not a standing-person clearance check.',
-        ),
+            items: const [
+              DropdownMenuItem(
+                value: 0.1,
+                child: Text('0.10 m · virtual camera'),
+              ),
+              DropdownMenuItem(value: 0.2, child: Text('0.20 m · camera')),
+              DropdownMenuItem(value: 0.3, child: Text('0.30 m · camera')),
+            ],
+            onChanged: (radius) {
+              if (radius == null) return;
+              setState(() {
+                _clearanceMetres = radius;
+                _journey = _createJourney();
+              });
+            },
+          ),
+        if (person == null)
+          const Text(
+            'Camera height 1.50 m · not a standing-person clearance check.',
+          )
+        else
+          Text(
+            'Model envelope ${(person.radiusMetres * 2).toStringAsFixed(2)} m wide · '
+            '${person.bodyHeightMetres.toStringAsFixed(2)} m tall · '
+            '${person.headMarginMetres.toStringAsFixed(2)} m overhead margin',
+          ),
         if (!site.isWalkable(
           site.start,
           moved: _moved,
           clearanceMetres: _clearanceMetres,
         ))
-          const Text(
-            'Start position lacks the selected clearance. Reduce the radius to move from this start.',
+          Text(
+            person == null
+                ? 'Start position lacks the selected clearance. Reduce the radius to move from this start.'
+                : 'Start position lacks walking-person clearance.',
           ),
-        FilledButton.icon(
-          onPressed: _openWorld,
-          icon: const Icon(Icons.directions_walk),
-          label: const Text('Walk inside the 3D model'),
-        ),
+        if (person == null)
+          FilledButton.icon(
+            onPressed: _openWorld,
+            icon: const Icon(Icons.directions_walk),
+            label: const Text('Walk inside the 3D model'),
+          ),
         if (_target != null)
           OutlinedButton.icon(
             onPressed: _route.isEmpty ? null : () => _openWorld(simulate: true),
             icon: const Icon(Icons.play_arrow),
             label: const Text('Simulate service visit'),
           ),
-        if (site.objects.any((object) => object.movable))
+        if (person == null && site.objects.any((object) => object.movable))
           SwitchListTile(
             contentPadding: EdgeInsets.zero,
             title: const Text('Move pallet out of the aisle'),
