@@ -79,6 +79,16 @@ connectors clearly. The same four-crop replay for the rear vessel at the
 locked 0.76 threshold retained 25 true positives and added one false
 positive. It was rejected.
 
+## Blue inline valve handoff candidate
+
+At the validation-locked RF-DETR threshold 0.814663589, the projected and
+deduplicated archival comparison improved room results from 61/2/1 to
+62/0/0 (TP/FP/FN). The walking archive was unchanged at 7/0/0 and falls
+one positive below the eight-positive release gate. A separately frozen
+four-view walking-endpoint sample improved from 0/0/4 to 3/0/1, with no
+detections in two target-absent controls. This is supplementary static
+evidence. The app still uses R3 for this valve and for P-005.
+
 ## Ownership
 
 Each worker has three implementation or delivery packages. Mac owns everything that requires Xcode and iOS verification. Windows owns the cross-platform backend and submission assembly. One writer per file. Review the other worker's handoff without editing their files.
