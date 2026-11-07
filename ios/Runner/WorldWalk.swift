@@ -188,6 +188,7 @@ struct WorldAlignment {
 final class RouteMapView: UIControl {
   let model: WalkSite
   let mapImage: UIImage?
+  private let expanded: Bool
   private(set) var route: [[Int]]
   // Same orthographic crop/aspect correction as the reviewed 2400 × 2000 room PNG.
   static let imageWorldBounds = CGRect(x: 1.7163, y: 1.5921166667, width: 9.5708, height: 7.9756666667)
@@ -195,13 +196,14 @@ final class RouteMapView: UIControl {
   private(set) var pose: simd_float4x4?
   private var baseImage: UIImage?
 
-  init(model: WalkSite, image: UIImage? = nil) {
+  init(model: WalkSite, image: UIImage? = nil, expanded: Bool = false) {
     self.model = model
+    self.expanded = expanded
     route = model.route
     mapImage = model.sourceSha256 == Self.imageSourceSha256 ? image : nil
     super.init(frame: .zero)
     backgroundColor = UIColor.black.withAlphaComponent(0.85)
-    layer.cornerRadius = 12
+    layer.cornerRadius = expanded ? 0 : 6
     clipsToBounds = true
     isAccessibilityElement = true
     accessibilityLabel = "Route map"
@@ -229,9 +231,13 @@ final class RouteMapView: UIControl {
 
   func mapPoint(x: Float, z: Float) -> CGPoint {
     let region = worldBounds
-    let scale = max(0, min((bounds.width - 24) / region.width, (bounds.height - 60) / region.height))
+    let header: CGFloat = expanded ? 0 : 22
+    let footer: CGFloat = 22
+    let sideInset: CGFloat = expanded ? 0 : 2
+    let contentHeight = bounds.height - header - footer
+    let scale = max(0, min((bounds.width - 2 * sideInset) / region.width, contentHeight / region.height))
     return CGPoint(x: (bounds.width - region.width * scale) / 2 + (CGFloat(x) - region.minX) * scale,
-                   y: 30 + (bounds.height - 60 - region.height * scale) / 2 + (CGFloat(z) - region.minY) * scale)
+                   y: header + (contentHeight - region.height * scale) / 2 + (CGFloat(z) - region.minY) * scale)
   }
 
   private var worldBounds: CGRect {
@@ -321,10 +327,16 @@ final class RouteMapView: UIControl {
     let attributes: [NSAttributedString.Key: Any] = [
       .font: UIFont.preferredFont(forTextStyle: .caption1), .foregroundColor: UIColor.white,
     ]
-    ("Map ↗" as NSString).draw(at: CGPoint(x: 12, y: 8), withAttributes: attributes)
+    UIColor.black.setStroke()
+    let border = UIBezierPath(rect: imageRect.insetBy(dx: 0.25, dy: 0.25))
+    border.lineWidth = 0.5
+    border.stroke()
+    if !expanded {
+      ("Map ↗" as NSString).draw(at: CGPoint(x: 6, y: 3), withAttributes: attributes)
+    }
     let outside = pose.map { !worldBounds.contains(CGPoint(x: CGFloat($0.columns.3.x), y: CGFloat($0.columns.3.z))) } ?? false
     let status = pose == nil ? "Location unavailable" : outside ? "Outside map" : route.isEmpty ? "No route" : "You · Route · Target"
-    (status as NSString).draw(at: CGPoint(x: 12, y: bounds.height - 23), withAttributes: attributes)
+    (status as NSString).draw(at: CGPoint(x: 6, y: bounds.height - 19), withAttributes: attributes)
     guard let pose, !outside, let context = UIGraphicsGetCurrentContext() else { return }
     let point = mapPoint(x: pose.columns.3.x, z: pose.columns.3.z)
     context.saveGState()
@@ -549,7 +561,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     serviceMarker.isHidden = true
     virtual.addSubview(serviceMarker)
 
-    message.font = .preferredFont(forTextStyle: .callout)
+    message.font = .preferredFont(forTextStyle: .subheadline)
     message.textColor = .white
     message.numberOfLines = visionMode.isLiveWalk ? 5 : 0
     visionStatus.font = .preferredFont(forTextStyle: .caption1)
@@ -563,7 +575,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
       if self.visionMode != .normal { self.updateMap(pose) }
       self.updateNearbyEquipment(at: pose.columns.3, viewProjection: projection * pose.inverse)
     }
-    nearbyStatus.font = .preferredFont(forTextStyle: .caption1)
+    nearbyStatus.font = .preferredFont(forTextStyle: .caption2)
     nearbyStatus.textColor = .white
     nearbyStatus.numberOfLines = 4
     nearbyStatus.isHidden = true
@@ -718,7 +730,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     inspectionButton.title = "Open maintenance report"
     inspectionButton.image = UIImage(systemName: "doc.text")
     inspectionButton.imagePadding = 8
-    inspectionButton.buttonSize = .large
+    inspectionButton.buttonSize = .medium
     inspect.configuration = inspectionButton
     inspect.addTarget(self, action: #selector(showInspection), for: .touchUpInside)
     moveCrate.configuration = .tinted()
@@ -726,13 +738,13 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     moveCrate.addTarget(self, action: #selector(placeDemoCrate), for: .touchUpInside)
     let row = UIStackView(arrangedSubviews: [toggle, close])
     row.distribution = .fillEqually
-    row.spacing = 8
+    row.spacing = 6
     movementControls = model.keyControls ? makeControls() : nil
     let panel = UIStackView(arrangedSubviews: [message, inspect, visionStatus, nearbyStatus, movementControls, align, moveCrate, row].compactMap { $0 })
     panel.axis = .vertical
-    panel.spacing = 8
+    panel.spacing = 5
     panel.isLayoutMarginsRelativeArrangement = true
-    panel.layoutMargins = UIEdgeInsets(top: 12, left: 12, bottom: 12, right: 12)
+    panel.layoutMargins = UIEdgeInsets(top: 8, left: 9, bottom: 8, right: 9)
     panel.backgroundColor = UIColor.black.withAlphaComponent(0.85)
     panel.layer.cornerRadius = 12
     panel.translatesAutoresizingMaskIntoConstraints = false
@@ -743,7 +755,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     NSLayoutConstraint.activate([
       panel.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 12),
       trailing,
-      panel.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -10),
+      panel.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor),
     ])
     routeMap.translatesAutoresizingMaskIntoConstraints = false
     routeMap.addTarget(self, action: #selector(showMap), for: .touchUpInside)
@@ -1619,17 +1631,27 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     if let label = nearbyLabels[index] { return label }
     let label = UILabel()
     let font = UIFont.preferredFont(forTextStyle: .caption2)
-    label.font = index == model.target ? font : font.withSize(font.pointSize * 0.9)
+    let isTarget = index == model.target
+    label.font = isTarget ? font : font.withSize(font.pointSize * 0.9)
     label.textColor = .white
-    label.backgroundColor = UIColor.black.withAlphaComponent(0.85)
-    label.layer.borderColor = index == model.target ? targetFrameLayer.strokeColor : nearbyFrameLayer.strokeColor
-    label.layer.borderWidth = 1
-    label.layer.cornerRadius = 4
-    label.layer.masksToBounds = true
     label.textAlignment = .center
     label.numberOfLines = 2
     label.lineBreakMode = .byTruncatingTail
-    label.text = text
+    if isTarget {
+      label.backgroundColor = UIColor.black.withAlphaComponent(0.85)
+      label.layer.borderColor = targetFrameLayer.strokeColor
+      label.layer.borderWidth = 1
+      label.layer.cornerRadius = 4
+      label.layer.masksToBounds = true
+      label.text = text
+    } else {
+      label.attributedText = NSAttributedString(string: text, attributes: [
+        .font: label.font!,
+        .foregroundColor: UIColor.white,
+        .strokeColor: UIColor.black,
+        .strokeWidth: -4,
+      ])
+    }
     label.isHidden = true
     virtual.addSubview(label)
     nearbyLabels[index] = label
@@ -1902,7 +1924,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     let page = UIViewController()
     page.title = model.name
     page.view.backgroundColor = .black
-    let map = RouteMapView(model: model, image: mapImage)
+    let map = RouteMapView(model: model, image: mapImage, expanded: true)
     map.accessibilityTraits = .image
     map.accessibilityHint = nil
     map.setRoute(activeRoute)
@@ -1911,16 +1933,15 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     map.translatesAutoresizingMaskIntoConstraints = false
     page.view.addSubview(map)
     NSLayoutConstraint.activate([
-      map.leadingAnchor.constraint(equalTo: page.view.safeAreaLayoutGuide.leadingAnchor, constant: 12),
-      map.trailingAnchor.constraint(equalTo: page.view.safeAreaLayoutGuide.trailingAnchor, constant: -12),
-      map.topAnchor.constraint(equalTo: page.view.safeAreaLayoutGuide.topAnchor, constant: 12),
-      map.bottomAnchor.constraint(equalTo: page.view.safeAreaLayoutGuide.bottomAnchor, constant: -12),
+      map.leadingAnchor.constraint(equalTo: page.view.leadingAnchor),
+      map.trailingAnchor.constraint(equalTo: page.view.trailingAnchor),
+      map.topAnchor.constraint(equalTo: page.view.safeAreaLayoutGuide.topAnchor),
+      map.bottomAnchor.constraint(equalTo: page.view.safeAreaLayoutGuide.bottomAnchor),
     ])
     page.navigationItem.rightBarButtonItem = UIBarButtonItem(systemItem: .done,
       primaryAction: UIAction { [weak self] _ in self?.dismiss(animated: true) })
     let navigation = UINavigationController(rootViewController: page)
-    navigation.sheetPresentationController?.detents = [.large()]
-    navigation.sheetPresentationController?.prefersGrabberVisible = true
+    navigation.modalPresentationStyle = .overFullScreen
     present(navigation, animated: true)
   }
 
