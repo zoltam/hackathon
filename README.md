@@ -2,6 +2,8 @@
 
 Flutter starter for the Valmet hackathon challenge. See [challenge details](challenges.md).
 
+Demo slides: [Valmet Field Diagnostics](https://docs.google.com/presentation/d/1csJrFhN5E0WgSZq5gzBBEaNPzyUlpo0a8Nj8KYb7jmA/edit).
+
 Team coordination: [development plan](PLAN.md) · [full challenge notes and scoring](challenge-shortlist.md).
 
 ## Run the spatial backend and browser viewer
