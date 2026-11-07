@@ -54,5 +54,3 @@ app.*.map.json
 !/assets/valmet/equipment-room-map.png
 
 /sources/valmet/*
-!/sources/valmet/Valmet_SinceAI_2026_Synthetic_Industrial_Metaverse_Builder_Pack (1) (2) (1).xlsx
-!/sources/valmet/Valmet_x_SinceAI_2026_Challenge_Brief_FINAL_updated (1).docx

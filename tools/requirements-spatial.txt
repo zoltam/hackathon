@@ -1,5 +1,4 @@
-# Local backend and lightweight browser viewer.
+# Offline scene and workbook export.
 numpy>=1.26
 openpyxl>=3.1,<4
 Pillow>=10
-viser==1.1.1

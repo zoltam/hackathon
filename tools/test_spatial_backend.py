@@ -3,105 +3,19 @@ import json
 from pathlib import Path
 import tempfile
 import threading
-from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 
 import numpy as np
 
-from spatial_backend import SpatialApplication, SpatialViewer, box_edges, nearby_objects
+from spatial_backend import SpatialApplication, box_edges, nearby_objects
 from spatial_navigation import Journey, verify_route
 
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
-class ViewerLifecycleTest(unittest.TestCase):
-    def setUp(self):
-        self.viewer = SpatialViewer.__new__(SpatialViewer)
-        self.viewer._state_lock = threading.RLock()
-        self.viewer.generation = 0
-        self.viewer.selected_id = 'target'
-        self.viewer.asset_names = {'Fixture': 'target', 'Other': 'other'}
-        self.viewer.asset = SimpleNamespace(value='Other')
-
-    def test_unreachable_journey_keeps_loop_alive_without_position(self):
-        viewer = self.viewer
-        viewer.journey = Journey([], .1)
-        viewer.person = SimpleNamespace(visible=True)
-        viewer.body = SimpleNamespace(visible=True)
-        viewer.nearby = SimpleNamespace(content='Old nearby objects')
-        with patch('spatial_backend.time.sleep', side_effect=StopIteration):
-            with self.assertRaises(StopIteration):
-                viewer.run()
-        self.assertFalse(viewer.person.visible)
-        self.assertFalse(viewer.body.visible)
-        self.assertIn('No reachable', viewer.nearby.content)
-
-    def test_failed_replan_removes_previous_route(self):
-        viewer = self.viewer
-        viewer.target_ids = {'Fixture': 'target'}
-        viewer.target = SimpleNamespace(value='Fixture')
-        viewer.start_x = SimpleNamespace(value=1)
-        viewer.start_z = SimpleNamespace(value=1)
-        old_route = Mock()
-        viewer.route_handle = old_route
-        viewer.app = SimpleNamespace(route=Mock(side_effect=RuntimeError('Fixture failure')))
-        viewer.person = SimpleNamespace(visible=True)
-        viewer.body = SimpleNamespace(visible=True)
-        viewer.status = SimpleNamespace(content='Old route')
-        viewer.plan()
-        old_route.remove.assert_called_once()
-        self.assertIsNone(viewer.route_handle)
-        self.assertIsNone(viewer.journey)
-        self.assertFalse(viewer.person.visible)
-        self.assertIn('unavailable', viewer.status.content)
-
-    def test_replan_stops_old_journey_before_waiting_and_syncs_inspected_asset(self):
-        viewer = self.viewer
-        viewer.target_ids = {'Fixture': 'target'}
-        viewer.target = SimpleNamespace(value='Fixture')
-        viewer.start_x = SimpleNamespace(value=1)
-        viewer.start_z = SimpleNamespace(value=1)
-        viewer.route_handle = None
-        viewer.journey = Journey([[1, 1], [2, 1]], .1)
-        viewer.journey.play()
-        viewer.person = SimpleNamespace(visible=True)
-        viewer.body = SimpleNamespace(visible=True)
-        viewer.status = SimpleNamespace(content='Old route')
-        viewer.show_report = Mock()
-
-        def delayed_route(*args):
-            self.assertIsNone(viewer.journey)
-            return {'route': [[1, 1]], 'status': 'arrived', 'distanceMetres': 0}
-
-        viewer.app = SimpleNamespace(route=delayed_route, site={'cellSize': .1})
-        viewer.plan()
-        self.assertEqual(viewer.asset.value, 'Fixture')
-        viewer.show_report.assert_called_once_with('target')
-        self.assertEqual(viewer.journey.status, 'arrived')
-
-    def test_reset_and_replay_cannot_open_previous_arrival_explanation(self):
-        viewer = self.viewer
-        viewer.journey = Journey([[1, 1], [2, 1]], .1)
-        viewer.journey.play()
-        viewer.journey.advance(1)
-        journey = viewer.journey
-        viewer.show_report = Mock()
-        viewer.open_report = Mock()
-
-        def answer_after_reset(*args):
-            viewer.reset()
-            journey.play()
-            journey.advance(1)
-
-        viewer.app = SimpleNamespace(explain=answer_after_reset)
-        viewer.arrival_report(journey, 'target', viewer.generation)
-        self.assertEqual(journey.status, 'arrived')
-        self.assertGreater(viewer.generation, 0)
-        viewer.show_report.assert_not_called()
-        viewer.open_report.assert_not_called()
-
+class SpatialExportTest(unittest.TestCase):
     def test_catalog_refresh_cannot_be_overwritten_by_pending_model_output(self):
         app = SpatialApplication.__new__(SpatialApplication)
         original, refreshed = {'summary': 'Old association'}, {'summary': 'New association'}

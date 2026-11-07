@@ -145,7 +145,7 @@ void main() {
         expect(report, isNotNull, reason: object.objectId);
         expect(report!.reportText, contains('Synthetic'));
         expect(report.reportText, contains('Current_State!'));
-        expect(report.arrivalSummary, contains('Engine:'));
+        expect(report.reportText, contains('Engine: ${report.engine}'));
       }
       expect(
         data.tagForObject(
