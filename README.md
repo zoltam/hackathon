@@ -66,20 +66,26 @@ The supplement has an independent
 bounded inference queue and two-frame confirmation history. Its approved IDs
 exclude all 11 R3 IDs. Capture-time 3D association follows image inference.
 
-The frozen epoch-16 export qualified 14 additional instances on both validation
+The first epoch-16 release qualified 14 additional instances on both validation
 and test at per-instance precision ≥95% and recall ≥70%, after pose association
 and deduplication. The separate image-only policy qualified ten additional
 instances. These are different evaluated policies. Across all 33 candidates,
 the pose-associated test produced 2,243 true positives, 81 false positives and
 392 misses. Three difficult instances still have low recall, particularly the
-two orange actuators and the rear red vessel. The enabled catalog contains 25 IDs,
-comprising 11 R3 IDs and 14 additional IDs.
+two orange actuators and the rear red vessel. Validation-only threshold changes
+qualified four more instances on the archived 292-view test. Floor carton,
+black shelf cart and yellow-wheel hand truck also passed on new views. Short
+step ladder qualified on the archive, with 62 positive examples. The new-view
+set had no positive examples of that ladder. The enabled catalog contains 29
+IDs, comprising 11 R3 IDs and 18 additional IDs.
 
 The iPhone check found all 14 additional IDs in their respective fixed views
 and showed no supplemental overlay in the negative view. Both baseline and
 combined runs missed the same wall-pump approach view. All six service journeys
 passed recognition, arrival and workbook-evidence checks with the supplement.
 A separate 2.0 m alternate P-005 journey also passed.
+With the four new thresholds, iPhone verification confirmed each newly
+enabled object, the empty negative view and the alternate P-005 journey.
 
 After a 12.49 s cold-model warmup, the 90-second combined benchmark produced
 719 supplemental samples at 7.99 Hz, with p95 inference of 27 ms and one stale

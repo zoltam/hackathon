@@ -4,18 +4,18 @@
 
 The original Industrial Boiler Room PLY passed structural checks for 502,482 of 1,506,136 records. The demo uses the complete Equipment Room replacement. The Python/NumPy pipeline validates and registers all 1,676,481 Gaussians to the reviewed scene frame. Swift/Metal renders anisotropic splats with opacity and degree-3 view-dependent color. Model distances assume one registered unit equals one metre.
 
-Extraction starts from 33 reviewed 3D seed volumes. The builder selects supporting Gaussians and refines bounds from their coordinates where applicable. It stores a stable object ID, type, 3D bounds and support count for each frame. The enabled detectors cover 25 identities. Coverage is limited to the seeded catalog.
+Extraction starts from 33 reviewed 3D seed volumes. The builder selects supporting Gaussians and refines bounds from their coordinates where applicable. It stores a stable object ID, type, 3D bounds and support count for each frame. The enabled detectors cover 29 identities. Coverage is limited to the seeded catalog.
 
 ## Recognition and 3D association
 
 On macOS, Swift/Metal and Pillow prepare labeled renders and portrait crops. Scene masks produce 2D training boxes from the visible parts of registered volumes. Apple Create ML trains an ObjectPrint transfer-learning detector. The bundled R3 Core ML export used 720 training images from the same simulated room.
 
-An RF-DETR Nano FP16 Core ML supplement adds 14 IDs after validation, held-out
+An RF-DETR Nano FP16 Core ML supplement adds 18 IDs after validation, held-out
 render and phone checks. Its typed RGB input includes normalization, and its
 metadata stores the ordered classes, frozen thresholds and approved IDs.
 Its bounded queue and confirmation history are independent of R3. Supplemental
 failure clears its overlays while R3 continues. The source package and Apache
-2.0 notice are included. Eight of the 33 reviewed IDs remain disabled.
+2.0 notice are included. Four of the 33 reviewed IDs remain disabled.
 
 On iPhone, Vision/Core ML runs on clean Metal-rendered frames sampled at up to 8 Hz, skipping frames while inference is busy. ARKit tracks physical phone motion for the manual walkthrough. The detector receives only rendered pixels and returns catalog IDs, boxes and scores. Each frame carries its capture-time pose, projection and timestamp. For current results, the app projects the matching catalog volume into the captured frame and checks overlap. It keeps the strongest box per ID and requires two consecutive observations before showing a yellow box. Teal proximity frames and mapped status use the scene geometry within 2.5 m.
 
@@ -36,6 +36,7 @@ At arrival, Dart retrieves current state, latest sampled telemetry, recent alarm
 - Held-out same-room renders at IoU ≥ 0.50 and score ≥ 0.25. R3 aggregate F1 was 91.54% on 88 original views and 81.43% on 69 walking views. Raw pump detections were 13/18 and 67/69, with two and three false pump detections respectively. Replaying the app's pose-based filter and per-ID deduplication on the walking views raised F1 to 85.21% and removed all three false pump detections. This replay measured independent frames.
 - iPhone 15, iOS 26.5, 15-second scripted render benchmark. 29.67 GPU FPS, 29 predictions, 5 ms median and 7 ms p95 inference latency. With class-checked workbook mapping, the scripted journey confirmed `P-005 · Red circulation pump`, showed up to four proximity frames (two with workbook mappings) and arrived after 20.36 s.
 - A warmed-up 90-second combined phone benchmark produced 7.99 Hz supplemental inference, p95 27 ms, and 27.21 rendered FPS versus 28.88 with R3 alone. All 14 additional IDs were confirmed in their fixed views and the negative view remained empty. The same wall-pump approach was missed with and without the supplement. All six scripted service journeys passed recognition, arrival and workbook evidence. Fixed-view confirmation does not measure per-instance phone precision.
+- A threshold-only extension confirmed four more IDs in fixed iPhone views, the empty view and an alternate P-005 journey. On 48 new agent-reviewed views, the enabled 29 IDs reached 91.8% precision and 67.9% recall after association.
 - The stationary-camera crate test localized two placements, blocked the original route and then the active detour, and reopened 27 cells after the move. The user confirmed a physical offline P-005 walkthrough, arrival guidance and report dismissal.
 
 Setup and repeatable checks are in the [README](../README.md). Model selection and device evidence are in the [development plan](../PLAN.md).

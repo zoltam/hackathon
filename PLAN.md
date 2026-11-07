@@ -320,7 +320,7 @@ A predeclared visibility-reviewed subset contained nine usable new views of
 five IDs, all nine correctly detected. That subset complements the original
 test and leaves substantial class coverage gaps.
 
-The app bundles this candidate as a supplement, with 14
+The first epoch-16 release bundled this candidate as a supplement, with 14
 approved additional IDs and the existing R3 model handling its original 11.
 The source Core ML package, upstream license and optional reproducible local
 data/train/export tooling travel with the preview. Phone verification passed
@@ -377,6 +377,39 @@ Among 84 readable, separated orange-actuator training pairs, A appeared to the
 left in 77. The seven genuine reversed pairs came from two camera cells with a
 view of the backs of the actuators. A separate training experiment tests the effect
 of removing default horizontal mirroring while retaining those real views.
+In that replay, the A actuator reached 80.8% recall after association and 57.7%
+with RGB alone. The front-leaning ladder fell below the protected recall gate
+at 67.5%, so the replay stayed local.
+
+### Threshold-only coverage extension
+
+For eight previously disabled IDs, a 0.01–0.99 validation grid selected the
+highest score threshold that retained at least 97% precision and 80% recall
+after association. Five IDs qualified. All five passed the archived 292-view
+test at precision ≥95% and recall ≥70%. The already enabled 14 IDs retained
+their exact score thresholds, and the package uses the same learned weights.
+
+A supplementary evaluation froze 48 new views after numerical and agent
+visual review, covering 25 previously held-out camera cells. Its annotations
+include 31 IDs. Thirteen IDs had an accepted primary view. The set has no
+human signoff and shares coarse cells with earlier tests. Of the five threshold
+nominees, floor carton, black shelf cart and yellow-wheel hand truck passed
+with adequate support. Rolling chair recorded 15 true positives, one false
+positive and six misses, below the 95% precision gate. Short step ladder had
+zero positives in this supplementary set and qualified on 62 archived positives.
+
+The four newly enabled thresholds are 0.85 for floor carton, 0.51 for short
+step ladder, 0.55 for black shelf cart and 0.51 for yellow-wheel hand truck.
+Together they recorded 277 true positives, seven false positives and 85 misses
+on the archived test. The RGB-only policy also qualified floor carton and
+short step ladder. All four passed their fixed iPhone poses with the normal
+launch policy. The empty view and alternate 2.0 m P-005 journey passed, including
+the exact workbook tag and arrival evidence. The app now enables 29 IDs.
+
+The 48-view replay for these 29 IDs measured 290 true positives, 26 false
+positives and 137 misses after association, giving 91.8% precision and 67.9%
+recall. These results describe static views and expose substantial misses
+outside the fixed demonstration poses.
 
 - The supplied DOCX names the original Industrial Boiler Room PLY. In that
   archive 502,482 of 1,506,136 records pass the structural guard. The team uses
@@ -446,7 +479,7 @@ of removing default horizontal mirroring while retaining those real views.
 ## Known gaps and decisions
 
 - The full brief favours lightweight UI and backend intelligence. iOS with live on-phone recognition is our chosen product requirement; keep it focused so the scored spatial/data/diagnostic work is delivered.
-- The scene builder uses 33 visually reviewed seed volumes. The enabled detectors cover 25 object identities in rendered views. Eight candidate identities remain disabled pending accuracy checks. Fixed views still expose a wall-pump miss, despite successful scripted service journeys.
+- The scene builder uses 33 visually reviewed seed volumes. The enabled detectors cover 29 identities. Rolling chair, rear red vessel and both orange actuators remain below release criteria. Fixed views still expose a wall-pump miss, despite successful scripted service journeys.
 - The replacement PLY passed structural validation. Recheck registered equipment bounds in the complete scene before publishing detection metrics.
 - Workbook scene coordinates are placeholders. Remap them to extracted objects; the brief explicitly allows procedural/random metadata association.
 - The local workbook contains 4,320 telemetry samples. Its referenced `telemetry_full_14d_30min.csv` is not in the supplied ZIP. Use the included sample unless more data is provided.
