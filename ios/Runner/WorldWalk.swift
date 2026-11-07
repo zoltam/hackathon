@@ -220,7 +220,7 @@ struct WalkSite: Decodable {
 
   func isAtServicePosition(_ position: SIMD2<Float>, on route: [[Int]]) -> Bool {
     guard let end = route.last, cellSize > 0 else { return false }
-    let radius = arrivalRadiusMetres ?? max(0.30, cellSize / 2)
+    let radius = (arrivalRadiusMetres ?? max(0.30, cellSize / 2)) * (isRedPumpService ? 1.5 : 1)
     let destination = center(end)
     guard simd_distance(position, SIMD2(destination.x, destination.z)) <= radius else { return false }
     let cell = cellAt(x: position.x, z: position.y)
@@ -647,6 +647,8 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
   private let toggle = UIButton(type: .system)
   private let inspect = UIButton(type: .system)
   private var arrived = false
+  private var nearReportPump = false
+  private var keepReportVisibleUntil: CFTimeInterval = 0
   private var alignment: WorldAlignment?
   private var showModel = false
   private var started = false
@@ -2036,6 +2038,8 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
   @objc private func calibrate() {
     if alignment != nil {
       arrived = false
+      nearReportPump = false
+      keepReportVisibleUntil = 0
       alignment = nil
       showModel = false
       lastFrame = nil
@@ -2211,6 +2215,12 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
   }
 
   private func updateWalkStatus(at position: SIMD4<Float>) {
+    if model.isRedPumpService, let pump = serviceTarget {
+      let point = SIMD2(position.x, position.z)
+      let bounds = pump.floorBounds(cellSize: model.cellSize)
+      // The report can be opened nearby even when the pump is out of sight.
+      nearReportPump = simd_distance_squared(point, simd_clamp(point, bounds.min, bounds.max)) <= 1.5 * 1.5
+    }
     let accessWarning = isNearBlockedAccess(at: position)
       ? (model.serviceAccessDemo == true
           ? "Move the cart and carton to reach P-001 for repair."
@@ -2247,7 +2257,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
   }
 
   @objc private func showInspection() {
-    guard arrived else { return }
+    guard !inspect.isHidden else { return }
     let report = UIViewController()
     report.title = "Inspection evidence"
     report.navigationItem.rightBarButtonItem = UIBarButtonItem(
@@ -2427,7 +2437,12 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
                                visionMode == .obstacle || (ready && alignment != nil))
     virtual.isHidden = !visible
     movementControls?.isHidden = !visible
-    inspect.isHidden = !visible || !arrived
+    let now = CACurrentMediaTime()
+    let canOpenReport = arrived || nearReportPump
+    if model.isRedPumpService, visible, canOpenReport, inspect.isHidden {
+      keepReportVisibleUntil = now + 4
+    }
+    inspect.isHidden = !visible || (!canOpenReport && now >= keepReportVisibleUntil)
     accessBanner.isHidden = !visible || accessStatus.text == nil
     visionStatus.isHidden = !visible || visionMode.isLiveWalk
     nearbyStatus.isHidden = !visible || nearbyStatus.text == nil ||
