@@ -97,9 +97,44 @@ struct WalkSite: Decodable {
   let inspectionSummary: String?
 
   var serviceAccessBlockers: Set<Int> {
-    guard serviceAccessDemo == true else { return [] }
-    let demoObjects: Set<String> = ["boiler-room:silver-platform-cart", "boiler-room:floor-carton"]
-    return Set(objects.indices.filter { demoObjects.contains(objects[$0].objectId ?? "") })
+    guard let target, objects.indices.contains(target) else { return [] }
+    if serviceAccessDemo == true {
+      let demoObjects: Set<String> = ["boiler-room:silver-platform-cart", "boiler-room:floor-carton"]
+      return Set(objects.indices.filter { demoObjects.contains(objects[$0].objectId ?? "") })
+    }
+    let equipment = objects[target]
+    guard let service = equipment.service, service.count == 2, cellSize > 0,
+          equipment.markerBounds != nil else { return [] }
+    let approach = center(service)
+    let start = SIMD2(approach.x, approach.z)
+    let targetBounds = equipment.floorBounds(cellSize: cellSize)
+    let end = simd_clamp(start, targetBounds.min, targetBounds.max)
+    let direction = end - start
+    guard simd_length_squared(direction) > 0.01 else { return [] }
+    let portableTypes: Set<String> = ["carton", "chair", "cleaning_cart", "fan", "hand_truck", "trolley"]
+    let margin: Float = 0.20
+    return Set(objects.indices.filter { index in
+      let object = objects[index]
+      guard index != target, object.markerBounds != nil,
+            portableTypes.contains(object.equipmentType ?? "") else { return false }
+      let bounds = object.floorBounds(cellSize: cellSize)
+      let lower = bounds.min - margin
+      let upper = bounds.max + margin
+      // Intersect the padded footprint with the approach-to-equipment segment.
+      var first: Float = 0
+      var last: Float = 1
+      for axis in 0..<2 {
+        if abs(direction[axis]) < 0.000001 {
+          if start[axis] < lower[axis] || start[axis] > upper[axis] { return false }
+        } else {
+          let a = (lower[axis] - start[axis]) / direction[axis]
+          let b = (upper[axis] - start[axis]) / direction[axis]
+          first = max(first, min(a, b))
+          last = min(last, max(a, b))
+        }
+      }
+      return first < last
+    })
   }
 
   func center(_ cell: [Int], height: Float = 0) -> SIMD3<Float> {
@@ -1542,6 +1577,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
   private func updateNearbyEquipment(at position: SIMD4<Float>, viewProjection: simd_float4x4) {
     let point = SIMD2(position.x, position.z)
     let warnAboutAccess = isNearBlockedAccess(at: position)
+    let accessLabel = model.serviceAccessDemo == true ? "Move to clear access" : "Check access"
     let radius: Float = 2.5
     let nearby = model.objects.indices.compactMap { index -> (index: Int, distance: Float)? in
       let bounds = model.objects[index].floorBounds(cellSize: model.cellSize)
@@ -1605,7 +1641,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
       path.append(frame)
       frameCount += 1
       if object.syntheticCondition != nil { mappedFrameCount += 1 }
-      let labelText = object.displayName + "\n" + (needsMove ? "Move to clear access" : conditionText(for: object))
+      let labelText = object.displayName + "\n" + (needsMove ? accessLabel : conditionText(for: object))
       let label = nearbyLabel(at: entry.index, text: labelText)
       if label.text != labelText {
         Self.setOutlinedText(labelText, on: label)
@@ -1965,7 +2001,10 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
 
   private func updateWalkStatus(at position: SIMD4<Float>) {
     let accessWarning = isNearBlockedAccess(at: position)
-      ? "Move the cart and carton to reach P-001 for repair." : nil
+      ? (model.serviceAccessDemo == true
+          ? "Move the cart and carton to reach P-001 for repair."
+          : "Possible mapped obstruction · Check the highlighted items before servicing.")
+      : nil
     if accessStatus.text != accessWarning { accessStatus.text = accessWarning }
     let cell = cellAt(x: position.x, z: position.z)
     let walkable = isWalkablePosition(x: position.x, z: position.z)

@@ -6,6 +6,32 @@ import simd
 @testable import Runner
 
 class RunnerTests: XCTestCase {
+  func testServiceAccessFindsPortableFootprintsBetweenApproachAndEquipment() throws {
+    let json = """
+      {"name":"Room","keyControls":false,"width":60,"depth":60,"cellSize":0.1,
+       "start":[4,4],"route":[[4,4]],"target":0,"serviceAccessDemo":false,
+       "objects":[
+         {"name":"Pump","x":30,"z":3,"width":5,"depth":4,"height":1.5,"service":[4,4],
+          "bounds":[[3,1,0.3],[3.5,1.5,0.7]]},
+         {"name":"Blocking trolley","equipmentType":"trolley","objectId":"boiler-room:silver-platform-cart",
+          "x":13,"z":4,"width":6,"depth":4,"height":0.9,"bounds":[[1.3,0,0.4],[1.9,0.9,0.8]]},
+         {"name":"Carton off to the side","equipmentType":"carton","objectId":"boiler-room:floor-carton",
+          "x":13,"z":14,"width":6,"depth":4,"height":0.3,"bounds":[[1.3,0,1.4],[1.9,0.3,1.8]]},
+         {"name":"Cabinet","equipmentType":"control_cabinet",
+          "x":22,"z":4,"width":6,"depth":4,"height":1.8,"bounds":[[2.2,0,0.4],[2.8,1.8,0.8]]},
+         {"name":"Trolley beyond the pump","equipmentType":"trolley",
+          "x":39,"z":4,"width":6,"depth":4,"height":0.9,"bounds":[[3.9,0,0.4],[4.5,0.9,0.8]]}
+       ]}
+      """
+    let decoder = JSONDecoder()
+    let mapped = try decoder.decode(WalkSite.self, from: Data(json.utf8))
+    XCTAssertEqual(mapped.serviceAccessBlockers, [1])
+    let demo = try decoder.decode(WalkSite.self, from: Data(
+      json.replacingOccurrences(of: "\"serviceAccessDemo\":false", with: "\"serviceAccessDemo\":true").utf8
+    ))
+    XCTAssertEqual(demo.serviceAccessBlockers, [1, 2])
+  }
+
   func testLiveVisionAcceptsOnlySelectedEquipment() {
     for mode in [WorldWalk.VisionMode.normal, .preview] {
       XCTAssertTrue(mode.acceptsDetection("pump", selectedID: "pump"))
