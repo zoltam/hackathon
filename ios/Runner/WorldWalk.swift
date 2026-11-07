@@ -227,6 +227,54 @@ struct WorldAlignment {
   }
 }
 
+struct RouteReturnGuidance {
+  private var departedAt: TimeInterval?
+  private var trail: [SIMD2<Float>] = []
+  private(set) var isActive = false
+
+  mutating func update(position: SIMD2<Float>, route: [SIMD2<Float>], time: TimeInterval) -> [SIMD2<Float>] {
+    guard let start = route.first else {
+      self = Self()
+      return []
+    }
+    var distanceSquared = simd_distance_squared(position, start)
+    for (a, b) in zip(route, route.dropFirst()) {
+      let segment = b - a
+      let lengthSquared = simd_length_squared(segment)
+      guard lengthSquared > 0 else { continue }
+      let fraction = min(1, max(0, simd_dot(position - a, segment) / lengthSquared))
+      distanceSquared = min(distanceSquared, simd_distance_squared(position, a + fraction * segment))
+    }
+
+    if distanceSquared <= 0.8 * 0.8 {
+      self = Self()
+      trail = [position]
+      return []
+    }
+    if isActive {
+      while trail.count > 1, let next = trail.last,
+            simd_distance_squared(position, next) <= 0.45 * 0.45 {
+        trail.removeLast()
+      }
+      return Array(trail.reversed())
+    }
+
+    // Record the approach so the return arrow follows ground already traversed.
+    if let last = trail.last, simd_distance_squared(position, last) >= 0.35 * 0.35 {
+      trail.append(position)
+    }
+    guard distanceSquared >= 1.5 * 1.5 else {
+      departedAt = nil
+      return []
+    }
+    if departedAt == nil { departedAt = time }
+    guard let departedAt, time - departedAt >= 1.2 else { return [] }
+    isActive = true
+    if trail.count > 1 { trail.removeLast() }
+    return Array(trail.reversed())
+  }
+}
+
 final class RouteMapView: UIControl {
   let model: WalkSite
   let mapImage: UIImage?
@@ -237,6 +285,9 @@ final class RouteMapView: UIControl {
   static let imageSourceSha256 = "83d8c7d99316c08c9719cfc2c5a6b9d1903b89847780e2458adc662c79f32955"
   private(set) var pose: simd_float4x4?
   private var baseImage: UIImage?
+  var returnPath: [SIMD2<Float>] = [] {
+    didSet { if returnPath != oldValue { setNeedsDisplay() } }
+  }
 
   init(model: WalkSite, image: UIImage? = nil, expanded: Bool = false) {
     self.model = model
@@ -388,8 +439,26 @@ final class RouteMapView: UIControl {
     let outside = pose.map { !worldBounds.contains(CGPoint(x: CGFloat($0.columns.3.x), y: CGFloat($0.columns.3.z))) } ?? false
     let status = pose == nil ? "Location unavailable" : outside ? "Outside map" : route.isEmpty ? "No route" : "You · Route · Target"
     drawCaption(status, y: bounds.height - 19)
-    guard let pose, !outside, let context = UIGraphicsGetCurrentContext() else { return }
-    let point = mapPoint(x: pose.columns.3.x, z: pose.columns.3.z)
+    guard let pose, let context = UIGraphicsGetCurrentContext() else { return }
+    let mapped = mapPoint(x: pose.columns.3.x, z: pose.columns.3.z)
+    let markerBounds = imageRect.insetBy(dx: 8, dy: 8)
+    let point = outside ? CGPoint(x: min(max(mapped.x, markerBounds.minX), markerBounds.maxX),
+                                  y: min(max(mapped.y, markerBounds.minY), markerBounds.maxY)) : mapped
+    if let rejoin = returnPath.last {
+      context.saveGState()
+      context.clip(to: imageRect)
+      let path = UIBezierPath()
+      path.move(to: point)
+      for step in returnPath { path.addLine(to: mapPoint(x: step.x, z: step.y)) }
+      path.setLineDash([4, 3], count: 2, phase: 0)
+      path.lineWidth = 2.5
+      UIColor.systemOrange.setStroke()
+      path.stroke()
+      let end = mapPoint(x: rejoin.x, z: rejoin.y)
+      UIColor.systemOrange.setFill()
+      UIBezierPath(ovalIn: CGRect(x: end.x - 4, y: end.y - 4, width: 8, height: 8)).fill()
+      context.restoreGState()
+    }
     context.saveGState()
     context.translateBy(x: point.x, y: point.y)
     context.rotate(by: CGFloat(atan2(-pose.columns.2.x, pose.columns.2.z)))
@@ -486,10 +555,25 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
   #endif
   private var journeyNearbyMax = (frames: 0, mapped: 0)
   var replanRoute: (([String: Any], @escaping (Any?) -> Void) -> Void)?
+  private var returnGuidance = RouteReturnGuidance()
+  private let returnBanner = UIVisualEffectView(effect: UIBlurEffect(style: .systemChromeMaterialDark))
+  private let returnSymbol = UIImageView(image: UIImage(systemName: "arrow.uturn.backward"))
+  private let returnDirection = UIImageView(image: UIImage(systemName: "arrow.up.circle.fill"))
+  private lazy var returnRoute = routePoints()
+
+  private func routePoints() -> [SIMD2<Float>] {
+    activeRoute.map {
+      let center = model.center($0)
+      return SIMD2(center.x, center.z)
+    }
+  }
+
   private lazy var activeRoute = model.route {
     didSet {
       routeMap.setRoute(activeRoute)
       expandedMap?.setRoute(activeRoute)
+      returnRoute = routePoints()
+      resetReturnGuidance()
     }
   }
   private var obstacleStart: CFTimeInterval?
@@ -842,6 +926,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
       routeMap.widthAnchor.constraint(equalToConstant: 160),
       routeMap.heightAnchor.constraint(equalTo: routeMap.widthAnchor),
     ])
+    installReturnBanner()
     updateDisplay("Hold the phone steady while tracking starts.")
   }
 
@@ -1995,14 +2080,107 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
       displayPose.columns.3 = pose.columns.3
     }
     if model.isRedPumpService { displayPose.columns.3.y += 0.10 }
+    updateMap(displayPose)
+    updateWalkStatus(at: pose.columns.3)
+    if showModel, !arrived {
+      updateReturnGuidance(pose: displayPose, time: frame.timestamp)
+    } else {
+      resetReturnGuidance()
+    }
     let size = virtual.bounds.size
     if showModel, size.width > 0, size.height > 0 {
       virtual.isHidden = false
       let projection = frame.camera.projectionMatrix(for: orientation, viewportSize: size, zNear: 0.04, zFar: 40)
       renderer.render(pose: displayPose, projection: projection)
     }
-    updateMap(displayPose)
-    updateWalkStatus(at: pose.columns.3)
+
+  }
+
+  private func installReturnBanner() {
+    returnBanner.isHidden = true
+    returnBanner.isUserInteractionEnabled = false
+    returnBanner.clipsToBounds = true
+    returnBanner.layer.cornerRadius = 18
+    returnBanner.layer.cornerCurve = .continuous
+    returnBanner.translatesAutoresizingMaskIntoConstraints = false
+    let title = UILabel()
+    title.text = "Return to the route"
+    title.font = .preferredFont(forTextStyle: .headline)
+    title.textColor = .white
+    let detail = UILabel()
+    detail.text = "Retrace your steps · See map"
+    detail.font = .preferredFont(forTextStyle: .caption1)
+    detail.textColor = UIColor.white.withAlphaComponent(0.85)
+    detail.numberOfLines = 0
+    let labels = UIStackView(arrangedSubviews: [title, detail])
+    labels.axis = .vertical
+    labels.spacing = 2
+    for icon in [returnSymbol, returnDirection] {
+      icon.tintColor = .systemOrange
+      icon.contentMode = .scaleAspectFit
+      icon.widthAnchor.constraint(equalToConstant: 32).isActive = true
+      icon.heightAnchor.constraint(equalToConstant: 32).isActive = true
+    }
+    let row = UIStackView(arrangedSubviews: [returnSymbol, labels, returnDirection])
+    row.alignment = .center
+    row.spacing = 12
+    row.translatesAutoresizingMaskIntoConstraints = false
+    returnBanner.contentView.addSubview(row)
+    view.addSubview(returnBanner)
+    NSLayoutConstraint.activate([
+      returnBanner.topAnchor.constraint(equalTo: routeMap.bottomAnchor, constant: 12),
+      returnBanner.centerXAnchor.constraint(equalTo: view.safeAreaLayoutGuide.centerXAnchor),
+      returnBanner.leadingAnchor.constraint(greaterThanOrEqualTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 12),
+      returnBanner.trailingAnchor.constraint(lessThanOrEqualTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -12),
+      row.leadingAnchor.constraint(equalTo: returnBanner.leadingAnchor, constant: 14),
+      row.trailingAnchor.constraint(equalTo: returnBanner.trailingAnchor, constant: -14),
+      row.topAnchor.constraint(equalTo: returnBanner.topAnchor, constant: 10),
+      row.bottomAnchor.constraint(equalTo: returnBanner.bottomAnchor, constant: -10),
+    ])
+  }
+
+  private func updateReturnGuidance(pose: simd_float4x4, time: TimeInterval) {
+    let position = SIMD2(pose.columns.3.x, pose.columns.3.z)
+    let path = returnGuidance.update(position: position, route: returnRoute, time: time)
+    if path != routeMap.returnPath {
+      renderer.setReturnPath(path.isEmpty ? [] : [position] + path)
+    }
+    routeMap.returnPath = path
+    expandedMap?.returnPath = path
+    let heading = SIMD2(-pose.columns.2.x, -pose.columns.2.z)
+    if let next = path.first, simd_length_squared(heading) > 0.01 {
+      let direction = next - position
+      let angle = atan2(direction.x, -direction.y) - atan2(heading.x, -heading.y)
+      returnDirection.transform = CGAffineTransform(rotationAngle: CGFloat(angle))
+      returnDirection.isHidden = false
+    } else {
+      returnDirection.isHidden = true
+    }
+    let active = returnGuidance.isActive
+    if active, returnBanner.isHidden {
+      UIAccessibility.post(notification: .announcement, argument: "Off route. Retrace your steps.")
+      if !UIAccessibility.isReduceMotionEnabled {
+        let pulse = CABasicAnimation(keyPath: "opacity")
+        pulse.fromValue = 1
+        pulse.toValue = 0.35
+        pulse.duration = 0.55
+        pulse.autoreverses = true
+        pulse.repeatCount = .infinity
+        returnSymbol.layer.add(pulse, forKey: "return-pulse")
+      }
+    } else if !active, !returnBanner.isHidden {
+      returnSymbol.layer.removeAnimation(forKey: "return-pulse")
+    }
+    returnBanner.isHidden = !active
+  }
+
+  private func resetReturnGuidance() {
+    returnGuidance = RouteReturnGuidance()
+    if !routeMap.returnPath.isEmpty { renderer.setReturnPath([]) }
+    routeMap.returnPath = []
+    expandedMap?.returnPath = []
+    returnBanner.isHidden = true
+    returnSymbol.layer.removeAnimation(forKey: "return-pulse")
   }
 
   private func updateWalkStatus(at position: SIMD4<Float>) {
@@ -2142,6 +2320,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
   private func updateMap(_ pose: simd_float4x4?) {
     routeMap.setPose(pose)
     expandedMap?.setPose(pose)
+    if pose == nil { resetReturnGuidance() }
   }
 
   @objc private func showMap() {
@@ -2164,6 +2343,7 @@ final class WorldWalk: UIViewController, ARSessionDelegate {
     map.accessibilityHint = nil
     map.setRoute(activeRoute)
     map.setPose(routeMap.pose)
+    map.returnPath = routeMap.returnPath
     expandedMap = map
     map.translatesAutoresizingMaskIntoConstraints = false
     page.view.addSubview(map)

@@ -49,6 +49,8 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
   private let obstacleRendering: ObstacleRendering?
   private var routeBuffer: MTLBuffer?
   private var routeCount = 0
+  private var returnBuffer: MTLBuffer?
+  private var returnCount = 0
   private let routeCellSize: Float
   private let roomSize: SIMD2<Float>
   private let sourceRotation: simd_float3x3
@@ -163,6 +165,16 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
     routeCount = markers.count
   }
 
+  func setReturnPath(_ path: [SIMD2<Float>]) {
+    let markers = Self.guideMarkers(for: path.map { SIMD3($0.x, 0, $0.y) }, cellSize: routeCellSize)
+      .filter { $0.w == 0 }
+    returnBuffer = markers.withUnsafeBytes { bytes in
+      guard !bytes.isEmpty, let base = bytes.baseAddress else { return nil }
+      return view.device?.makeBuffer(bytes: base, length: bytes.count, options: .storageModeShared)
+    }
+    returnCount = markers.count
+  }
+
   private static func makeObstacleRendering(device: MTLDevice, library: MTLLibrary,
                                             colorFormat: MTLPixelFormat) -> ObstacleRendering? {
     let descriptor = MTLRenderPipelineDescriptor()
@@ -251,7 +263,7 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
     )
     let separateGuide = captureEndedScene || obstacleRendering != nil
     if separateGuide && !captureEndedScene { encoder.endEncoding() }
-    if let routeBuffer {
+    if routeBuffer != nil || returnBuffer != nil {
       // Vision needs the scene without the guide. Other frames can share one pass.
       let guide: MTLRenderCommandEncoder?
       if separateGuide {
@@ -269,11 +281,18 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
         var wavePhase: Float = UIAccessibility.isReduceMotionEnabled
           ? -1 : Float(frame.timestamp.truncatingRemainder(dividingBy: 3)) * (2 * .pi / 3)
         guide.setRenderPipelineState(routePipeline)
-        guide.setVertexBuffer(routeBuffer, offset: 0, index: 0)
         guide.setVertexBytes(&cellSize, length: MemoryLayout<Float>.size, index: 1)
         guide.setVertexBytes(&uniforms, length: MemoryLayout<Uniforms>.stride, index: 2)
         guide.setVertexBytes(&wavePhase, length: MemoryLayout<Float>.size, index: 3)
-        guide.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4, instanceCount: routeCount)
+        func drawGuide(_ buffer: MTLBuffer?, count: Int, colorMode: Float) {
+          guard let buffer, count > 0 else { return }
+          var colorMode = colorMode
+          guide.setVertexBuffer(buffer, offset: 0, index: 0)
+          guide.setVertexBytes(&colorMode, length: MemoryLayout<Float>.size, index: 4)
+          guide.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4, instanceCount: count)
+        }
+        drawGuide(routeBuffer, count: routeCount, colorMode: 0)
+        drawGuide(returnBuffer, count: returnCount, colorMode: 1)
         if separateGuide { guide.endEncoding() }
       }
     }
@@ -517,13 +536,15 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
     float2 local;
     float ribbonLength [[flat]];
     float brightness [[flat]];
+    float colorMode [[flat]];
   };
 
   vertex GuidePixel guideVertex(uint corner [[vertex_id]], uint index [[instance_id]],
                                 const device float4 *markers [[buffer(0)]],
                                 constant float &cellSize [[buffer(1)]],
                                 constant Uniforms &u [[buffer(2)]],
-                                constant float &wavePhase [[buffer(3)]]) {
+                                constant float &wavePhase [[buffer(3)]],
+                                constant float &colorMode [[buffer(4)]]) {
     float4 marker = markers[index];
     float2 forward = float2(cos(marker.z), sin(marker.z));
     float2 right = float2(-forward.y, forward.x);
@@ -535,8 +556,8 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
     float brightness = arrow && wavePhase >= 0.0 ? .5 + .5 * sin(float(index) * .85 - wavePhase) : -1.0;
     float scale = marker.w > 0 ? cellSize : max(cellSize, .18);
     float2 p = marker.xy + (right * offset.x + forward * offset.y) * scale;
-    return { u.viewProjection * float4(p.x, .035, p.y, 1),
-             marker.w > 0 ? offset : local, marker.w, brightness };
+    return { u.viewProjection * float4(p.x, .035 + .004 * colorMode, p.y, 1),
+             marker.w > 0 ? offset : local, marker.w, brightness, colorMode };
   }
 
   float guideSegment(float2 p, float2 a, float2 b) {
@@ -564,6 +585,7 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
       distance = guideSegment(float2(abs(p.x), p.y), tip, float2(.59, -.30)) - .17;
       ink = in.brightness < 0.0 ? float3(.37, .955, .765) :
         mix(float3(.20, .68, .54), float3(.68, 1.0, .94), in.brightness);
+      if (in.colorMode > 0) { ink = float3(1.0, .57, .16); }
       border = .08;
     }
     float aa = clamp(fwidth(distance), .005, border);
